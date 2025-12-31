@@ -14,6 +14,7 @@ export class RtlDevice extends EventEmitter {
     private decoderProcess: ChildProcess | null = null;
     private channelIndex: number = 0;
     private sessionTimeout: NodeJS.Timeout | null = null;
+    private manualOverride: boolean = false;
 
     constructor() {
         super();
@@ -22,12 +23,14 @@ export class RtlDevice extends EventEmitter {
     public start() {
         if (this.isRunning) return;
         this.isRunning = true;
+        this.manualOverride = false;
         console.log('Starting RTL-SDR Device Manager...');
         this.startScanning();
     }
 
     public stop() {
         this.isRunning = false;
+        this.manualOverride = false;
         if (this.scanInterval) {
             clearTimeout(this.scanInterval);
             this.scanInterval = null;
@@ -39,6 +42,50 @@ export class RtlDevice extends EventEmitter {
         this.killActiveProcess();
         this.stopDecoding();
         this.updateState({ status: 'IDLE', currentFrequency: undefined, currentChannel: undefined, signalStrength: 0 });
+    }
+
+    public holdFrequency(frequency: number) {
+        const channel = CHANNELS.find(c => c.frequency === frequency);
+        if (!channel) {
+            console.error(`Channel not found for frequency: ${frequency}`);
+            return;
+        }
+
+        console.log(`Manual hold on: ${channel.alphaTag}`);
+        this.manualOverride = true;
+        this.isRunning = true;
+
+        // Stop any current scanning or decoding
+        if (this.scanInterval) {
+            clearTimeout(this.scanInterval);
+            this.scanInterval = null;
+        }
+        if (this.sessionTimeout) {
+            clearTimeout(this.sessionTimeout);
+            this.sessionTimeout = null;
+        }
+        this.killActiveProcess();
+        this.stopDecoding(); // Stop current stream if any
+
+        // Force lock on
+        this.lockOn(channel);
+    }
+
+    public resumeScan() {
+        if (!this.manualOverride) return; // Already scanning or idle
+        
+        console.log('Resuming scan...');
+        this.manualOverride = false;
+        
+        // Stop current hold
+        this.stopDecoding();
+        if (this.sessionTimeout) {
+            clearTimeout(this.sessionTimeout);
+            this.sessionTimeout = null;
+        }
+
+        // Restart scanning
+        this.startScanning();
     }
 
     public getState(): ScannerState {
@@ -73,7 +120,7 @@ export class RtlDevice extends EventEmitter {
      * This is more efficient than tuning rtl_fm to every channel
      */
     private async startScanning() {
-        if (!this.isRunning) return;
+        if (!this.isRunning || this.manualOverride) return;
 
         if (this.state.status === 'RECEIVING') {
             // We are receiving, do not scan.
@@ -96,10 +143,15 @@ export class RtlDevice extends EventEmitter {
             const strength = await this.measureSignalStrength(channel.frequency);
             this.updateState({ signalStrength: this.normalizeDb(strength) });
 
-            // Threshold for "squelch" (e.g., -5dB seems to be a good cutoff above the -13dB noise floor)
-            if (strength > -5) {
+            // Threshold for "squelch"
+            if (strength > -10) {
                 this.lockOn(channel);
-                return; // lockOn will restart scanning when done
+                return;
+            } else {
+                // Log periodic scans if strength is above a certain noise floor but below squelch
+                if (strength > -14) {
+                    console.log(`[Scan] ${channel.alphaTag}: ${strength.toFixed(2)} dB (Below Squelch)`);
+                }
             }
         } catch (error) {
             console.warn(`Scanning warning: ${error}`);
@@ -113,7 +165,7 @@ export class RtlDevice extends EventEmitter {
         }
 
         // Schedule next scan
-        if (this.isRunning) {
+        if (this.isRunning && !this.manualOverride) {
             this.scanInterval = setTimeout(() => this.startScanning(), 100) as any;
         }
     }
@@ -180,16 +232,21 @@ export class RtlDevice extends EventEmitter {
         });
     }
 
+    private activityTimer: NodeJS.Timeout | null = null;
+
     private lockOn(channel: Channel) {
         if (this.scanInterval) {
             clearTimeout(this.scanInterval);
             this.scanInterval = null;
         }
 
-        console.log(`[${new Date().toLocaleTimeString()}] Locked on to ${channel.alphaTag} (${channel.frequency} MHz)`);
+        console.log(`[${new Date().toLocaleTimeString()}] ${this.manualOverride ? 'Manual Hold' : 'Locked on'} to ${channel.alphaTag} (${channel.frequency} MHz)`);
         
+        // Initial state: 
+        // If manual hold, we are MONITORING (listening for signal).
+        // If auto scan, we assume we found a signal, so RECEIVING (but will fallback if DSD finds nothing).
         this.updateState({
-            status: 'RECEIVING',
+            status: this.manualOverride ? 'MONITORING' : 'RECEIVING',
             currentFrequency: channel.frequency,
             currentChannel: channel,
             isAudioStreaming: true
@@ -198,61 +255,90 @@ export class RtlDevice extends EventEmitter {
         // Start the decoding pipeline
         this.startDecoding(channel);
 
-        // Safety timeout: Stop listening after 10 seconds and return to scan
-        // In a real app, this would be reset by activity (audio detected)
-        this.sessionTimeout = setTimeout(() => {
-            console.log('Session timeout, resuming scan...');
-            this.stopDecoding();
-            this.startScanning();
-        }, 10000);
+        // Safety timeout only if NOT manual override
+        if (!this.manualOverride) {
+            // Stop listening after 10 seconds and return to scan
+            this.sessionTimeout = setTimeout(() => {
+                console.log('Session timeout, resuming scan...');
+                this.stopDecoding();
+                this.startScanning();
+            }, 10000);
+        }
     }
 
     private startDecoding(channel: Channel) {
         this.stopDecoding(); // Ensure clean slate
 
         // 1. Start rtl_fm (Demodulator)
-        // rtl_fm -f 155.0325M -s 48k -p 0 - | ...
         const fmArgs = [
             '-f', `${channel.frequency}M`,
-            '-s', '48000', // 48k sample rate required for DSD
-            '-p', '0',     // ppm error
-            '-'            // Output to stdout
+            '-s', '48000',
+            '-p', '0',
+            '-' 
         ];
 
         console.log(`Spawning: rtl_fm ${fmArgs.join(' ')}`);
         this.fmProcess = spawn('rtl_fm', fmArgs);
 
         // 2. Start dsd-fme (Digital Decoder)
-        // ... | dsd-fme -i - -o - (Input from stdin, Output to stdout)
-        // -f1 for P25 Phase 1 (optional, auto is default usually)
         const dsdArgs = [
             '-i', '-',
             '-o', '-',
-            '-f1' // Force P25 Phase 1 for now based on user data
+            '-f1', // P25 Phase 1
+            '-Z'   // Log Payloads (increases verbosity for detection)
         ];
         
         console.log(`Spawning: dsd-fme ${dsdArgs.join(' ')}`);
         this.decoderProcess = spawn('dsd-fme', dsdArgs);
 
-        // Pipe rtl_fm -> dsd-fme
         if (this.fmProcess.stdout && this.decoderProcess.stdin) {
             this.fmProcess.stdout.pipe(this.decoderProcess.stdin);
         }
 
-        // Handle errors
-        this.fmProcess.stderr?.on('data', (d) => { /* console.log(`rtl_fm stderr: ${d}`); */ });
-        this.decoderProcess.stderr?.on('data', (d) => { /* console.log(`dsd stderr: ${d}`); */ });
+        // Activity Detection via stderr
+        this.decoderProcess.stderr?.on('data', (data) => {
+            const output = data.toString();
+            // Detect P25 Sync or Voice frames
+            // Common patterns: "Sync: +P25p1", "Slot 1", "Voice", "LDU"
+            if (output.includes('Sync:') || output.includes('Voice') || output.includes('Slot 1')) {
+                this.handleActivity();
+            }
+        });
 
         this.fmProcess.on('error', (err) => console.error('rtl_fm error:', err));
         this.decoderProcess.on('error', (err) => console.error('dsd-fme error:', err));
 
         // CAPTURE AUDIO
-        // dsd-fme stdout should be the decoded audio (PCM)
         this.decoderProcess.stdout?.on('data', (chunk) => {
-            // Emit raw audio chunk
             this.emit('audio', chunk);
-            
-            // TODO: Activity detection could go here to reset the timeout
         });
+    }
+
+    private handleActivity() {
+        // If we detect valid P25 frames, set state to RECEIVING
+        if (this.state.status !== 'RECEIVING') {
+            this.updateState({ status: 'RECEIVING' });
+        }
+
+        // Reset inactivity timer
+        if (this.activityTimer) clearTimeout(this.activityTimer);
+        
+        // Reset session timeout (keep listening if active)
+        if (this.sessionTimeout && !this.manualOverride) {
+            clearTimeout(this.sessionTimeout);
+            this.sessionTimeout = setTimeout(() => {
+                console.log('Session timeout (post-activity), resuming scan...');
+                this.stopDecoding();
+                this.startScanning();
+            }, 5000); // 5s hang time after transmission ends
+        }
+
+        // If no more activity for 2 seconds, revert state
+        this.activityTimer = setTimeout(() => {
+            if (this.manualOverride) {
+                this.updateState({ status: 'MONITORING' });
+            } 
+            // If auto-scan, the sessionTimeout will handle the exit eventually
+        }, 2000);
     }
 }

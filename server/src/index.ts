@@ -30,13 +30,19 @@ app.get('/api/channels', (req, res) => {
 });
 
 app.post('/api/control', (req, res) => {
-    const { action } = req.body;
+    const { action, frequency } = req.body;
     if (action === 'start') {
         radio.start();
         res.json({ message: 'Scanner started' });
     } else if (action === 'stop') {
         radio.stop();
         res.json({ message: 'Scanner stopped' });
+    } else if (action === 'hold' && frequency) {
+        radio.holdFrequency(parseFloat(frequency));
+        res.json({ message: `Holding on ${frequency}` });
+    } else if (action === 'scan') {
+        radio.resumeScan();
+        res.json({ message: 'Resuming scan' });
     } else {
         res.status(400).json({ error: 'Invalid action' });
     }

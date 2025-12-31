@@ -29,6 +29,15 @@ export class MockRadio extends EventEmitter {
         this.updateState({ status: 'IDLE', currentFrequency: undefined, currentChannel: undefined, signalStrength: 0 });
     }
 
+    public holdFrequency(frequency: number) {
+        console.log(`[Mock] Holding on ${frequency}`);
+        // Mock implementation could set state here
+    }
+
+    public resumeScan() {
+        console.log('[Mock] Resuming scan');
+    }
+
     public getState(): ScannerState {
         return this.state;
     }

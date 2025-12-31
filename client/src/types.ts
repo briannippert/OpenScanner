@@ -17,6 +17,12 @@ export interface ScannerState {
     isAudioStreaming?: boolean;
 }
 
+export interface CallLog {
+    id: number;
+    timestamp: string;
+    channel: Channel;
+}
+
 declare global {
     interface Window {
         audioCtx?: AudioContext;

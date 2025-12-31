@@ -10,25 +10,21 @@
 
 ### 1. Installation Verification
 - [x] **Code Implementation:** Done.
-- [ ] **System Dependencies:**
-    - **CRITICAL:** `dsd-fme` is MISSING from the system.
-    - User must install `dsd-fme`.
-    - User must ensure `rtl_fm` is installed (it appears to be).
+- [x] **System Dependencies:**
+    - `dsd-fme` is installed at `/usr/local/bin/dsd-fme`.
+    - `rtl_fm` is installed at `/usr/bin/rtl_fm`.
 
 ### 2. Audio Tuning
 - [ ] **Sample Rate Matching:**
     - Current code assumes `dsd-fme` outputs 8000Hz 16-bit PCM.
-    - Needs verification once `dsd-fme` is running.
+    - Needs verification once a real transmission is captured.
 - [ ] **Jitter Buffer:**
-    - Frontend implementation is very basic. Might drift or click.
-    - Consider a proper ring buffer if audio quality is poor.
+    - Frontend implementation is very basic. If audio is choppy, we need a better buffering strategy.
 
-### 3. Stability
-- [ ] **Process Zombie Check:**
-    - Ensure `rtl_fm` and `dsd-fme` are truly killed when scanning resumes.
-    - If `dsd-fme` hangs, it might block the device.
-
-### 4. Code Improvements
-- [ ] **Squelch Logic:**
-    - Currently uses a hard 10s timeout for listening.
-    - Ideally, read `dsd-fme` stderr to detect "Sync: +P25p1" messages and extend timeout while sync is present.
+### 3. Stability & Features
+- [ ] **Squelch Logic Improvements:**
+    - Observe if -10dB is a reliable threshold for real transmissions.
+- [ ] **Activity Detection:**
+    - Currently uses a 10s hard timeout. Ideally, use `dsd-fme` logs to keep the channel open while voice is active.
+- [ ] **Volume Control:**
+    - Add a volume slider to the frontend.

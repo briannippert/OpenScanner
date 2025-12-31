@@ -33,7 +33,7 @@ export const CHANNELS: Channel[] = [
 ];
 
 export interface ScannerState {
-    status: 'SCANNING' | 'RECEIVING' | 'IDLE';
+    status: 'SCANNING' | 'RECEIVING' | 'MONITORING' | 'IDLE';
     currentFrequency?: number;
     currentChannel?: Channel;
     signalStrength: number; // 0-100

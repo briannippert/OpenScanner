@@ -35,3 +35,4 @@ Thumbs.db
 # Project Specific
 server/dist/
 client/dist/
+build_deps/
