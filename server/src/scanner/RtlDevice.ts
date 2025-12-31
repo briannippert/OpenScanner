@@ -1,7 +1,10 @@
 import { spawn, ChildProcessWithoutNullStreams, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 const gpsd = require('node-gpsd');
+import fs from 'fs';
+import path from 'path';
 import { Channel, CHANNELS, ScannerState } from '../models';
+import { saveTransmission } from '../db';
 
 export class RtlDevice extends EventEmitter {
     private state: ScannerState = {
@@ -16,6 +19,12 @@ export class RtlDevice extends EventEmitter {
     private sessionTimeout: NodeJS.Timeout | null = null;
     private manualOverride: boolean = false;
     private gpsListener: any = null;
+
+    // Recording State
+    private currentRecordingFile: string | null = null;
+    private recordingStream: fs.WriteStream | null = null;
+    private recordingStartTime: number = 0;
+    private recordingLockoutUntil: number = 0; // Prevent recording immediately after channel change
 
     constructor() {
         super();
@@ -114,6 +123,9 @@ export class RtlDevice extends EventEmitter {
         this.killActiveProcess();
         this.stopDecoding(); // Stop current stream if any
 
+        // Set lockout to prevent recording the switch blip
+        this.recordingLockoutUntil = Date.now() + 3000;
+
         // Force lock on
         this.lockOn(channel);
     }
@@ -130,6 +142,9 @@ export class RtlDevice extends EventEmitter {
             clearTimeout(this.sessionTimeout);
             this.sessionTimeout = null;
         }
+
+        // Set lockout
+        this.recordingLockoutUntil = Date.now() + 3000;
 
         // Restart scanning after a short delay to let hardware settle
         setTimeout(() => this.startScanning(), 500);
@@ -224,6 +239,7 @@ export class RtlDevice extends EventEmitter {
                 }
 
                 if (bestChannel) {
+                    this.recordingLockoutUntil = Date.now() + 3000;
                     this.lockOn(bestChannel);
                     return;
                 }
@@ -423,15 +439,18 @@ export class RtlDevice extends EventEmitter {
         });
 
         // CAPTURE AUDIO from the end of the pipe (dsd-fme's stdout)
-        this.decoderProcess.stdout?.on('data', (chunk) => {
-            this.emit('audio', chunk);
-        });
-    }
+                    this.decoderProcess.stdout?.on('data', (chunk) => {
+                        if (this.recordingStream) {
+                            this.recordingStream.write(chunk);
+                        }
+                        this.emit('audio', chunk);
+                    });    }
 
     private handleActivity() {
         // If we detect valid P25 frames, set state to RECEIVING
         if (this.state.status !== 'RECEIVING') {
             this.updateState({ status: 'RECEIVING' });
+            this.startRecording();
         }
 
         // Reset inactivity timer
@@ -449,10 +468,71 @@ export class RtlDevice extends EventEmitter {
 
         // If no more activity for 2 seconds, revert state
         this.activityTimer = setTimeout(() => {
+            this.stopRecording();
             if (this.manualOverride) {
                 this.updateState({ status: 'MONITORING' });
             } 
             // If auto-scan, the sessionTimeout will handle the exit eventually
         }, 2000);
+    }
+
+    private startRecording() {
+        if (this.recordingStream || !this.state.currentChannel) return;
+        
+        // Skip if within lockout period (prevent switch blips)
+        if (Date.now() < this.recordingLockoutUntil) {
+            return;
+        }
+
+        const filename = `rec_${Date.now()}_${this.state.currentChannel.frequency}.raw`;
+        const dir = path.join(__dirname, '../../data/recordings');
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        
+        this.currentRecordingFile = filename;
+        this.recordingStartTime = Date.now();
+        this.recordingStream = fs.createWriteStream(path.join(dir, filename));
+        
+        console.log(`⏺️ Starting recording: ${filename}`);
+    }
+
+    private stopRecording() {
+        if (!this.recordingStream || !this.state.currentChannel) return;
+
+        const duration = (Date.now() - this.recordingStartTime) / 1000;
+        const file = this.currentRecordingFile;
+        const filePath = path.join(__dirname, '../../data/recordings', file!);
+        
+        this.recordingStream.end();
+        this.recordingStream = null;
+        this.currentRecordingFile = null;
+
+        // Save to DB (only if duration > 2s to skip noise and channel switching blips)
+        if (duration > 2.0) {
+            const entry = {
+                id: `log_${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                frequency: this.state.currentChannel.frequency,
+                alphaTag: this.state.currentChannel.alphaTag,
+                description: this.state.currentChannel.description,
+                lat: this.state.gps?.lat,
+                lon: this.state.gps?.lon,
+                alt: this.state.gps?.alt,
+                audio_path: file!,
+                duration: duration
+            };
+
+            saveTransmission(entry);
+            console.log(`💾 Saved transmission: ${duration.toFixed(1)}s`);
+            
+            // Broadcast new log to all clients
+            this.emit('new-log', entry);
+        } else {
+            // Delete the tiny file to save space and keep it tidy
+            try {
+                if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            } catch (e) {
+                // Ignore errors
+            }
+        }
     }
 }

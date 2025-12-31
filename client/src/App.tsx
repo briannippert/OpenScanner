@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, List, ListItem, ListItemText, Divider, Paper, Chip } from '@mui/material';
+import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, List, ListItem, ListItemText, Divider, Paper, Chip, IconButton } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -8,6 +8,8 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import SpeedIcon from '@mui/icons-material/Speed';
 import SatelliteAltIcon from '@mui/icons-material/SatelliteAlt';
+import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
+import DeleteIcon from '@mui/icons-material/Delete';
 import type { ScannerState, Channel, CallLog } from './types';
 
 const darkTheme = createTheme({
@@ -99,6 +101,45 @@ function App() {
 
   const nextStartTime = useRef<number>(0);
 
+  // Audio Playback Helper for recorded files
+  const playRawAudio = async (filename: string) => {
+    if (!window.audioCtx) return;
+    try {
+        const response = await fetch(`/audio/${filename}`);
+        const arrayBuffer = await response.arrayBuffer();
+        const int16Array = new Int16Array(arrayBuffer);
+        const float32Array = new Float32Array(int16Array.length);
+        for (let i = 0; i < int16Array.length; i++) {
+            float32Array[i] = int16Array[i] / 32768;
+        }
+
+        const buffer = window.audioCtx.createBuffer(1, float32Array.length, 8000);
+        buffer.copyToChannel(float32Array, 0);
+        const source = window.audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(window.audioCtx.destination);
+        source.start();
+    } catch (e) {
+        console.error("Playback failed:", e);
+    }
+  };
+
+  const deleteEntry = async (id: string) => {
+    const isDev = window.location.port === '5173';
+    const port = isDev ? '3001' : window.location.port || '80';
+    const protocol = window.location.protocol;
+    const backendHost = window.location.hostname;
+    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
+    const deleteUrl = `${protocol}//${backendHost}${portSuffix}/api/history/${id}`;
+
+    try {
+        await fetch(deleteUrl, { method: 'DELETE' });
+        setCallLog(prev => prev.filter(log => log.id !== id));
+    } catch (e) {
+        console.error("Delete failed:", e);
+    }
+  };
+
   useEffect(() => {
     const isDev = window.location.port === '5173';
     const port = isDev ? '3001' : window.location.port || '80';
@@ -109,12 +150,18 @@ function App() {
     const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
 
     const httpUrl = `${protocol}//${backendHost}${portSuffix}/api/channels`;
+    const historyUrl = `${protocol}//${backendHost}${portSuffix}/api/history`;
     const wsUrl = `${wsProtocol}//${backendHost}${portSuffix}`;
 
     fetch(httpUrl)
       .then(res => res.json())
       .then(data => setChannels(data))
       .catch(err => console.error("Failed to fetch channels:", err));
+
+    fetch(historyUrl)
+      .then(res => res.json())
+      .then(data => setCallLog(data))
+      .catch(err => console.error("Failed to fetch history:", err));
 
     ws.current = new WebSocket(wsUrl);
 
@@ -172,17 +219,10 @@ function App() {
             const message = JSON.parse(event.data);
             if (message.type === 'STATE_UPDATE') {
               const newState = message.payload as ScannerState;
-              setScannerState(prev => {
-                  // Only log if we transition TO receiving and have a channel
-                  if (newState.status === 'RECEIVING' && prev.status !== 'RECEIVING' && newState.currentChannel) {
-                      setCallLog(log => [{
-                          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                          timestamp: new Date().toLocaleTimeString(),
-                          channel: newState.currentChannel!
-                      }, ...log].slice(0, 50));
-                  }
-                  return newState;
-              });
+              setScannerState(newState);
+            } else if (message.type === 'NEW_LOG') {
+              const newEntry = message.payload as CallLog;
+              setCallLog(log => [newEntry, ...log].slice(0, 100));
             }
         } catch (e) {
             console.warn('Unknown message:', event.data);
@@ -356,18 +396,46 @@ function App() {
                             )}
                             {callLog.map((log) => (
                                 <div key={log.id}>
-                                    <ListItem alignItems="flex-start" sx={{ px: 2, py: 1 }}>
+                                    <ListItem 
+                                        sx={{ 
+                                            px: 2, 
+                                            py: 1,
+                                            '& .MuiListItemSecondaryAction-root': {
+                                                right: 8
+                                            }
+                                        }}
+                                        secondaryAction={
+                                            <Box sx={{ display: 'flex', gap: 0.5 }}>
+                                                {log.audio_path && (
+                                                    <IconButton size="small" onClick={() => playRawAudio(log.audio_path!)}>
+                                                        <PlayCircleOutlineIcon sx={{ color: 'primary.main', fontSize: 22 }} />
+                                                    </IconButton>
+                                                )}
+                                                <IconButton size="small" onClick={() => deleteEntry(log.id)}>
+                                                    <DeleteIcon sx={{ color: '#444', fontSize: 20 }} />
+                                                </IconButton>
+                                            </Box>
+                                        }
+                                    >
                                         <ListItemText 
+                                            sx={{ pr: 8 }} // Add padding to prevent text overlap with buttons
                                             primary={
                                                 <Typography variant="body2" fontWeight="bold" color="white">
-                                                    {log.channel.alphaTag}
+                                                    {log.alphaTag}
                                                 </Typography>
                                             }
                                             secondary={
-                                                <Typography variant="caption" color="gray" sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                    <span>{log.channel.frequency} MHz</span>
-                                                    <span>{log.timestamp}</span>
-                                                </Typography>
+                                                <Box component="span">
+                                                    <Typography variant="caption" color="gray" sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                                                        <span>{log.frequency} MHz</span>
+                                                        <span>{new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                    </Typography>
+                                                    {log.lat && (
+                                                        <Typography variant="caption" sx={{ color: '#444', fontSize: '9px', display: 'block' }}>
+                                                            📍 {log.lat.toFixed(3)}, {log.lon!.toFixed(3)} • {log.duration?.toFixed(1)}s
+                                                        </Typography>
+                                                    )}
+                                                </Box>
                                             }
                                         />
                                     </ListItem>

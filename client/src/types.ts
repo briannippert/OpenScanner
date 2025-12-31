@@ -30,7 +30,13 @@ export interface ScannerState {
 export interface CallLog {
     id: string;
     timestamp: string;
-    channel: Channel;
+    frequency: number;
+    alphaTag: string;
+    description: string;
+    lat?: number;
+    lon?: number;
+    audio_path?: string;
+    duration?: number;
 }
 
 declare global {

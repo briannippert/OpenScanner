@@ -6,6 +6,8 @@ import path from 'path';
 import { MockRadio } from './scanner/MockRadio';
 import { RtlDevice } from './scanner/RtlDevice';
 import { CHANNELS } from './models';
+import { getHistory, deleteTransmission } from './db';
+import fs from 'fs';
 
 const app = express();
 app.use(cors({ origin: '*' }));
@@ -14,6 +16,9 @@ app.use(express.json());
 // Serve static files from client/dist
 const clientBuildPath = path.join(__dirname, '../../client/dist');
 app.use(express.static(clientBuildPath));
+
+// Serve recordings
+app.use('/audio', express.static(path.join(__dirname, '../data/recordings')));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -32,6 +37,35 @@ console.log(`Initializing Radio Driver: ${useRealRadio ? 'REAL HARDWARE (RTL-SDR
 // API Routes
 app.get('/api/channels', (req, res) => {
     res.json(CHANNELS);
+});
+
+app.get('/api/history', (req, res) => {
+    try {
+        const history = getHistory(100);
+        res.json(history);
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to fetch history' });
+    }
+});
+
+app.delete('/api/history/:id', (req, res) => {
+    try {
+        const { id } = req.params;
+        const history = getHistory(500); // Find the file path
+        const item = history.find(h => h.id === id);
+        
+        if (item && item.audio_path) {
+            const filePath = path.join(__dirname, '../data/recordings', item.audio_path);
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+            }
+        }
+        
+        deleteTransmission(id);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to delete entry' });
+    }
 });
 
 app.post('/api/control', (req, res) => {
@@ -74,6 +108,14 @@ wss.on('connection', (ws) => {
 
     radio.on('state-change', handleStateChange);
     
+    // Broadcast new logs
+    const handleNewLog = (log: any) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'NEW_LOG', payload: log }));
+        }
+    };
+    radio.on('new-log', handleNewLog);
+    
     // Broadcast audio chunks
     const handleAudio = (chunk: Buffer) => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -92,6 +134,7 @@ wss.on('connection', (ws) => {
 
     ws.on('close', () => {
         radio.off('state-change', handleStateChange);
+        radio.off('new-log', handleNewLog);
         radio.off('audio', handleAudio);
         radio.off('error', handleError);
         console.log('Client disconnected');

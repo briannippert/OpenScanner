@@ -36,3 +36,6 @@ Thumbs.db
 server/dist/
 client/dist/
 build_deps/
+server/data/
+server/[0-9]*M
+server/-Z
