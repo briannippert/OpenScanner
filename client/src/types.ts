@@ -10,15 +10,25 @@ export interface Channel {
 }
 
 export interface ScannerState {
-    status: 'SCANNING' | 'RECEIVING' | 'IDLE';
+    status: 'SCANNING' | 'RECEIVING' | 'MONITORING' | 'IDLE';
     currentFrequency?: number;
     currentChannel?: Channel;
     signalStrength: number; // 0-100
     isAudioStreaming?: boolean;
+    rfSpectrum?: { frequency: number, db: number }[];
+    gps?: {
+        lat: number;
+        lon: number;
+        alt: number;
+        speed: number;
+        time: string;
+        fix: number;
+        sats: number;
+    };
 }
 
 export interface CallLog {
-    id: number;
+    id: string;
     timestamp: string;
     channel: Channel;
 }

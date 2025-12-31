@@ -22,6 +22,16 @@ else
     fi
 fi
 
+# Build Frontend
+echo "🔨 Building Frontend..."
+cd client
+npm run build
+if [ $? -ne 0 ]; then
+    echo "❌ Frontend build failed! Stopping."
+    exit 1
+fi
+cd ..
+
 # Start Backend
 echo "📡 Starting Backend Server..."
 cd server

@@ -2,13 +2,18 @@ import express from 'express';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
+import path from 'path';
 import { MockRadio } from './scanner/MockRadio';
 import { RtlDevice } from './scanner/RtlDevice';
 import { CHANNELS } from './models';
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: '*' }));
 app.use(express.json());
+
+// Serve static files from client/dist
+const clientBuildPath = path.join(__dirname, '../../client/dist');
+app.use(express.static(clientBuildPath));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -31,6 +36,7 @@ app.get('/api/channels', (req, res) => {
 
 app.post('/api/control', (req, res) => {
     const { action, frequency } = req.body;
+    console.log(`[API] Control Action: ${action} ${frequency || ''}`);
     if (action === 'start') {
         radio.start();
         res.json({ message: 'Scanner started' });
@@ -46,6 +52,11 @@ app.post('/api/control', (req, res) => {
     } else {
         res.status(400).json({ error: 'Invalid action' });
     }
+});
+
+// Handle client-side routing (serve index.html for all other routes)
+app.get(/.*/, (req, res) => {
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
 });
 
 // WebSocket handling
@@ -87,9 +98,9 @@ wss.on('connection', (ws) => {
     });
 });
 
-const PORT = 3001;
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
     // Auto-start radio for demo purposes
     radio.start();
 });

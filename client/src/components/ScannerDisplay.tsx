@@ -1,15 +1,19 @@
 import React from 'react';
-import { Box, Typography, Paper, LinearProgress, Chip, Grid } from '@mui/material';
+import { Box, Typography, Paper, LinearProgress, Chip } from '@mui/material';
 import type { ScannerState } from '../types';
 import RadioIcon from '@mui/icons-material/Radio';
 import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
-import GraphicEqIcon from '@mui/icons-material/GraphicEq';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import AudioSpectrogram from './AudioSpectrogram';
+import VuMeter from './VuMeter';
 
 interface Props {
     state: ScannerState;
+    analyser?: AnalyserNode;
+    onScan?: () => void;
 }
 
-const ScannerDisplay: React.FC<Props> = ({ state }) => {
+const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan }) => {
     const isReceiving = state.status === 'RECEIVING';
     const activeColor = isReceiving ? '#00ff00' : '#555';
 
@@ -46,7 +50,18 @@ const ScannerDisplay: React.FC<Props> = ({ state }) => {
                             {state.status}
                         </Typography>
                     </Box>
-                    <Box display="flex" gap={1}>
+                    <Box display="flex" gap={1} alignItems="center">
+                        {onScan && state.status !== 'SCANNING' && state.status !== 'IDLE' && (
+                            <Chip 
+                                label="RESUME SCAN" 
+                                color="primary" 
+                                variant="outlined" 
+                                size="small" 
+                                onClick={onScan}
+                                icon={<PlayArrowIcon />}
+                                sx={{ cursor: 'pointer', height: 24, fontSize: '0.65rem' }}
+                            />
+                        )}
                         <Chip 
                             icon={<SignalCellularAltIcon />} 
                             label={`${state.signalStrength.toFixed(0)}%`} 
@@ -62,49 +77,47 @@ const ScannerDisplay: React.FC<Props> = ({ state }) => {
                 </Box>
 
                 {/* Main Frequency Display */}
-                <Box textAlign="center" py={4} sx={{ borderTop: '1px solid #222', borderBottom: '1px solid #222', my: 2, bgcolor: '#0f0f0f' }}>
-                    <Typography variant="h1" sx={{ 
-                        fontFamily: 'monospace', 
-                        fontWeight: 700, 
-                        color: activeColor,
-                        textShadow: isReceiving ? '0 0 10px rgba(0,255,0,0.5)' : 'none',
-                        fontSize: { xs: '3rem', md: '5rem' }
-                    }}>
-                        {state.currentFrequency ? state.currentFrequency.toFixed(4) : '---.----'}
-                    </Typography>
-                    <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 4 }}>
-                        MEGAHERTZ
-                    </Typography>
+                <Box py={4} sx={{ 
+                    borderTop: '1px solid #222', 
+                    borderBottom: '1px solid #222', 
+                    my: 2, 
+                    bgcolor: '#0f0f0f', 
+                    display: 'flex', 
+                    flexDirection: { xs: 'column', md: 'row' },
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    gap: 4 
+                }}>
+                    <Box textAlign="center">
+                        <Typography variant="h1" sx={{ 
+                            fontFamily: 'monospace', 
+                            fontWeight: 700, 
+                            color: activeColor,
+                            textShadow: isReceiving ? '0 0 10px rgba(0,255,0,0.5)' : 'none',
+                            fontSize: { xs: '3rem', md: '5rem' }
+                        }}>
+                            {state.currentFrequency ? state.currentFrequency.toFixed(4) : '---.----'}
+                        </Typography>
+                        <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 4 }}>
+                            MEGAHERTZ
+                        </Typography>
+                    </Box>
+                    
+                    {/* VU Meter (Only when receiving) */}
+                    {isReceiving && analyser && (
+                        <Box>
+                             <VuMeter analyser={analyser} height={100} width={15} />
+                        </Box>
+                    )}
                 </Box>
 
-                {/* Channel Info */}
-                <Grid container spacing={2} sx={{ mt: 2 }}>
-                    <Grid item xs={12} md={6}>
-                        <Box sx={{ p: 2, bgcolor: '#111', borderRadius: 1 }}>
-                            <Typography variant="caption" color="gray" display="block">CHANNEL TAG</Typography>
-                            <Typography variant="h6" sx={{ color: '#fff', fontWeight: 'bold' }}>
-                                {state.currentChannel?.alphaTag || 'SCANNING...'}
-                            </Typography>
-                        </Box>
-                    </Grid>
-                    <Grid item xs={12} md={6}>
-                        <Box sx={{ p: 2, bgcolor: '#111', borderRadius: 1 }}>
-                            <Typography variant="caption" color="gray" display="block">DESCRIPTION</Typography>
-                            <Typography variant="body1" sx={{ color: '#aaa' }}>
-                                {state.currentChannel?.description || 'System Idle'}
-                            </Typography>
-                        </Box>
-                    </Grid>
-                </Grid>
-
-                {/* Audio Visualizer Placeholder */}
-                {isReceiving && (
-                    <Box sx={{ mt: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, color: '#00ff00' }}>
-                        <GraphicEqIcon className="pulse-animation" />
-                        <Typography variant="caption">AUDIO STREAM ACTIVE</Typography>
-                    </Box>
-                )}
-                
+                {/* Visualizers */}
+                <Box sx={{ mt: 3, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                    {/* Audio Waterfall (Heatmap during receive or monitoring) */}
+                    {(state.status === 'RECEIVING' || state.status === 'MONITORING') && analyser && (
+                        <AudioSpectrogram analyser={analyser} height={200} />
+                    )}
+                </Box>
                 {/* Signal Bar Bottom */}
                 <Box mt={3}>
                     <LinearProgress 
