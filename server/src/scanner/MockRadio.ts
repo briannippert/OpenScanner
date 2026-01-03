@@ -4,7 +4,8 @@ import { Channel, CHANNELS, ScannerState } from '../models';
 export class MockRadio extends EventEmitter {
     private state: ScannerState = {
         status: 'IDLE',
-        signalStrength: 0
+        signalStrength: 0,
+        squelch: -40
     };
     private isRunning: boolean = false;
     private scanInterval: NodeJS.Timeout | null = null;
@@ -12,6 +13,15 @@ export class MockRadio extends EventEmitter {
 
     constructor() {
         super();
+    }
+
+    public setSquelch(db: number) {
+        this.updateState({ squelch: db });
+        console.log(`[MockRadio] Squelch set to ${db}dB`);
+    }
+
+    public reloadChannels() {
+        console.log('[MockRadio] Reloading channels...');
     }
 
     public start() {

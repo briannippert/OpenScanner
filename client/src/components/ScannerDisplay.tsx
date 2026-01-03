@@ -1,9 +1,10 @@
-import React from 'react';
-import { Box, Typography, Paper, LinearProgress, Chip } from '@mui/material';
-import type { ScannerState } from '../types';
+import React, { useEffect, useState } from 'react';
+import { Box, Typography, Paper, LinearProgress, Chip, Slider, Stack } from '@mui/material';
+import type { ScannerState, Channel } from '../types';
 import RadioIcon from '@mui/icons-material/Radio';
 import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import TuneIcon from '@mui/icons-material/Tune';
 import AudioSpectrogram from './AudioSpectrogram';
 import VuMeter from './VuMeter';
 
@@ -11,11 +12,50 @@ interface Props {
     state: ScannerState;
     analyser?: AnalyserNode;
     onScan?: () => void;
+    channels?: Channel[];
+    onSquelchChange?: (val: number) => void;
 }
 
-const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan }) => {
+const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [], onSquelchChange }) => {
     const isReceiving = state.status === 'RECEIVING';
     const activeColor = isReceiving ? '#00ff00' : '#555';
+    
+    // Local state for smooth slider dragging
+    const [squelchVal, setSquelchVal] = useState<number>(state.squelch || -40);
+
+    useEffect(() => {
+        if (state.squelch !== undefined) {
+            setSquelchVal(state.squelch);
+        }
+    }, [state.squelch]);
+
+    const handleSquelchCommit = (_event: Event | React.SyntheticEvent, value: number | number[]) => {
+        if (onSquelchChange) {
+            onSquelchChange(value as number);
+        }
+    };
+
+    // Virtual display state for scanning animation
+    const [scanIndex, setScanIndex] = useState(0);
+
+    useEffect(() => {
+        if (state.status === 'SCANNING' && channels.length > 0) {
+            const interval = setInterval(() => {
+                setScanIndex(prev => (prev + 1) % channels.length);
+            }, 80); // Fast cycle
+            return () => clearInterval(interval);
+        }
+    }, [state.status, channels]);
+
+    // Determine what to show
+    let displayFreq = state.currentFrequency;
+    let displayAlpha = state.currentChannel?.alphaTag;
+
+    if (state.status === 'SCANNING' && channels.length > 0) {
+        // Show cycling channels
+        displayFreq = channels[scanIndex].frequency;
+        displayAlpha = channels[scanIndex].alphaTag;
+    }
 
     return (
         <Paper 
@@ -53,7 +93,7 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan }) => {
                     <Box display="flex" gap={1} alignItems="center">
                         {onScan && state.status !== 'SCANNING' && state.status !== 'IDLE' && (
                             <Chip 
-                                label="RESUME SCAN" 
+                                label={state.status === 'RECEIVING' || state.status === 'MONITORING' ? "SKIP" : "RESUME SCAN"} 
                                 color="primary" 
                                 variant="outlined" 
                                 size="small" 
@@ -96,11 +136,24 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan }) => {
                             textShadow: isReceiving ? '0 0 10px rgba(0,255,0,0.5)' : 'none',
                             fontSize: { xs: '3rem', md: '5rem' }
                         }}>
-                            {state.currentFrequency ? state.currentFrequency.toFixed(4) : '---.----'}
+                            {displayFreq ? displayFreq.toFixed(4) : '---.----'}
                         </Typography>
-                        <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 4 }}>
-                            MEGAHERTZ
-                        </Typography>
+                        <Box display="flex" justifyContent="center" gap={2} alignItems="center">
+                            <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 4 }}>
+                                MEGAHERTZ
+                            </Typography>
+                            {displayAlpha && (
+                                <Chip 
+                                    label={displayAlpha} 
+                                    size="small" 
+                                    sx={{ 
+                                        bgcolor: 'rgba(255,255,255,0.1)', 
+                                        color: '#aaa', 
+                                        fontFamily: 'monospace' 
+                                    }} 
+                                />
+                            )}
+                        </Box>
                     </Box>
                     
                     {/* VU Meter (Only when receiving) */}
@@ -132,6 +185,46 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan }) => {
                             }
                         }} 
                     />
+                </Box>
+
+                {/* Squelch Control */}
+                <Box mt={2} px={2} display="flex" alignItems="center" gap={2}>
+                    <Stack direction="row" spacing={2} sx={{ width: '100%' }} alignItems="center">
+                        <TuneIcon sx={{ color: '#666', fontSize: 20 }} />
+                        <Typography variant="caption" sx={{ color: '#888', minWidth: 60 }}>
+                            SQL {squelchVal}dB
+                        </Typography>
+                        <Slider
+                            value={squelchVal}
+                            min={-90}
+                            max={40}
+                            step={1}
+                            onChange={(_, val) => setSquelchVal(val as number)}
+                            onChangeCommitted={handleSquelchCommit}
+                            sx={{
+                                color: '#00ff00',
+                                '& .MuiSlider-thumb': {
+                                    width: 12,
+                                    height: 12,
+                                    '&:hover, &.Mui-focusVisible': {
+                                        boxShadow: '0 0 0 8px rgba(0, 255, 0, 0.16)',
+                                    },
+                                },
+                                '& .MuiSlider-rail': {
+                                    opacity: 0.2,
+                                },
+                            }}
+                        />
+                         {state.currentSignalDb !== undefined && (
+                            <Chip 
+                                label={`${state.currentSignalDb.toFixed(1)} dB`} 
+                                size="small" 
+                                variant="outlined" 
+                                color={state.currentSignalDb > squelchVal ? "success" : "default"}
+                                sx={{ height: 24, fontSize: '0.7rem', minWidth: 70 }}
+                            />
+                        )}
+                    </Stack>
                 </Box>
             </Box>
             

@@ -5,8 +5,7 @@ import cors from 'cors';
 import path from 'path';
 import { MockRadio } from './scanner/MockRadio';
 import { RtlDevice } from './scanner/RtlDevice';
-import { CHANNELS } from './models';
-import { getHistory, deleteTransmission } from './db';
+import { getHistory, deleteTransmission, getAllChannels, addChannel, updateChannel, deleteChannel } from './db';
 import fs from 'fs';
 
 const app = express();
@@ -15,7 +14,13 @@ app.use(express.json());
 
 // Serve static files from client/dist
 const clientBuildPath = path.join(__dirname, '../../client/dist');
-app.use(express.static(clientBuildPath));
+app.use(express.static(clientBuildPath, {
+    setHeaders: (res, path) => {
+        if (path.endsWith('index.html')) {
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        }
+    }
+}));
 
 // Serve recordings
 app.use('/audio', express.static(path.join(__dirname, '../data/recordings')));
@@ -36,7 +41,44 @@ console.log(`Initializing Radio Driver: ${useRealRadio ? 'REAL HARDWARE (RTL-SDR
 
 // API Routes
 app.get('/api/channels', (req, res) => {
-    res.json(CHANNELS);
+    try {
+        const channels = getAllChannels();
+        res.json(channels);
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to fetch channels' });
+    }
+});
+
+app.post('/api/channels', (req, res) => {
+    try {
+        const id = addChannel(req.body);
+        (radio as any).reloadChannels();
+        res.json({ id, ...req.body });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to add channel' });
+    }
+});
+
+app.put('/api/channels/:id', (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        updateChannel({ ...req.body, id });
+        (radio as any).reloadChannels();
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to update channel' });
+    }
+});
+
+app.delete('/api/channels/:id', (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        deleteChannel(id);
+        (radio as any).reloadChannels();
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to delete channel' });
+    }
 });
 
 app.get('/api/history', (req, res) => {
@@ -69,8 +111,8 @@ app.delete('/api/history/:id', (req, res) => {
 });
 
 app.post('/api/control', (req, res) => {
-    const { action, frequency } = req.body;
-    console.log(`[API] Control Action: ${action} ${frequency || ''}`);
+    const { action, frequency, value } = req.body;
+    console.log(`[API] Control Action: ${action} ${frequency || value || ''}`);
     if (action === 'start') {
         radio.start();
         res.json({ message: 'Scanner started' });
@@ -83,6 +125,9 @@ app.post('/api/control', (req, res) => {
     } else if (action === 'scan') {
         radio.resumeScan();
         res.json({ message: 'Resuming scan' });
+    } else if (action === 'set_squelch' && value !== undefined) {
+        (radio as any).setSquelch(parseFloat(value));
+        res.json({ message: `Squelch set to ${value}` });
     } else {
         res.status(400).json({ error: 'Invalid action' });
     }

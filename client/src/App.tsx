@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
-import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, List, ListItem, ListItemText, Divider, Paper, Chip, IconButton } from '@mui/material';
+import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, List, ListItem, ListItemText, Divider, Paper, Chip, IconButton, Snackbar, Alert } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
+import ChannelManager from './components/ChannelManager';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import HistoryIcon from '@mui/icons-material/History';
@@ -8,8 +9,10 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import SpeedIcon from '@mui/icons-material/Speed';
 import SatelliteAltIcon from '@mui/icons-material/SatelliteAlt';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
 import type { ScannerState, Channel, CallLog } from './types';
 
 const darkTheme = createTheme({
@@ -60,7 +63,48 @@ function App() {
   const [callLog, setCallLog] = useState<CallLog[]>([]);
   const [manualHold, setManualHold] = useState<number | null>(null);
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | undefined>(undefined);
+  const [isManagerOpen, setIsManagerOpen] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const ws = useRef<WebSocket | null>(null);
+  const wakeLock = useRef<any>(null);
+
+  // Wake Lock Manager
+  useEffect(() => {
+    const requestWakeLock = async () => {
+      if ('wakeLock' in navigator && scannerState.status !== 'IDLE') {
+        try {
+          if (!wakeLock.current) {
+            wakeLock.current = await (navigator as any).wakeLock.request('screen');
+            console.log('Wake Lock active');
+            wakeLock.current.addEventListener('release', () => {
+               wakeLock.current = null;
+               console.log('Wake Lock released');
+            });
+          }
+        } catch (err) {
+          console.error(`${err.name}, ${err.message}`);
+        }
+      } else if (wakeLock.current && scannerState.status === 'IDLE') {
+         wakeLock.current.release();
+         wakeLock.current = null;
+      }
+    };
+
+    requestWakeLock();
+
+    // Re-acquire on visibility change if still active
+    const handleVisibilityChange = () => {
+       if (document.visibilityState === 'visible' && scannerState.status !== 'IDLE') {
+         requestWakeLock();
+       }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLock.current) wakeLock.current.release();
+    };
+  }, [scannerState.status]);
 
   // Clock Effect
   useEffect(() => {
@@ -69,7 +113,7 @@ function App() {
   }, []);
 
   // Helper to send commands
-  const sendCommand = (action: string, frequency?: number) => {
+  const sendCommand = (action: string, frequency?: number, value?: number) => {
     const isDev = window.location.port === '5173';
     const port = isDev ? '3001' : window.location.port || '80';
     const protocol = window.location.protocol;
@@ -80,7 +124,7 @@ function App() {
     fetch(httpUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, frequency })
+        body: JSON.stringify({ action, frequency, value })
     }).catch(err => console.error("Command failed:", err));
   };
 
@@ -113,7 +157,7 @@ function App() {
             float32Array[i] = int16Array[i] / 32768;
         }
 
-        const buffer = window.audioCtx.createBuffer(1, float32Array.length, 8000);
+        const buffer = window.audioCtx.createBuffer(1, float32Array.length, 48000);
         buffer.copyToChannel(float32Array, 0);
         const source = window.audioCtx.createBufferSource();
         source.buffer = buffer;
@@ -137,6 +181,56 @@ function App() {
         setCallLog(prev => prev.filter(log => log.id !== id));
     } catch (e) {
         console.error("Delete failed:", e);
+    }
+  };
+
+  const refreshChannels = () => {
+    const isDev = window.location.port === '5173';
+    const port = isDev ? '3001' : window.location.port || '80';
+    const protocol = window.location.protocol;
+    const backendHost = window.location.hostname;
+    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
+    fetch(`${protocol}//${backendHost}${portSuffix}/api/channels`)
+      .then(res => res.json())
+      .then(data => setChannels(data))
+      .catch(err => console.error("Failed to fetch channels:", err));
+  };
+
+  const handleSaveChannel = async (channel: Channel) => {
+    const isDev = window.location.port === '5173';
+    const port = isDev ? '3001' : window.location.port || '80';
+    const protocol = window.location.protocol;
+    const backendHost = window.location.hostname;
+    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
+    const baseUrl = `${protocol}//${backendHost}${portSuffix}/api/channels`;
+
+    const method = channel.id ? 'PUT' : 'POST';
+    const url = channel.id ? `${baseUrl}/${channel.id}` : baseUrl;
+
+    try {
+        await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(channel)
+        });
+        refreshChannels();
+    } catch (e) {
+        console.error("Save channel failed:", e);
+    }
+  };
+
+  const handleDeleteChannel = async (id: number) => {
+    const isDev = window.location.port === '5173';
+    const port = isDev ? '3001' : window.location.port || '80';
+    const protocol = window.location.protocol;
+    const backendHost = window.location.hostname;
+    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
+    
+    try {
+        await fetch(`${protocol}//${backendHost}${portSuffix}/api/channels/${id}`, { method: 'DELETE' });
+        refreshChannels();
+    } catch (e) {
+        console.error("Delete channel failed:", e);
     }
   };
 
@@ -184,7 +278,7 @@ function App() {
         }
         
         if (!window.audioCtx) {
-            window.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 8000 });
+            window.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
             const analyser = window.audioCtx.createAnalyser();
             analyser.fftSize = 1024;
             analyser.connect(window.audioCtx.destination);
@@ -196,7 +290,7 @@ function App() {
         if (ctx.state === 'suspended') ctx.resume();
         const analyser = (ctx as any)._analyser;
 
-        const audioBuffer = ctx.createBuffer(1, float32Array.length, 8000);
+        const audioBuffer = ctx.createBuffer(1, float32Array.length, 48000);
         audioBuffer.copyToChannel(float32Array, 0);
 
         const source = ctx.createBufferSource();
@@ -223,6 +317,8 @@ function App() {
             } else if (message.type === 'NEW_LOG') {
               const newEntry = message.payload as CallLog;
               setCallLog(log => [newEntry, ...log].slice(0, 100));
+            } else if (message.type === 'ERROR') {
+              setErrorMsg(message.payload);
             }
         } catch (e) {
             console.warn('Unknown message:', event.data);
@@ -255,9 +351,16 @@ function App() {
                     OPENSCANNER <span style={{fontSize: '0.7em', color: '#666'}}>P25</span>
                 </Typography>
 
-                <Box sx={{ mr: 3, px: 2, py: 0.5, bgcolor: '#111', borderRadius: 1, border: '1px solid #333' }}>
+                <Box sx={{ mr: 3, px: 2, py: 0.5, bgcolor: '#111', borderRadius: 1, border: '1px solid #333', display: 'flex', alignItems: 'center', gap: 1 }}>
+                    {scannerState.gps?.time && scannerState.gps.fix >= 2 
+                        ? <SatelliteAltIcon sx={{ fontSize: 16, color: 'primary.main' }} />
+                        : <AccessTimeIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                    }
                     <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'primary.main', fontWeight: 'bold', fontSize: '14px' }}>
-                        {currentTime.toLocaleTimeString([], { hour12: false })}
+                        {scannerState.gps?.time && scannerState.gps.fix >= 2 
+                            ? new Date(scannerState.gps.time).toLocaleTimeString([], { hour12: false })
+                            : currentTime.toLocaleTimeString([], { hour12: false })
+                        }
                     </Typography>
                 </Box>
                 
@@ -329,19 +432,26 @@ function App() {
                     <Box sx={{ mb: 2 }}>
                         <ScannerDisplay 
                             state={scannerState} 
-                            analyser={audioAnalyser} 
+                            analyser={audioAnalyser}
+                            channels={channels}
                             onScan={() => {
                                 setManualHold(null);
                                 sendCommand('scan');
                             }}
+                            onSquelchChange={(val) => sendCommand('set_squelch', undefined, val)}
                         />
                     </Box>
 
                     {/* Channel Grid */}
                     <Paper sx={{ flexGrow: 1, p: 2, bgcolor: '#0a0a0a', border: '1px solid #222', borderRadius: 2, overflowY: 'auto' }}>
-                        <Box display="flex" alignItems="center" mb={2} gap={1}>
-                            <AssessmentIcon color="primary" fontSize="small" />
-                            <Typography variant="subtitle2" color="text.secondary" fontWeight="bold">CHANNEL CONTROL</Typography>
+                        <Box display="flex" alignItems="center" mb={2} justifyContent="space-between">
+                            <Box display="flex" alignItems="center" gap={1}>
+                                <AssessmentIcon color="primary" fontSize="small" />
+                                <Typography variant="subtitle2" color="text.secondary" fontWeight="bold">CHANNEL CONTROL</Typography>
+                            </Box>
+                            <IconButton size="small" onClick={() => setIsManagerOpen(true)}>
+                                <EditIcon fontSize="small" />
+                            </IconButton>
                         </Box>
                         <Grid container spacing={2}>
                             {channels.map((ch) => (
@@ -448,6 +558,25 @@ function App() {
 
             </Grid>
         </Box>
+        
+        <ChannelManager 
+            open={isManagerOpen} 
+            onClose={() => setIsManagerOpen(false)} 
+            channels={channels}
+            onSave={handleSaveChannel}
+            onDelete={handleDeleteChannel}
+        />
+
+        <Snackbar 
+            open={!!errorMsg} 
+            autoHideDuration={6000} 
+            onClose={() => setErrorMsg(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+            <Alert onClose={() => setErrorMsg(null)} severity="error" variant="filled" sx={{ width: '100%' }}>
+                {errorMsg}
+            </Alert>
+        </Snackbar>
       </Box>
     </ThemeProvider>
   );

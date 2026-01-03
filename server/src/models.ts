@@ -1,4 +1,5 @@
 export interface Channel {
+    id?: number;
     frequency: number;
     license: string;
     type: string;
@@ -37,7 +38,9 @@ export interface ScannerState {
     currentFrequency?: number;
     currentChannel?: Channel;
     signalStrength: number; // 0-100
+    currentSignalDb?: number;
     isAudioStreaming?: boolean;
+    squelch?: number;
     rfSpectrum?: { frequency: number, db: number }[];
     gps?: {
         lat: number;

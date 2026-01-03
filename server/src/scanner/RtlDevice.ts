@@ -3,8 +3,8 @@ import { EventEmitter } from 'events';
 const gpsd = require('node-gpsd');
 import fs from 'fs';
 import path from 'path';
-import { Channel, CHANNELS, ScannerState } from '../models';
-import { saveTransmission } from '../db';
+import { Channel, ScannerState } from '../models';
+import { saveTransmission, getAllChannels } from '../db';
 
 export class RtlDevice extends EventEmitter {
     private state: ScannerState = {
@@ -17,8 +17,11 @@ export class RtlDevice extends EventEmitter {
     private decoderProcess: ChildProcess | null = null;
     private channelIndex: number = 0;
     private sessionTimeout: NodeJS.Timeout | null = null;
+    private syncTimeout: NodeJS.Timeout | null = null;
+    private decodeStartTimer: NodeJS.Timeout | null = null;
     private manualOverride: boolean = false;
     private gpsListener: any = null;
+    private channels: Channel[] = [];
 
     // Recording State
     private currentRecordingFile: string | null = null;
@@ -28,7 +31,33 @@ export class RtlDevice extends EventEmitter {
 
     constructor() {
         super();
+        this.reloadChannels();
         this.startGpsTracking();
+    }
+
+    public reloadChannels() {
+        try {
+            this.channels = getAllChannels();
+            console.log(`[RtlDevice] Loaded ${this.channels.length} channels.`);
+        } catch (e) {
+            console.error('Failed to load channels:', e);
+        }
+    }
+
+    public setSquelch(db: number) {
+        this.updateState({ squelch: db });
+        console.log(`[RtlDevice] Squelch set to ${db}dB`);
+        console.log(`[Debug] Checking breakout: Status=${this.state.status}, Manual=${this.manualOverride}, CurrentDB=${this.state.currentSignalDb}`);
+
+        // Live Check: If we are stuck on a signal (RECEIVING) that is now below squelch, resume scanning!
+        if (this.state.status === 'RECEIVING' && !this.manualOverride && this.state.currentSignalDb !== undefined) {
+             if (this.state.currentSignalDb < db) {
+                 console.log(`[RtlDevice] Breakout triggered: ${this.state.currentSignalDb} < ${db}`);
+                 this.resumeScan();
+             } else {
+                 console.log(`[Debug] Signal ${this.state.currentSignalDb} still >= ${db}`);
+             }
+        }
     }
 
     private startGpsTracking() {
@@ -95,13 +124,14 @@ export class RtlDevice extends EventEmitter {
             clearTimeout(this.sessionTimeout);
             this.sessionTimeout = null;
         }
-        this.killActiveProcess();
+        this.killActiveProcess(); // Legacy rtl_power cleanup
+        this.stopScanning();      // New rtl_sdr cleanup
         this.stopDecoding();
         this.updateState({ status: 'IDLE', currentFrequency: undefined, currentChannel: undefined, signalStrength: 0 });
     }
 
     public holdFrequency(frequency: number) {
-        const channel = CHANNELS.find(c => c.frequency === frequency);
+        const channel = this.channels.find(c => c.frequency === frequency);
         if (!channel) {
             console.error(`Channel not found for frequency: ${frequency}`);
             return;
@@ -178,140 +208,226 @@ export class RtlDevice extends EventEmitter {
         }
     }
 
-    private scanCounter: number = 0;
+    private scannerProcess: ChildProcessWithoutNullStreams | null = null;
+    private scanBuffer: Buffer = Buffer.alloc(0);
+    private lastScanUpdate: number = 0;
 
     /**
-     * Uses rtl_power to check signal levels at specific frequencies
-     * Optimized: Scans all channels simultaneously if they fit in one bandwidth chunk.
+     * Uses rtl_sdr to stream I/Q samples and performs FFT in Node.js
+     * Allows for 10Hz+ update rates.
      */
     private async startScanning() {
-        if (!this.isRunning || this.manualOverride) return;
+        if (!this.isRunning || this.manualOverride || this.state.status === 'RECEIVING') return;
 
-        if (this.state.status === 'RECEIVING') {
+        if (this.channels.length === 0) {
+            console.warn('[RtlDevice] No channels to scan.');
+            this.updateState({ status: 'IDLE' });
             return;
         }
 
-        // Calculate Bandwidth needed
-        const freqs = CHANNELS.map(c => c.frequency);
+        // Calculate Bandwidth and Center Frequency
+        const freqs = this.channels.map(c => c.frequency);
         const minFreq = Math.min(...freqs);
         const maxFreq = Math.max(...freqs);
-        const bandwidth = maxFreq - minFreq;
-
-        // Add margins (0.1 MHz)
-        const scanStart = Math.floor((minFreq - 0.1) * 10) / 10; // Round down to 100k
-        const scanEnd = Math.ceil((maxFreq + 0.1) * 10) / 10;    // Round up to 100k
+        // Center frequency
+        const centerFreq = (minFreq + maxFreq) / 2;
         
-        // If channels fit in 2MHz, do a group scan (fastest)
-        if (scanEnd - scanStart < 2.0) {
-            this.updateState({
-                status: 'SCANNING',
-                currentFrequency: undefined, // Show 'Scanning'
-                currentChannel: undefined,
-                signalStrength: 0,
-                isAudioStreaming: false
-            });
+        // Use 2.048 MSPS (standard stable rate)
+        const sampleRate = 2048000;
+        
+        // Verify channels fit
+        if ((maxFreq - minFreq) > (sampleRate / 1000000 * 0.8)) {
+             console.warn('Channels spread too wide for single tuner bandwidth. Scanning first group only.');
+        }
 
-            try {
-                // Scan range with 10k bins (narrow enough for P25)
-                // -i 1s is default/stable. We could try 0.5s if supported, but 1s is safe.
-                const spectrum = await this.performSpectrumSweep(`${scanStart}M`, `${scanEnd}M`, '10k');
-                this.updateState({ rfSpectrum: spectrum });
+        this.updateState({
+            status: 'SCANNING',
+            currentFrequency: undefined,
+            currentChannel: undefined,
+            signalStrength: 0,
+            isAudioStreaming: false
+        });
 
-                // Check for hits
-                let bestChannel: Channel | null = null;
-                let bestStrength = -100;
+        // Kill any existing scanner
+        if (this.scannerProcess) this.scannerProcess.kill();
 
-                for (const channel of CHANNELS) {
-                    // Find bin for this frequency
-                    // Simple closest match
-                    const hit = spectrum.reduce((prev, curr) => 
-                        Math.abs(curr.frequency - channel.frequency) < Math.abs(prev.frequency - channel.frequency) ? curr : prev
-                    );
+        const cmd = 'rtl_sdr';
+        // -f frequency (Hz), -s sample_rate (Hz), -g gain (0=auto? No, use fixed for consistency or auto), -n (samples to read, omitted for stream)
+        const args = ['-f', Math.floor(centerFreq * 1000000).toString(), '-s', sampleRate.toString(), '-g', '40', '-'];
+        
+        console.log(`Starting Fast Scan: ${centerFreq} MHz @ ${sampleRate} SPS`);
+        this.scannerProcess = spawn(cmd, args);
 
-                    if (hit && Math.abs(hit.frequency - channel.frequency) < 0.02) { // Match within 20kHz
-                        const db = hit.db;
-                        // Squelch check: -25dB is more sensitive
-                        if (db > -25 && db > bestStrength) {
-                            bestStrength = db;
-                            bestChannel = channel;
-                        }
-                    }
-                }
-
-                if (bestChannel) {
-                    this.recordingLockoutUntil = Date.now() + 3000;
-                    this.lockOn(bestChannel);
-                    return;
-                }
-
-            } catch (error) {
-                console.warn(`Group Scan warning: ${error}`);
-                if (error && error.toString().includes('ENOENT')) {
-                    this.emit('error', 'RTL-SDR tools not found. Please install them.');
-                    this.stop();
-                    return;
-                }
+        let errorOutput = '';
+        this.scannerProcess.stderr.on('data', (d) => {
+            const msg = d.toString();
+            errorOutput += msg;
+            if (msg.includes('No supported devices found')) {
+                this.emit('error', 'RTL-SDR Hardware Not Detected. Please check your USB connection.');
+                this.stop();
             }
-        } else {
-            // Fallback: Round Robin (Legacy Logic) for wide spreads
-            // (Omitted for brevity as user only has 2 close channels)
-            console.warn('Channels spread too wide for fast scan. Only scanning first group.');
-        }
+        });
 
-        // Schedule next scan immediately (loop)
-        if (this.isRunning && !this.manualOverride) {
-            this.scanInterval = setTimeout(() => this.startScanning(), 50) as any;
-        }
-    }
+        this.scannerProcess.stdout.on('data', (chunk: Buffer) => {
+            this.processScanData(chunk, centerFreq, sampleRate);
+        });
 
-    private performSpectrumSweep(lower: string, upper: string, bin: string): Promise<{ frequency: number, db: number }[]> {
-        return new Promise((resolve, reject) => {
-            const cmd = 'rtl_power';
-            const args = ['-f', `${lower}:${upper}:${bin}`, '-i', '1', '-1'];
-            const proc = spawn(cmd, args);
-            let output = '';
-
-            proc.stdout.on('data', (data) => output += data.toString());
-            
-            // Handle stderr if needed, but usually we just want stdout
-            
-            proc.on('close', (code) => {
-                if (code !== 0) {
-                    console.error(`rtl_power failed with code ${code}. Output: ${output.substring(0, 100)}...`);
-                    return reject('rtl_power failed');
+        this.scannerProcess.on('close', (code) => {
+            if (this.isRunning && this.state.status === 'SCANNING') {
+                if (code !== 0 && errorOutput.includes('usb_open error')) {
+                     this.emit('error', 'RTL-SDR USB Permission Error. Try running with sudo or check udev rules.');
                 }
-                
-                const lines = output.split('\n');
-                const csvLine = lines.find(line => line.includes(',') && line.split(',').length > 6);
-                
-                if (csvLine) {
-                    const parts = csvLine.trim().split(',');
-                    const startFreq = parseFloat(parts[2]);
-                    const endFreq = parseFloat(parts[3]);
-                    const step = parseFloat(parts[4]);
-                    
-                    const spectrum = [];
-                    
-                    // Column 6 is "samples", db values start at index 6 in 0-based array? 
-                    // No, format is: date(0), time(1), low(2), high(3), step(4), samples(5), db(6)...
-                    
-                    for (let i = 6; i < parts.length; i++) {
-                        const db = parseFloat(parts[i]);
-                        if (!isNaN(db)) {
-                            // Calculate frequency for this bin
-                            const freq = startFreq + ((i - 6) * step);
-                            spectrum.push({ frequency: freq / 1000000, db }); // Convert to MHz
-                        }
-                    }
-                    // console.log(`Spectrum generated: ${spectrum.length} points`);
-                    resolve(spectrum);
-                } else {
-                    console.warn("rtl_power: No valid CSV line found in output.");
-                    resolve([]);
-                }
-            });
+                console.log(`Scanner process died with code ${code}, restarting in 5s...`);
+                setTimeout(() => this.startScanning(), 5000);
+            }
         });
     }
+
+    private processScanData(chunk: Buffer, centerFreq: number, sampleRate: number) {
+        // Rate Limit Updates (15Hz max)
+        const now = Date.now();
+        if (now - this.lastScanUpdate < 60) return; // Skip data if too fast
+        this.lastScanUpdate = now;
+
+        // We need 256 samples (512 bytes) for a quick snapshot
+        // Use the LAST 512 bytes to get the most recent data (lowest latency)
+        if (chunk.length < 512) return;
+        
+        const fftSize = 256;
+        const samples = chunk.slice(chunk.length - (fftSize * 2)); // Last 512 bytes
+        
+        // Simple DFT/FFT for Power Spectrum
+        // Since we only need magnitudes for specific channels, we could optimize,
+        // but a full low-res spectrum is nice for the UI.
+        const spectrum = this.computePowerSpectrum(samples, fftSize);
+        
+        // Map bins to frequencies
+        const rfSpectrum = spectrum.map((db, i) => {
+            // Bin 0 = Center - Rate/2
+            // Bin N/2 = Center
+            // Bin N = Center + Rate/2
+            // Actually, standard FFT layout: 0 is DC (Center).
+            // But usually we shift it. Let's assume standard shifted output:
+            // i ranges 0 to fftSize. 
+            // Freq = Center + (i - fftSize/2) * (Rate / fftSize)
+            const freqOffset = (i - fftSize / 2) * (sampleRate / fftSize);
+            return {
+                frequency: (centerFreq * 1000000 + freqOffset) / 1000000,
+                db: db
+            };
+        });
+
+        // Update State
+        this.updateState({ rfSpectrum });
+
+        // Check Channels
+        let bestChannel: Channel | null = null;
+        let maxDetectedDb = -100;
+        const threshold = this.state.squelch ?? -40;
+
+        for (const channel of this.channels) {
+            // Find bin
+            const freqDiff = channel.frequency - centerFreq; // MHz
+            const binIndex = Math.floor((freqDiff * 1000000 / sampleRate) * fftSize + fftSize/2);
+            
+            if (binIndex >= 0 && binIndex < fftSize) {
+                const db = spectrum[binIndex];
+                if (db > maxDetectedDb) maxDetectedDb = db;
+                
+                if (db > threshold && (bestChannel === null || db > maxDetectedDb)) {
+                    bestChannel = channel;
+                }
+            }
+        }
+
+        this.updateState({ currentSignalDb: maxDetectedDb });
+
+        if (bestChannel) {
+             this.stopScanning(); // Kill rtl_sdr
+             this.recordingLockoutUntil = Date.now() + 3000;
+             this.lockOn(bestChannel);
+        }
+    }
+
+    private computePowerSpectrum(buffer: Buffer, size: number): number[] {
+        // Simple DFT (Direct Fourier Transform) - O(N^2) but N=256 is tiny.
+        // Input: buffer (Uint8) 0-255. Center 127.5.
+        // Output: dB array
+        
+        const signalReal = new Float32Array(size);
+        const signalImag = new Float32Array(size);
+        
+        for (let i = 0; i < size; i++) {
+            signalReal[i] = (buffer[i*2] - 127.5) / 127.5;
+            signalImag[i] = (buffer[i*2+1] - 127.5) / 127.5;
+        }
+
+        const magnitudes = new Float32Array(size);
+        
+        // Apply Hanning Window to reduce leakage
+        for (let i = 0; i < size; i++) {
+            const multiplier = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (size - 1)));
+            signalReal[i] *= multiplier;
+            signalImag[i] *= multiplier;
+        }
+
+        // Compute FFT (actually using DFT for simplicity without external lib)
+        // For N=256, 65k iterations is < 1ms in JS.
+        // We want shifted output (0Hz in middle).
+        
+        const output = new Array(size).fill(-100);
+
+        for (let k = 0; k < size; k++) { // For each output bin
+            let sumReal = 0;
+            let sumImag = 0;
+            const angleTerm = -2 * Math.PI * k / size;
+            
+            for (let n = 0; n < size; n++) { // Sum over time samples
+                 // Euler: e^(-ix) = cos(x) - i*sin(x)
+                 const angle = angleTerm * n;
+                 const c = Math.cos(angle);
+                 const s = Math.sin(angle);
+                 
+                 // (a+bi)(c+di) = (ac - bd) + i(ad + bc)
+                 // Here (signalReal + i signalImag) * (cos + i sin) -> wait, formula is e^-i...
+                 // e^-ix = cos(x) - i sin(x)
+                 // So we multiply by (cos - i sin)
+                 // (r + ji) * (c - js) = (rc + rs) + j(ic - rs) -- wait.
+                 // (r + ji)(c - js) = rc - jrs + jic - j^2 is 
+                 // rc + s*r(imag part?) No.
+                 // Real: r*c - i*(-s) = rc + is
+                 // Imag: r*(-s) + i*c = ic - rs
+                 
+                 sumReal += signalReal[n] * c + signalImag[n] * s; // check sign?
+                 sumImag += signalImag[n] * c - signalReal[n] * s;
+            }
+            
+            // Power = Real^2 + Imag^2
+            const power = sumReal*sumReal + sumImag*sumImag;
+            const db = 10 * Math.log10(power + 1e-9); // Prevent log0
+            magnitudes[k] = db; 
+        }
+
+        // Shift: Swap left and right halves to put DC in middle
+        const shifted = [
+            ...magnitudes.slice(size / 2),
+            ...magnitudes.slice(0, size / 2)
+        ];
+
+        // Normalize dB (empirical adjustment for RTL-SDR range)
+        return shifted.map(x => x - 20); // Arbitrary offset to match typical "noise floor" ~-40dB
+    }
+
+    private stopScanning() {
+        if (this.scannerProcess) {
+            this.scannerProcess.stdout.removeAllListeners();
+            this.scannerProcess.stderr.removeAllListeners();
+            this.scannerProcess.removeAllListeners(); // Prevent restart loop
+            this.scannerProcess.kill('SIGKILL'); // Force kill
+            this.scannerProcess = null;
+        }
+    }
+
 
     private normalizeDb(db: number): number {
         // Map -60dB (noise) to 0% and -10dB (strong) to 100%
@@ -412,39 +528,51 @@ export class RtlDevice extends EventEmitter {
     private startDecoding(channel: Channel) {
         this.stopDecoding(); // Ensure clean slate
 
-        // Use dsd-fme's built-in RTL-SDR support directly
-        // -i rtl:0 = device 0, -c = center freq, -ft = target freq, -O 8000 = 8k output
-        const command = `dsd-fme -i rtl:0 -c ${channel.frequency}M -ft ${channel.frequency}M -g 45 -o - -O 8000 -fp`;
+        // Stable shell pipe mode
+        // Force P25 Phase 1 (-f1)
+        const command = `rtl_fm -f ${channel.frequency}M -s 48000 -g 45 -p 0 -M fm - | dsd-fme -f1 -i - -o - -s 48000`;
 
-        console.log(`Executing Direct Decoder: ${command}`);
-        this.decoderProcess = spawn('sh', ['-c', command], { detached: true });
+        console.log(`Executing Stable Pipeline: ${command}`);
         
-        this.decoderProcess.on('error', (err) => {
-            console.error('Failed to start decoder pipeline:', err.message);
-        });
+        // Wait 500ms for hardware to release
+        setTimeout(() => {
+            if (!this.isRunning) return;
+            
+            this.decoderProcess = spawn('sh', ['-c', command], { detached: true });
+            
+            this.decoderProcess.on('error', (err) => {
+                console.error('Failed to start decoder pipeline:', err.message);
+            });
 
-        this.decoderProcess.on('exit', (code) => {
-            console.log(`[PIPELINE] Process exited with code ${code}`);
-        });
+            this.decoderProcess.on('exit', (code) => {
+                if (code !== null && code !== 0) {
+                    console.log(`[PIPELINE] Process exited with code ${code}`);
+                }
+            });
 
-        // Activity Detection via stderr
-        this.decoderProcess.stderr?.on('data', (data) => {
-            const output = data.toString().trim();
-            if (output && !output.includes('██') && !output.includes('Version')) {
-                console.log(`[DSD] ${output}`);
-            }
-            if (output.includes('Sync:') || output.includes('Voice') || output.includes('P25')) {
-                this.handleActivity();
-            }
-        });
+            // Activity Detection via stderr
+            this.decoderProcess.stderr?.on('data', (data) => {
+                const output = data.toString().trim();
+                if (output && !output.includes('██') && !output.includes('Version')) {
+                    console.log(`[DSD] ${output}`);
+                }
+                if (output.includes('Sync:') || output.includes('Voice') || output.includes('P25')) {
+                    this.handleActivity();
+                }
+            });
 
-        // CAPTURE AUDIO from the end of the pipe (dsd-fme's stdout)
-                    this.decoderProcess.stdout?.on('data', (chunk) => {
-                        if (this.recordingStream) {
-                            this.recordingStream.write(chunk);
-                        }
-                        this.emit('audio', chunk);
-                    });    }
+            // CAPTURE AUDIO from the end of the pipe (dsd-fme's stdout)
+            this.decoderProcess.stdout?.on('data', (chunk) => {
+                if (chunk.length > 0) {
+                    // console.log(`[Audio] Chunk: ${chunk.length} bytes`); // Uncomment for heavy debugging
+                }
+                if (this.recordingStream) {
+                    this.recordingStream.write(chunk);
+                }
+                this.emit('audio', chunk);
+            });
+        }, 300);
+    }
 
     private handleActivity() {
         // If we detect valid P25 frames, set state to RECEIVING

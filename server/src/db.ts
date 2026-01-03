@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import { Channel, CHANNELS } from './models';
 
 const DB_PATH = path.join(__dirname, '../data/openscanner.db');
 const RECORDINGS_PATH = path.join(__dirname, '../data/recordings');
@@ -28,8 +29,34 @@ db.exec(`
         alt REAL,
         audio_path TEXT,
         duration REAL
-    )
+    );
+
+    CREATE TABLE IF NOT EXISTS channels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        frequency REAL UNIQUE,
+        license TEXT,
+        type TEXT,
+        tone TEXT,
+        alphaTag TEXT,
+        description TEXT,
+        mode TEXT,
+        tag TEXT
+    );
 `);
+
+// Seed Channels if empty
+const count = db.prepare('SELECT count(*) as count FROM channels').get() as { count: number };
+if (count.count === 0) {
+    const insert = db.prepare(`
+        INSERT INTO channels (frequency, license, type, tone, alphaTag, description, mode, tag)
+        VALUES (@frequency, @license, @type, @tone, @alphaTag, @description, @mode, @tag)
+    `);
+    const insertMany = db.transaction((channels: Channel[]) => {
+        for (const channel of channels) insert.run(channel);
+    });
+    insertMany(CHANNELS);
+    console.log(`[DB] Seeded ${CHANNELS.length} initial channels.`);
+}
 
 export interface DBTransmission {
     id: string;
@@ -43,6 +70,34 @@ export interface DBTransmission {
     audio_path?: string;
     duration?: number;
 }
+
+export const getAllChannels = (): Channel[] => {
+    return db.prepare('SELECT * FROM channels ORDER BY frequency ASC').all() as Channel[];
+};
+
+export const addChannel = (channel: Channel): number => {
+    const stmt = db.prepare(`
+        INSERT INTO channels (frequency, license, type, tone, alphaTag, description, mode, tag)
+        VALUES (@frequency, @license, @type, @tone, @alphaTag, @description, @mode, @tag)
+    `);
+    const info = stmt.run(channel);
+    return Number(info.lastInsertRowid);
+};
+
+export const updateChannel = (channel: Channel) => {
+    const stmt = db.prepare(`
+        UPDATE channels 
+        SET frequency=@frequency, license=@license, type=@type, tone=@tone, 
+            alphaTag=@alphaTag, description=@description, mode=@mode, tag=@tag
+        WHERE id=@id
+    `);
+    stmt.run(channel);
+};
+
+export const deleteChannel = (id: number) => {
+    const stmt = db.prepare('DELETE FROM channels WHERE id = ?');
+    stmt.run(id);
+};
 
 export const saveTransmission = (t: DBTransmission) => {
     const stmt = db.prepare(`
