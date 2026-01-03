@@ -10,6 +10,7 @@ public class RtlDevice : BackgroundService
 {
     private readonly Database _db;
     private readonly ILogger<RtlDevice> _logger;
+    private readonly GpsService _gps;
     private ScannerState _state;
     
     // Processes
@@ -37,11 +38,15 @@ public class RtlDevice : BackgroundService
     public event Action<byte[]>? OnAudio;
     public event Action<CallLog>? OnNewLog;
 
-    public RtlDevice(Database db, ILogger<RtlDevice> logger)
+    public RtlDevice(Database db, ILogger<RtlDevice> logger, GpsService gps)
     {
         _db = db;
         _logger = logger;
+        _gps = gps;
         _state = new ScannerState("IDLE", 0);
+        
+        _gps.OnGpsUpdate += (data) => UpdateState(_state with { Gps = data });
+        
         ReloadChannels();
     }
 

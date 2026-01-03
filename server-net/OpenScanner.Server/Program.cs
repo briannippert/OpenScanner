@@ -9,6 +9,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add Services
 builder.Services.AddSingleton<Database>();
+builder.Services.AddSingleton<GpsService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<GpsService>());
 builder.Services.AddSingleton<RtlDevice>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RtlDevice>());
 builder.Services.AddSingleton<WebSocketBroadcaster>();
