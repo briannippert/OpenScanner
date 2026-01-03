@@ -19,7 +19,7 @@ public class Database
         // In production, this should be configurable.
         
         // Ensure data directory exists
-        _dataDir = Path.Combine(root, "../../server/data");
+        _dataDir = Path.Combine(root, "../../data");
         if (!Directory.Exists(_dataDir)) Directory.CreateDirectory(_dataDir);
 
         _connectionString = $"Data Source={Path.Combine(_dataDir, "openscanner.db")}";

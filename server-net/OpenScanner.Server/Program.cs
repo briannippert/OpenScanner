@@ -47,7 +47,7 @@ if (Directory.Exists(clientDistPath))
 }
 
 // Static Files (Audio Recordings)
-var recordingsPath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "../../server/data/recordings"));
+var recordingsPath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "../../data/recordings"));
 if (!Directory.Exists(recordingsPath)) Directory.CreateDirectory(recordingsPath);
 
 app.UseStaticFiles(new StaticFileOptions
