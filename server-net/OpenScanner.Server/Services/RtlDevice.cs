@@ -32,6 +32,9 @@ public class RtlDevice : BackgroundService
     // Timers (using CancellationTokenSources for cancellation)
     private CancellationTokenSource? _sessionTimeoutCts;
     private CancellationTokenSource? _activityTimeoutCts;
+    private Dictionary<double, int> _channelHits = new();
+    private DateTime _scanStartTime = DateTime.MinValue;
+    private (double Lat, double Lon)? _lastGeoPosition;
 
     // Events
     public event Action<ScannerState>? OnStateChanged;
@@ -45,9 +48,54 @@ public class RtlDevice : BackgroundService
         _gps = gps;
         _state = new ScannerState("IDLE", 0);
         
-        _gps.OnGpsUpdate += (data) => UpdateState(_state with { Gps = data });
+        _gps.OnGpsUpdate += (data) => 
+        {
+            UpdateState(_state with { Gps = data });
+            CheckGeoRefresh(data.Lat, data.Lon);
+        };
         
         ReloadChannels();
+    }
+
+    private void CheckGeoRefresh(double lat, double lon)
+    {
+        if (!_lastGeoPosition.HasValue)
+        {
+            _lastGeoPosition = (lat, lon);
+            RefreshGeoChannels(lat, lon);
+            return;
+        }
+
+        // Only refresh if moved > 1 mile
+        double dist = CalculateDistance(_lastGeoPosition.Value.Lat, _lastGeoPosition.Value.Lon, lat, lon);
+        if (dist > 1.0)
+        {
+            _lastGeoPosition = (lat, lon);
+            RefreshGeoChannels(lat, lon);
+        }
+    }
+
+    private void RefreshGeoChannels(double lat, double lon)
+    {
+        var localChannels = _db.GetChannelsNear(lat, lon).ToList();
+        if (localChannels.Count > 0)
+        {
+            _logger.LogInformation($"Geo-Sync: Found {localChannels.Count} local channels.");
+            // Merge with static channels or replace? 
+            // For "Auto Scan", let's prioritize these.
+            _channels = localChannels; 
+            // If we are currently scanning, the new list will be picked up on the next loop or restart
+        }
+    }
+
+    private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
+    {
+        var d1 = lat1 * (Math.PI / 180.0);
+        var num1 = lon1 * (Math.PI / 180.0);
+        var d2 = lat2 * (Math.PI / 180.0);
+        var num2 = lon2 * (Math.PI / 180.0) - num1;
+        var d3 = Math.Pow(Math.Sin((d2 - d1) / 2.0), 2.0) + Math.Cos(d1) * Math.Cos(d2) * Math.Pow(Math.Sin(num2 / 2.0), 2.0);
+        return 6376500.0 * (2.0 * Math.Atan2(Math.Sqrt(d3), Math.Sqrt(1.0 - d3))) * 0.000621371;
     }
 
     public ScannerState GetState() => _state;
@@ -137,6 +185,8 @@ public class RtlDevice : BackgroundService
     {
         if (_channels.Count == 0 || _manualOverride || _state.Status == "RECEIVING") return;
 
+        _channelHits.Clear();
+        _scanStartTime = DateTime.UtcNow;
         UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0 });
 
         var min = _channels.Min(c => c.Frequency);
@@ -217,6 +267,9 @@ public class RtlDevice : BackgroundService
                 if ((DateTime.UtcNow - lastUpdate).TotalMilliseconds < 60) continue;
                 lastUpdate = DateTime.UtcNow;
 
+                // Warm-up: Skip first 500ms of data to let hardware settle
+                if ((DateTime.UtcNow - _scanStartTime).TotalMilliseconds < 500) continue;
+
                 ProcessSamples(buffer, bytesRead, centerFreqMhz, sampleRate);
             }
         }
@@ -287,7 +340,11 @@ public class RtlDevice : BackgroundService
     {
         Channel? bestChannel = null;
         double maxDetectedDb = -100;
-        double threshold = _state.Squelch ?? -55; // Use Squelch if set, else -55 default
+        
+        // Calculate average noise floor
+        double sum = 0;
+        for (int i = 0; i < fftSize; i++) sum += fftDb[i];
+        double avgNoise = sum / fftSize;
 
         foreach (var channel in _channels)
         {
@@ -296,12 +353,29 @@ public class RtlDevice : BackgroundService
 
             if (binIndex >= 0 && binIndex < fftSize)
             {
+                // DC Filter: Ignore center 3 bins
+                int centerBin = fftSize / 2;
+                if (binIndex >= centerBin - 1 && binIndex <= centerBin + 1) continue;
+
                 double db = fftDb[binIndex];
                 if (db > maxDetectedDb) maxDetectedDb = db;
 
-                if (db > threshold && (bestChannel == null || db > maxDetectedDb))
+                // SNR Requirement: Signal must be at least 15dB above average noise
+                // AND above absolute threshold
+                double snr = db - avgNoise;
+                double threshold = _state.Squelch ?? -55;
+
+                if (snr > 15 && db > threshold)
                 {
-                    bestChannel = channel;
+                    _channelHits[channel.Frequency] = _channelHits.GetValueOrDefault(channel.Frequency, 0) + 1;
+                    if (_channelHits[channel.Frequency] >= 3 && (bestChannel == null || db > maxDetectedDb))
+                    {
+                        bestChannel = channel;
+                    }
+                }
+                else
+                {
+                    _channelHits[channel.Frequency] = 0;
                 }
             }
         }
@@ -310,6 +384,7 @@ public class RtlDevice : BackgroundService
 
         if (bestChannel != null)
         {
+            _logger.LogInformation($"Detected carrier on {bestChannel.AlphaTag} (SNR: {(maxDetectedDb - avgNoise):F1}dB)");
             StopScanning();
             _recordingLockoutUntil = DateTime.UtcNow.AddSeconds(3);
             LockOn(bestChannel);
@@ -333,7 +408,7 @@ public class RtlDevice : BackgroundService
         // Safety timeout
         if (!_manualOverride)
         {
-            RestartSessionTimeout(2000); // 2s to hear something
+            RestartSessionTimeout(3000); // 3s to hear something (sync up)
         }
     }
 
@@ -347,7 +422,10 @@ public class RtlDevice : BackgroundService
         {
             if (!token.IsCancellationRequested)
             {
-                _logger.LogInformation("Session timeout, resuming scan...");
+                // If we are currently recording, don't timeout
+                if (_recordingStream != null) return;
+
+                _logger.LogInformation("Session timeout (no data), resuming scan...");
                 StopDecoding();
                 UpdateState(_state with { Status = "IDLE" });
                 StartScanning();
@@ -427,6 +505,7 @@ public class RtlDevice : BackgroundService
                             if (_recordingStream != null)
                             {
                                 await _recordingStream.WriteAsync(chunk, 0, chunk.Length, token);
+                                await _recordingStream.FlushAsync(token);
                             }
                         }
                     }
@@ -444,7 +523,9 @@ public class RtlDevice : BackgroundService
                         var line = await _decoderProcess.StandardError.ReadLineAsync(token);
                         if (line != null)
                         {
-                            if (line.Contains("Sync:") || line.Contains("Voice") || line.Contains("P25"))
+                            // Expand detection to capture more frame types
+                            if (line.Contains("Sync:") || line.Contains("Voice") || line.Contains("P25") || 
+                                line.Contains("LDU") || line.Contains("VDU") || line.Contains("TDU"))
                             {
                                 HandleActivity();
                             }
@@ -467,6 +548,11 @@ public class RtlDevice : BackgroundService
         if (_state.Status != "RECEIVING")
         {
             UpdateState(_state with { Status = "RECEIVING" });
+        }
+        
+        // Start recording if not already started
+        if (_recordingStream == null)
+        {
             StartRecording();
         }
 
@@ -498,7 +584,7 @@ public class RtlDevice : BackgroundService
 
         var filename = $"rec_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_{_state.CurrentChannel.Frequency}.raw";
         // Ensure data dir exists
-        var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../server/data/recordings");
+        var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../data/recordings");
         if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
 
         _currentRecordingPath = Path.Combine(dataDir, filename);
@@ -524,7 +610,7 @@ public class RtlDevice : BackgroundService
         
         var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - _recordingStartTime) / 1000.0;
         
-        if (duration > 2.0 && _currentRecordingPath != null && File.Exists(_currentRecordingPath) && _state.CurrentChannel != null)
+        if (duration >= 0.5 && _currentRecordingPath != null && File.Exists(_currentRecordingPath) && _state.CurrentChannel != null)
         {
              // Run Transcription
              string? transcription = null;

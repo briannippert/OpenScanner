@@ -54,12 +54,18 @@ public class Database
                 alphaTag TEXT,
                 description TEXT,
                 mode TEXT,
-                tag TEXT
+                tag TEXT,
+                lat REAL,
+                lon REAL,
+                range REAL
             );
         ");
         
         // Simple migration for existing table
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN transcription TEXT;"); } catch {}
+        try { conn.Execute("ALTER TABLE channels ADD COLUMN lat REAL;"); } catch {}
+        try { conn.Execute("ALTER TABLE channels ADD COLUMN lon REAL;"); } catch {}
+        try { conn.Execute("ALTER TABLE channels ADD COLUMN range REAL;"); } catch {}
 
         // Seed if empty
         var count = conn.ExecuteScalar<int>("SELECT count(*) FROM channels");
@@ -84,12 +90,36 @@ public class Database
         return conn.Query<Channel>("SELECT * FROM channels ORDER BY frequency ASC");
     }
 
+    public IEnumerable<Channel> GetChannelsNear(double lat, double lon)
+    {
+        using var conn = GetConnection();
+        var all = conn.Query<Channel>("SELECT * FROM channels WHERE lat IS NOT NULL AND lon IS NOT NULL");
+        
+        // Filter by distance in C# (easier than SQLite math functions)
+        return all.Where(c => 
+        {
+            if (!c.Lat.HasValue || !c.Lon.HasValue) return false;
+            double distance = CalculateDistance(lat, lon, c.Lat.Value, c.Lon.Value);
+            return distance <= (c.Range ?? 25); // Default to 25 mile range
+        }).OrderBy(c => c.Frequency);
+    }
+
+    private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
+    {
+        var d1 = lat1 * (Math.PI / 180.0);
+        var num1 = lon1 * (Math.PI / 180.0);
+        var d2 = lat2 * (Math.PI / 180.0);
+        var num2 = lon2 * (Math.PI / 180.0) - num1;
+        var d3 = Math.Pow(Math.Sin((d2 - d1) / 2.0), 2.0) + Math.Cos(d1) * Math.Cos(d2) * Math.Pow(Math.Sin(num2 / 2.0), 2.0);
+        return 6376500.0 * (2.0 * Math.Atan2(Math.Sqrt(d3), Math.Sqrt(1.0 - d3))) * 0.000621371; // result in miles
+    }
+
     public int AddChannel(Channel channel)
     {
         using var conn = GetConnection();
         return conn.ExecuteScalar<int>(@"
-            INSERT INTO channels (frequency, license, type, tone, alphaTag, description, mode, tag)
-            VALUES (@Frequency, @License, @Type, @Tone, @AlphaTag, @Description, @Mode, @Tag)
+            INSERT INTO channels (frequency, license, type, tone, alphaTag, description, mode, tag, lat, lon, range)
+            VALUES (@Frequency, @License, @Type, @Tone, @AlphaTag, @Description, @Mode, @Tag, @Lat, @Lon, @Range)
             RETURNING id", channel);
     }
 
@@ -99,7 +129,8 @@ public class Database
         conn.Execute(@"
             UPDATE channels 
             SET frequency=@Frequency, license=@License, type=@Type, tone=@Tone, 
-                alphaTag=@AlphaTag, description=@Description, mode=@Mode, tag=@Tag
+                alphaTag=@AlphaTag, description=@Description, mode=@Mode, tag=@Tag,
+                lat=@Lat, lon=@Lon, range=@Range
             WHERE id=@Id", channel);
     }
 

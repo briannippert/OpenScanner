@@ -72,10 +72,10 @@ public class GpsService : BackgroundService
         }
     }
 
-    internal void ParseSky(JsonElement root)
+    private void ParseSky(JsonElement root)
     {
         // Count satellites used in solution (u=true)
-        int sats = 0;
+        int satsUsed = 0;
         int totalSeen = 0;
         if (root.TryGetProperty("satellites", out var satellites) && satellites.ValueKind == JsonValueKind.Array)
         {
@@ -84,7 +84,7 @@ public class GpsService : BackgroundService
                 totalSeen++;
                 if (sat.TryGetProperty("used", out var used) && used.GetBoolean())
                 {
-                    sats++;
+                    satsUsed++;
                 }
             }
         }
@@ -92,16 +92,16 @@ public class GpsService : BackgroundService
         // Only update if we actually got satellite info to prevent flickering to 0
         if (totalSeen == 0) return;
 
-        _logger.LogInformation($"GPS SKY: Seen {totalSeen}, Used {sats}");
+        _logger.LogInformation($"GPS SKY: Seen {totalSeen}, Used {satsUsed}");
 
         // Update state preserving other data
         if (_lastGps != null)
         {
-            _lastGps = _lastGps with { Sats = sats };
+            _lastGps = _lastGps with { Sats = satsUsed, SatsVisible = totalSeen };
         }
         else
         {
-            _lastGps = new GpsData(0, 0, 0, 0, "", 0, sats);
+            _lastGps = new GpsData(0, 0, 0, 0, "", 0, satsUsed, totalSeen);
         }
         OnGpsUpdate?.Invoke(_lastGps);
     }
@@ -117,10 +117,11 @@ public class GpsService : BackgroundService
         double speed = root.TryGetProperty("speed", out var s) ? s.GetDouble() : 0;
         string time = root.TryGetProperty("time", out var t) ? t.GetString() ?? "" : "";
 
-        // Preserve previous satellite count
+        // Preserve previous satellite counts
         int currentSats = _lastGps?.Sats ?? 0;
+        int? currentVisible = _lastGps?.SatsVisible;
 
-        var gps = new GpsData(lat, lon, alt, speed, time, modeProp.GetInt32(), currentSats);
+        var gps = new GpsData(lat, lon, alt, speed, time, modeProp.GetInt32(), currentSats, currentVisible);
         _lastGps = gps;
         OnGpsUpdate?.Invoke(gps);
     }

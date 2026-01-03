@@ -30,6 +30,7 @@ export interface ScannerState {
         time: string;
         fix: number;
         sats: number;
+        satsVisible?: number;
     };
     manualHoldFrequency?: number;
 }

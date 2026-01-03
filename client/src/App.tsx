@@ -13,6 +13,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import UsbIcon from '@mui/icons-material/Usb';
 import UsbOffIcon from '@mui/icons-material/UsbOff';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
+import StopCircleIcon from '@mui/icons-material/StopCircle';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import type { ScannerState, Channel, CallLog } from './types';
@@ -67,8 +68,10 @@ function App() {
   const [isManagerOpen, setIsManagerOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [playingId, setPlayingId] = useState<string | null>(null);
   const ws = useRef<WebSocket | null>(null);
   const wakeLock = useRef<any>(null);
+  const activeSource = useRef<AudioBufferSourceNode | null>(null);
 
   const manualHold = scannerState.manualHoldFrequency;
 
@@ -148,8 +151,22 @@ function App() {
   const nextStartTime = useRef<number>(0);
 
   // Audio Playback Helper for recorded files
-  const playRawAudio = async (filename: string) => {
+  const playRawAudio = async (id: string, filename: string) => {
     if (!window.audioCtx) return;
+
+    if (playingId === id && activeSource.current) {
+        activeSource.current.stop();
+        activeSource.current = null;
+        setPlayingId(null);
+        return;
+    }
+
+    // Stop any current playback
+    if (activeSource.current) {
+        activeSource.current.stop();
+        activeSource.current = null;
+    }
+
     try {
         const response = await fetch(`/audio/${filename}`);
         if (!response.ok) {
@@ -168,9 +185,21 @@ function App() {
         const source = window.audioCtx.createBufferSource();
         source.buffer = buffer;
         source.connect(window.audioCtx.destination);
+        
+        activeSource.current = source;
+        setPlayingId(id);
+
+        source.onended = () => {
+            if (activeSource.current === source) {
+                activeSource.current = null;
+                setPlayingId(null);
+            }
+        };
+
         source.start();
     } catch (e) {
         console.error("Playback failed:", e);
+        setPlayingId(null);
     }
   };
 
@@ -424,9 +453,9 @@ function App() {
                 {scannerState.gps && (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mr: 3, px: 2, py: 0.5, bgcolor: '#111', borderRadius: 1, border: '1px solid #333' }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                            <SatelliteAltIcon sx={{ fontSize: 16, color: scannerState.gps.sats > 0 ? 'primary.main' : '#444' }} />
+                            <SatelliteAltIcon sx={{ fontSize: 16, color: (scannerState.gps.satsVisible || 0) > 0 ? 'primary.main' : '#444' }} />
                             <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'white' }}>
-                                {scannerState.gps.sats} SATS
+                                {scannerState.gps.sats}{scannerState.gps.satsVisible ? `/${scannerState.gps.satsVisible}` : ''} SATS
                             </Typography>
                         </Box>
                         
@@ -478,8 +507,8 @@ function App() {
         </AppBar>
 
         {/* Main Content Dashboard */}
-        <Box sx={{ flexGrow: 1, p: 2, height: '100%', overflow: 'hidden' }}>
-            <Grid container spacing={2} sx={{ height: '100%' }}>
+        <Box sx={{ flexGrow: 1, p: 2, height: '100%', overflowY: { xs: 'auto', md: 'hidden' } }}>
+            <Grid container spacing={2} sx={{ height: { xs: 'auto', md: '100%' } }}>
                 
                 {/* Left Column: Active Scanner & Channel Grid (Compact) */}
                 <Grid size={{ xs: 12, md: 4, lg: 3 }} sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -546,8 +575,8 @@ function App() {
                 </Grid>
 
                 {/* Right Column: Transmission Log (Expanded) */}
-                <Grid size={{ xs: 12, md: 8, lg: 9 }} sx={{ height: '100%' }}>
-                    <Paper sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: '#0a0a0a', border: '1px solid #222', borderRadius: 2 }}>
+                <Grid size={{ xs: 12, md: 8, lg: 9 }} sx={{ height: '100%', overflow: 'hidden' }}>
+                    <Paper sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: '#0a0a0a', border: '1px solid #222', borderRadius: 2, overflowY: 'auto' }}>
                         <Box sx={{ p: 2, borderBottom: '1px solid #222' }} display="flex" alignItems="center" gap={1}>
                             <HistoryIcon color="primary" fontSize="small" />
                             <Typography variant="subtitle2" fontWeight="bold" color="text.secondary">TRANSMISSION LOG</Typography>
@@ -571,8 +600,11 @@ function App() {
                                         secondaryAction={
                                             <Box sx={{ display: 'flex', gap: 0.5 }}>
                                                 {log.audio_path && (
-                                                    <IconButton size="small" onClick={() => playRawAudio(log.audio_path!)}>
-                                                        <PlayCircleOutlineIcon sx={{ color: 'primary.main', fontSize: 22 }} />
+                                                    <IconButton size="small" onClick={() => playRawAudio(log.id, log.audio_path!)}>
+                                                        {playingId === log.id 
+                                                            ? <StopCircleIcon sx={{ color: 'error.main', fontSize: 22 }} />
+                                                            : <PlayCircleOutlineIcon sx={{ color: 'primary.main', fontSize: 22 }} />
+                                                        }
                                                     </IconButton>
                                                 )}
                                                 <IconButton size="small" onClick={() => deleteEntry(log.id)}>

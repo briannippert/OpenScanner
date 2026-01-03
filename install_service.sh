@@ -53,7 +53,7 @@ if git remote get-url origin &> /dev/null; then
     # Fix ownership before pulling to avoid permission errors
     chown -R "$REAL_USER":"$REAL_USER" "$PROJECT_ROOT/.git"
     
-    if sudo -u "$REAL_USER" git pull origin master; then
+    if sudo -u "$REAL_USER" git pull origin main; then
         log_success "Code pulled successfully."
     else
         log_warn "Git pull failed. Continuing with local files..."
@@ -154,7 +154,7 @@ fi
 cd "$PROJECT_ROOT"
 
 # Configure GPSD
-log_info "Configuring GPSD..."
+log_step "Configuring GPSD..."
 if [ ! -f /etc/default/gpsd ]; then
     cat <<EOF > /etc/default/gpsd
 START_DAEMON="true"

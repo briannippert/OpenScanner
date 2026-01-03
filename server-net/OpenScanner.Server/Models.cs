@@ -13,6 +13,9 @@ public class Channel
     public string Tone { get; set; } = string.Empty;
     public string Tag { get; set; } = string.Empty;
     public string License { get; set; } = string.Empty;
+    public double? Lat { get; set; }
+    public double? Lon { get; set; }
+    public double? Range { get; set; } // in miles
 
     public Channel() { }
 
@@ -71,7 +74,8 @@ public record GpsData(
     double Speed,
     string Time,
     int Fix,
-    int Sats
+    int Sats,
+    int? SatsVisible = null
 );
 
 public record SpectrumPoint(double Frequency, double Db);
