@@ -44,12 +44,15 @@ public class DatabaseTests : IDisposable
     [Fact]
     public void SaveTransmission_ShouldPersistLog()
     {
-        var log = new CallLog("test_id", DateTime.UtcNow.ToString("o"), 155.0, "Tag", "Desc", 45.0, -122.0, "audio.raw", 5.0, "Test transcription");
+        var log = new CallLog("test_id", DateTime.UtcNow.ToString("o"), 155.0, "Tag", "Desc", 45.0, -122.0, "audio.raw", 5.0, "Test transcription", 1234, 5678);
         _db.SaveTransmission(log);
 
         var history = _db.GetHistory(1);
         Assert.Single(history);
-        Assert.Equal("Test transcription", history.First().Transcription);
+        var entry = history.First();
+        Assert.Equal("Test transcription", entry.Transcription);
+        Assert.Equal(1234, entry.SourceID);
+        Assert.Equal(5678, entry.TargetID);
     }
 
     public void Dispose()
