@@ -53,12 +53,6 @@ For API documentation, visit:
 - **View Logs**: `journalctl -u openscanner -f`
 - **Data Location**: Database and recordings are stored in the `/data` directory in the project root.
 
-## Roadmap
-
-- [ ] **Multi-SDR Support**: Rapid trunking by dedicated SDR for Control Channel.
-- [ ] **Talkgroup Aliasing**: Name digital IDs (e.g., "101" -> "Main Dispatch").
-- [ ] **Mobile PWA**: "Install to Home Screen" support for mobile devices.
-
 ## Acknowledgments
 
 - [DSD-FME](https://github.com/lwvmobile/dsd-fme): Digital voice decoding.
