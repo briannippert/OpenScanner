@@ -33,6 +33,7 @@ export interface ScannerState {
         satsVisible?: number;
     };
     manualHoldFrequency?: number;
+    lastTranscription?: string;
 }
 
 export interface CallLog {

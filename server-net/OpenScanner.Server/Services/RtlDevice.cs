@@ -623,6 +623,11 @@ public class RtlDevice : BackgroundService
                  _logger.LogError(ex, "Transcription failed");
              }
 
+             if (!string.IsNullOrEmpty(transcription))
+             {
+                 UpdateState(_state with { LastTranscription = transcription });
+             }
+
              var log = new CallLog(
                  $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
                  DateTime.UtcNow.ToString("o"),
@@ -696,9 +701,32 @@ public class RtlDevice : BackgroundService
             WorkingDirectory = whisperRoot
         };
 
-        using (var proc = Process.Start(whisperStart))
+        try
         {
-            proc?.WaitForExit();
+            using var proc = Process.Start(whisperStart);
+            if (proc != null)
+            {
+                // Capture stderr to see what whisper is doing
+                var stderrTask = proc.StandardError.ReadToEndAsync();
+                
+                if (!proc.WaitForExit(30000)) // 30s timeout
+                {
+                    _logger.LogWarning("Whisper timed out");
+                    proc.Kill();
+                }
+                else
+                {
+                    var stderr = stderrTask.Result;
+                    if (!string.IsNullOrEmpty(stderr))
+                    {
+                        // _logger.LogDebug($"Whisper Stderr: {stderr}");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error running Whisper process");
         }
 
         File.Delete(wavPath); // Clean up WAV
@@ -708,6 +736,8 @@ public class RtlDevice : BackgroundService
         {
             var text = File.ReadAllText(txtPath).Trim();
             File.Delete(txtPath);
+            // Whisper sometimes outputs [BLANK_AUDIO] or metadata in brackets
+            if (text.StartsWith("[") && text.EndsWith("]")) return null;
             return string.IsNullOrEmpty(text) ? null : text;
         }
 

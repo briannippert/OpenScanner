@@ -152,7 +152,13 @@ function App() {
 
   // Audio Playback Helper for recorded files
   const playRawAudio = async (id: string, filename: string) => {
-    if (!window.audioCtx) return;
+    if (!window.audioCtx) {
+        window.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
+    }
+    
+    if (window.audioCtx.state === 'suspended') {
+        await window.audioCtx.resume();
+    }
 
     if (playingId === id && activeSource.current) {
         activeSource.current.stop();
@@ -175,11 +181,14 @@ function App() {
         }
         const arrayBuffer = await response.arrayBuffer();
         const int16Array = new Int16Array(arrayBuffer);
+        console.log(`Playing audio: ${filename}, size: ${int16Array.length} samples`);
+        
         const float32Array = new Float32Array(int16Array.length);
         for (let i = 0; i < int16Array.length; i++) {
             float32Array[i] = int16Array[i] / 32768;
         }
 
+        // Recorded files are 8000Hz s16le
         const buffer = window.audioCtx.createBuffer(1, float32Array.length, 8000);
         buffer.copyToChannel(float32Array, 0);
         const source = window.audioCtx.createBufferSource();

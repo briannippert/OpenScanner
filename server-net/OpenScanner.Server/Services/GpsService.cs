@@ -9,6 +9,7 @@ public class GpsService : BackgroundService
 {
     private readonly ILogger<GpsService> _logger;
     private GpsData? _lastGps;
+    private DateTime _lastUpdate = DateTime.MinValue;
 
     public event Action<GpsData>? OnGpsUpdate;
 
@@ -17,7 +18,12 @@ public class GpsService : BackgroundService
         _logger = logger;
     }
 
-    public GpsData? GetLastLocation() => _lastGps;
+    public GpsData? GetLastLocation() 
+    {
+        // If data is older than 10 seconds, consider it stale
+        if (DateTime.UtcNow - _lastUpdate > TimeSpan.FromSeconds(10)) return null;
+        return _lastGps;
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -36,6 +42,9 @@ public class GpsService : BackgroundService
 
                 // Enable JSON streaming
                 await writer.WriteLineAsync("?WATCH={\"enable\":true,\"json\":true}");
+
+                // Request 10Hz update rate (0.1s cycle)
+                await writer.WriteLineAsync("?DEVICE={\"native\":1,\"cycle\":0.1}"); 
 
                 while (client.Connected && !stoppingToken.IsCancellationRequested)
                 {
@@ -116,13 +125,18 @@ public class GpsService : BackgroundService
         double alt = root.TryGetProperty("alt", out var a) ? a.GetDouble() : (_lastGps?.Alt ?? 0);
         double speed = root.TryGetProperty("speed", out var s) ? s.GetDouble() : 0;
         string time = root.TryGetProperty("time", out var t) ? t.GetString() ?? "" : "";
+        
+        // Horizontal Dilution of Precision
+        double? hdop = null;
+        if (root.TryGetProperty("hdop", out var h)) hdop = h.GetDouble();
 
         // Preserve previous satellite counts
         int currentSats = _lastGps?.Sats ?? 0;
         int? currentVisible = _lastGps?.SatsVisible;
 
-        var gps = new GpsData(lat, lon, alt, speed, time, modeProp.GetInt32(), currentSats, currentVisible);
+        var gps = new GpsData(lat, lon, alt, speed, time, modeProp.GetInt32(), currentSats, currentVisible, hdop);
         _lastGps = gps;
+        _lastUpdate = DateTime.UtcNow;
         OnGpsUpdate?.Invoke(gps);
     }
 }

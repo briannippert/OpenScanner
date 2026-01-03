@@ -155,6 +155,33 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                     {(state.status === 'RECEIVING' || state.status === 'MONITORING') && analyser && (
                         <AudioSpectrogram analyser={analyser} height={60} />
                     )}
+
+                    {/* Transcription Overlay */}
+                    {state.lastTranscription && (
+                        <Box sx={{ 
+                            width: '100%', 
+                            p: 1.5, 
+                            bgcolor: 'rgba(0,0,0,0.6)', 
+                            borderRadius: 1, 
+                            border: '1px solid #333',
+                            mt: 1,
+                            minHeight: 40,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            textAlign: 'center'
+                        }}>
+                            <Typography variant="body2" sx={{ 
+                                color: '#00ff00', 
+                                fontStyle: 'italic',
+                                fontFamily: 'monospace',
+                                fontSize: '0.9rem',
+                                textShadow: '0 0 5px rgba(0,255,0,0.3)'
+                            }}>
+                                "{state.lastTranscription}"
+                            </Typography>
+                        </Box>
+                    )}
                 </Box>
                 {/* Signal Bar Bottom */}
                 <Box mt={1}>

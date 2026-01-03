@@ -36,7 +36,8 @@ app.UseSwaggerUi(config =>
 });
 
 // Static Files (Frontend)
-var clientDistPath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "../../client/dist"));
+var cwd = Directory.GetCurrentDirectory();
+var clientDistPath = Path.GetFullPath(Path.Combine(cwd, "../../client/dist"));
 if (Directory.Exists(clientDistPath))
 {
     app.UseStaticFiles(new StaticFileOptions
@@ -47,7 +48,7 @@ if (Directory.Exists(clientDistPath))
 }
 
 // Static Files (Audio Recordings)
-var recordingsPath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "../../data/recordings"));
+var recordingsPath = Path.GetFullPath(Path.Combine(cwd, "../../data/recordings"));
 if (!Directory.Exists(recordingsPath)) Directory.CreateDirectory(recordingsPath);
 
 var provider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
@@ -162,9 +163,10 @@ app.Map("/ws", async (HttpContext context) =>
 // SPA Fallback
 app.MapFallback(async context =>
 {
-    if (File.Exists(Path.Combine(clientDistPath, "index.html")))
+    var indexPath = Path.Combine(cwd, "../../client/dist/index.html");
+    if (File.Exists(indexPath))
     {
-        await context.Response.SendFileAsync(Path.Combine(clientDistPath, "index.html"));
+        await context.Response.SendFileAsync(indexPath);
     }
     else
     {

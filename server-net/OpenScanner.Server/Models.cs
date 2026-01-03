@@ -75,7 +75,8 @@ public record GpsData(
     string Time,
     int Fix,
     int Sats,
-    int? SatsVisible = null
+    int? SatsVisible = null,
+    double? Hdop = null
 );
 
 public record SpectrumPoint(double Frequency, double Db);
@@ -93,5 +94,6 @@ public record ScannerState(
     string? DevicePort = null,
     SpectrumPoint[]? RfSpectrum = null,
     GpsData? Gps = null,
-    double? ManualHoldFrequency = null
+    double? ManualHoldFrequency = null,
+    string? LastTranscription = null
 );
