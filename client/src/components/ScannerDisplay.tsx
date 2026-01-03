@@ -25,7 +25,7 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
         if (state.status === 'SCANNING' && channels.length > 0) {
             const interval = setInterval(() => {
                 setScanIndex(prev => (prev + 1) % channels.length);
-            }, 80); // Fast cycle
+            }, 500); // Half-second cycle
             return () => clearInterval(interval);
         }
     }, [state.status, channels]);

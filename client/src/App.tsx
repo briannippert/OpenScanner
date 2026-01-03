@@ -635,11 +635,19 @@ function App() {
                                                         <span>{log.frequency} MHz</span>
                                                         <span>{new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                     </Typography>
-                                                    {log.lat && (
-                                                        <Typography variant="caption" sx={{ color: '#444', fontSize: '9px', display: 'block' }}>
-                                                            LOC: {log.lat.toFixed(3)}, {log.lon!.toFixed(3)} • {log.duration?.toFixed(1)}s
-                                                        </Typography>
-                                                    )}
+                                                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                                                        {log.lat && (
+                                                            <Typography variant="caption" sx={{ color: '#444', fontSize: '9px' }}>
+                                                                LOC: {log.lat.toFixed(3)}, {log.lon!.toFixed(3)}
+                                                            </Typography>
+                                                        )}
+                                                        {log.lat && log.duration && <Typography variant="caption" sx={{ color: '#333', fontSize: '9px' }}>•</Typography>}
+                                                        {log.duration && (
+                                                            <Typography variant="caption" sx={{ color: '#444', fontSize: '9px' }}>
+                                                                {log.duration.toFixed(1)}s
+                                                            </Typography>
+                                                        )}
+                                                    </Box>
                                                     {log.transcription && (
                                                         <Typography variant="body2" sx={{ color: '#aaa', fontStyle: 'italic', mt: 0.5, fontSize: '11px', borderLeft: '2px solid #333', pl: 1 }}>
                                                             "{log.transcription}"
