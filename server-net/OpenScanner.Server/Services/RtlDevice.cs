@@ -76,7 +76,13 @@ public class RtlDevice : BackgroundService
     {
         StopScanning();
         StopDecoding();
-        UpdateState(_state with { Status = "IDLE", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0 });
+        UpdateState(_state with { 
+            Status = "IDLE", 
+            CurrentFrequency = null, 
+            CurrentChannel = null, 
+            SignalStrength = 0,
+            ManualHoldFrequency = null
+        });
     }
 
     public void HoldFrequency(double freq)
@@ -91,6 +97,7 @@ public class RtlDevice : BackgroundService
         StopDecoding();
 
         _recordingLockoutUntil = DateTime.UtcNow.AddSeconds(3);
+        UpdateState(_state with { ManualHoldFrequency = freq });
         LockOn(channel);
     }
 
@@ -101,6 +108,7 @@ public class RtlDevice : BackgroundService
         
         StopDecoding();
         _recordingLockoutUntil = DateTime.UtcNow.AddSeconds(3);
+        UpdateState(_state with { ManualHoldFrequency = null });
         
         // Small delay to let hardware settle
         Task.Delay(500).ContinueWith(_ => StartScanning());
@@ -396,25 +404,30 @@ public class RtlDevice : BackgroundService
             var token = _decodeCts.Token;
             Task.Run(async () => 
             {
-                var buffer = new byte[4096];
+                var readBuffer = new byte[4096];
+                var sendBuffer = new List<byte>(8192);
                 var stream = _decoderProcess.StandardOutput.BaseStream;
                 try
                 {
                     while (!token.IsCancellationRequested)
                     {
-                        var read = await stream.ReadAsync(buffer, 0, buffer.Length, token);
+                        var read = await stream.ReadAsync(readBuffer, 0, readBuffer.Length, token);
                         if (read == 0) break;
 
-                        var chunk = new byte[read];
-                        Array.Copy(buffer, chunk, read);
-                        
-                        // Stream to clients
-                        OnAudio?.Invoke(chunk);
+                        for (int i = 0; i < read; i++) sendBuffer.Add(readBuffer[i]);
 
-                        // Write to recording
-                        if (_recordingStream != null)
+                        // Send in consistent 4096 byte chunks (~250ms)
+                        while (sendBuffer.Count >= 4096)
                         {
-                            await _recordingStream.WriteAsync(chunk, 0, chunk.Length, token);
+                            var chunk = sendBuffer.Take(4096).ToArray();
+                            sendBuffer.RemoveRange(0, 4096);
+                            
+                            OnAudio?.Invoke(chunk);
+
+                            if (_recordingStream != null)
+                            {
+                                await _recordingStream.WriteAsync(chunk, 0, chunk.Length, token);
+                            }
                         }
                     }
                 }
@@ -513,6 +526,17 @@ public class RtlDevice : BackgroundService
         
         if (duration > 2.0 && _currentRecordingPath != null && File.Exists(_currentRecordingPath) && _state.CurrentChannel != null)
         {
+             // Run Transcription
+             string? transcription = null;
+             try 
+             {
+                 transcription = TranscribeAudio(_currentRecordingPath);
+             }
+             catch (Exception ex)
+             {
+                 _logger.LogError(ex, "Transcription failed");
+             }
+
              var log = new CallLog(
                  $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
                  DateTime.UtcNow.ToString("o"),
@@ -522,11 +546,12 @@ public class RtlDevice : BackgroundService
                  _state.Gps?.Lat,
                  _state.Gps?.Lon,
                  Path.GetFileName(_currentRecordingPath),
-                 duration
+                 duration,
+                 transcription
              );
 
              _db.SaveTransmission(log);
-             _logger.LogInformation($"Saved transmission: {duration:F1}s");
+             _logger.LogInformation($"Saved transmission: {duration:F1}s | Text: {transcription}");
              OnNewLog?.Invoke(log);
         }
         else if (_currentRecordingPath != null)
@@ -535,5 +560,71 @@ public class RtlDevice : BackgroundService
         }
         
         _currentRecordingPath = null;
+    }
+
+    private string? TranscribeAudio(string rawPath)
+    {
+        var wavPath = Path.ChangeExtension(rawPath, ".wav");
+        var projectRoot = Directory.GetCurrentDirectory(); // server-net/OpenScanner.Server
+        // Adjust path to whisper.cpp relative to execution context
+        // Execution: /home/brian/radio/OpenScanner/server-net/OpenScanner.Server
+        // Whisper: /home/brian/radio/OpenScanner/whisper.cpp
+        var whisperRoot = Path.GetFullPath(Path.Combine(projectRoot, "../../whisper.cpp"));
+        var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");
+        var modelPath = Path.Combine(whisperRoot, "models/ggml-tiny.en.bin");
+
+        if (!File.Exists(whisperBin) || !File.Exists(modelPath))
+        {
+            _logger.LogWarning($"Whisper not found at {whisperBin}");
+            return null;
+        }
+
+        // 1. Convert RAW (8k s16le) to WAV (16k)
+        var ffmpegArgs = $"-f s16le -ar 8000 -ac 1 -i \"{rawPath}\" -ar 16000 -ac 1 \"{wavPath}\" -y";
+        var convertStart = new ProcessStartInfo("ffmpeg", ffmpegArgs)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        
+        using (var proc = Process.Start(convertStart))
+        {
+            proc?.WaitForExit();
+        }
+
+        if (!File.Exists(wavPath)) return null;
+
+        // 2. Run Whisper with Radio Context
+        // Prompt helps Whisper bias towards radio terminology and style
+        var prompt = "Police radio dispatch. 10-4 copy that. Suspect vehicle description. Fire department responding. EMS on scene. Traffic stop. Code 3.";
+        var whisperArgs = $"-m \"{modelPath}\" -f \"{wavPath}\" -nt -otxt -l en -p \"{prompt}\""; 
+        
+        var whisperStart = new ProcessStartInfo(whisperBin, whisperArgs)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = whisperRoot
+        };
+
+        using (var proc = Process.Start(whisperStart))
+        {
+            proc?.WaitForExit();
+        }
+
+        File.Delete(wavPath); // Clean up WAV
+
+        var txtPath = wavPath + ".txt";
+        if (File.Exists(txtPath))
+        {
+            var text = File.ReadAllText(txtPath).Trim();
+            File.Delete(txtPath);
+            return string.IsNullOrEmpty(text) ? null : text;
+        }
+
+        return null;
     }
 }

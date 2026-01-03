@@ -1,0 +1,8 @@
+npm error code ENOENT
+npm error syscall open
+npm error path /home/brian/radio/OpenScanner/package.json
+npm error errno -2
+npm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open '/home/brian/radio/OpenScanner/package.json'
+npm error enoent This is related to npm not being able to find a file.
+npm error enoent
+npm error A complete log of this run can be found in: /home/brian/.npm/_logs/2026-01-01T16_09_36_588Z-debug-0.log

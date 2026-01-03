@@ -47,9 +47,14 @@ public class GpsService : BackgroundService
                         var json = JsonDocument.Parse(line);
                         if (json.RootElement.TryGetProperty("class", out var cls))
                         {
-                            if (cls.GetString() == "TPV")
+                            var type = cls.GetString();
+                            if (type == "TPV")
                             {
                                 ParseTpv(json.RootElement);
+                            }
+                            else if (type == "SKY")
+                            {
+                                ParseSky(json.RootElement);
                             }
                         }
                     }
@@ -67,18 +72,55 @@ public class GpsService : BackgroundService
         }
     }
 
+    private void ParseSky(JsonElement root)
+    {
+        // Count satellites used in solution (u=true)
+        int sats = 0;
+        int totalSeen = 0;
+        if (root.TryGetProperty("satellites", out var satellites) && satellites.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var sat in satellites.EnumerateArray())
+            {
+                totalSeen++;
+                if (sat.TryGetProperty("used", out var used) && used.GetBoolean())
+                {
+                    sats++;
+                }
+            }
+        }
+
+        // Only update if we actually got satellite info to prevent flickering to 0
+        if (totalSeen == 0) return;
+
+        _logger.LogInformation($"GPS SKY: Seen {totalSeen}, Used {sats}");
+
+        // Update state preserving other data
+        if (_lastGps != null)
+        {
+            _lastGps = _lastGps with { Sats = sats };
+        }
+        else
+        {
+            _lastGps = new GpsData(0, 0, 0, 0, "", 0, sats);
+        }
+        OnGpsUpdate?.Invoke(_lastGps);
+    }
+
     private void ParseTpv(JsonElement root)
     {
         // "mode": 2 (2D), 3 (3D)
         if (!root.TryGetProperty("mode", out var modeProp) || modeProp.GetInt32() < 2) return;
         
-        double lat = root.TryGetProperty("lat", out var l) ? l.GetDouble() : 0;
-        double lon = root.TryGetProperty("lon", out var ln) ? ln.GetDouble() : 0;
-        double alt = root.TryGetProperty("alt", out var a) ? a.GetDouble() : 0;
+        double lat = root.TryGetProperty("lat", out var l) ? l.GetDouble() : (_lastGps?.Lat ?? 0);
+        double lon = root.TryGetProperty("lon", out var ln) ? ln.GetDouble() : (_lastGps?.Lon ?? 0);
+        double alt = root.TryGetProperty("alt", out var a) ? a.GetDouble() : (_lastGps?.Alt ?? 0);
         double speed = root.TryGetProperty("speed", out var s) ? s.GetDouble() : 0;
         string time = root.TryGetProperty("time", out var t) ? t.GetString() ?? "" : "";
 
-        var gps = new GpsData(lat, lon, alt, speed, time, modeProp.GetInt32(), 0);
+        // Preserve previous satellite count
+        int currentSats = _lastGps?.Sats ?? 0;
+
+        var gps = new GpsData(lat, lon, alt, speed, time, modeProp.GetInt32(), currentSats);
         _lastGps = gps;
         OnGpsUpdate?.Invoke(gps);
     }

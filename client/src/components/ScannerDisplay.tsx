@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Typography, Paper, LinearProgress, Chip, Slider, Stack } from '@mui/material';
+import { Box, Typography, Paper, LinearProgress, Chip } from '@mui/material';
 import type { ScannerState, Channel } from '../types';
 import RadioIcon from '@mui/icons-material/Radio';
 import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import TuneIcon from '@mui/icons-material/Tune';
 import AudioSpectrogram from './AudioSpectrogram';
 import VuMeter from './VuMeter';
 
@@ -13,28 +12,12 @@ interface Props {
     analyser?: AnalyserNode;
     onScan?: () => void;
     channels?: Channel[];
-    onSquelchChange?: (val: number) => void;
 }
 
-const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [], onSquelchChange }) => {
+const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [] }) => {
     const isReceiving = state.status === 'RECEIVING';
     const activeColor = isReceiving ? '#00ff00' : '#555';
     
-    // Local state for smooth slider dragging
-    const [squelchVal, setSquelchVal] = useState<number>(state.squelch || -40);
-
-    useEffect(() => {
-        if (state.squelch !== undefined) {
-            setSquelchVal(state.squelch);
-        }
-    }, [state.squelch]);
-
-    const handleSquelchCommit = (_event: Event | React.SyntheticEvent, value: number | number[]) => {
-        if (onSquelchChange) {
-            onSquelchChange(value as number);
-        }
-    };
-
     // Virtual display state for scanning animation
     const [scanIndex, setScanIndex] = useState(0);
 
@@ -61,7 +44,7 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
         <Paper 
             elevation={6} 
             sx={{ 
-                p: 4, 
+                p: 2, 
                 bgcolor: '#0a0a0a', 
                 color: '#fff', 
                 borderRadius: 2,
@@ -117,36 +100,38 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                 </Box>
 
                 {/* Main Frequency Display */}
-                <Box py={4} sx={{ 
+                <Box py={1} sx={{ 
                     borderTop: '1px solid #222', 
                     borderBottom: '1px solid #222', 
-                    my: 2, 
+                    mb: 1, 
                     bgcolor: '#0f0f0f', 
                     display: 'flex', 
-                    flexDirection: { xs: 'column', md: 'row' },
+                    flexDirection: 'row',
                     alignItems: 'center', 
                     justifyContent: 'center', 
-                    gap: 4 
+                    gap: 2 
                 }}>
                     <Box textAlign="center">
-                        <Typography variant="h1" sx={{ 
+                        <Typography variant="h3" sx={{ 
                             fontFamily: 'monospace', 
                             fontWeight: 700, 
                             color: activeColor,
                             textShadow: isReceiving ? '0 0 10px rgba(0,255,0,0.5)' : 'none',
-                            fontSize: { xs: '3rem', md: '5rem' }
+                            fontSize: { xs: '2rem', md: '3rem' }
                         }}>
                             {displayFreq ? displayFreq.toFixed(4) : '---.----'}
                         </Typography>
-                        <Box display="flex" justifyContent="center" gap={2} alignItems="center">
-                            <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 4 }}>
-                                MEGAHERTZ
+                        <Box display="flex" justifyContent="center" gap={1} alignItems="center">
+                            <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: 2 }}>
+                                MHz
                             </Typography>
                             {displayAlpha && (
                                 <Chip 
                                     label={displayAlpha} 
                                     size="small" 
                                     sx={{ 
+                                        height: 20,
+                                        fontSize: '0.7rem',
                                         bgcolor: 'rgba(255,255,255,0.1)', 
                                         color: '#aaa', 
                                         fontFamily: 'monospace' 
@@ -159,20 +144,20 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                     {/* VU Meter (Only when receiving) */}
                     {isReceiving && analyser && (
                         <Box>
-                             <VuMeter analyser={analyser} height={100} width={15} />
+                             <VuMeter analyser={analyser} height={60} width={10} />
                         </Box>
                     )}
                 </Box>
 
                 {/* Visualizers */}
-                <Box sx={{ mt: 3, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
                     {/* Audio Waterfall (Heatmap during receive or monitoring) */}
                     {(state.status === 'RECEIVING' || state.status === 'MONITORING') && analyser && (
-                        <AudioSpectrogram analyser={analyser} height={200} />
+                        <AudioSpectrogram analyser={analyser} height={60} />
                     )}
                 </Box>
                 {/* Signal Bar Bottom */}
-                <Box mt={3}>
+                <Box mt={1}>
                     <LinearProgress 
                         variant="determinate" 
                         value={state.signalStrength} 
@@ -185,46 +170,6 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                             }
                         }} 
                     />
-                </Box>
-
-                {/* Squelch Control */}
-                <Box mt={2} px={2} display="flex" alignItems="center" gap={2}>
-                    <Stack direction="row" spacing={2} sx={{ width: '100%' }} alignItems="center">
-                        <TuneIcon sx={{ color: '#666', fontSize: 20 }} />
-                        <Typography variant="caption" sx={{ color: '#888', minWidth: 60 }}>
-                            SQL {squelchVal}dB
-                        </Typography>
-                        <Slider
-                            value={squelchVal}
-                            min={-90}
-                            max={40}
-                            step={1}
-                            onChange={(_, val) => setSquelchVal(val as number)}
-                            onChangeCommitted={handleSquelchCommit}
-                            sx={{
-                                color: '#00ff00',
-                                '& .MuiSlider-thumb': {
-                                    width: 12,
-                                    height: 12,
-                                    '&:hover, &.Mui-focusVisible': {
-                                        boxShadow: '0 0 0 8px rgba(0, 255, 0, 0.16)',
-                                    },
-                                },
-                                '& .MuiSlider-rail': {
-                                    opacity: 0.2,
-                                },
-                            }}
-                        />
-                         {state.currentSignalDb !== undefined && (
-                            <Chip 
-                                label={`${state.currentSignalDb.toFixed(1)} dB`} 
-                                size="small" 
-                                variant="outlined" 
-                                color={state.currentSignalDb > squelchVal ? "success" : "default"}
-                                sx={{ height: 24, fontSize: '0.7rem', minWidth: 70 }}
-                            />
-                        )}
-                    </Stack>
                 </Box>
             </Box>
             

@@ -45,3 +45,4 @@ obj/
 *.suo
 *.userprefs
 
+whisper.cpp/

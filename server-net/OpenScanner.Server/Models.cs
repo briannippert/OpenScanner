@@ -44,10 +44,12 @@ public class CallLog
     public string? AudioPath { get; set; }
     
     public double? Duration { get; set; }
+    
+    public string? Transcription { get; set; }
 
     public CallLog() { }
 
-    public CallLog(string id, string timestamp, double frequency, string alphaTag, string description, double? lat, double? lon, string? audioPath, double? duration)
+    public CallLog(string id, string timestamp, double frequency, string alphaTag, string description, double? lat, double? lon, string? audioPath, double? duration, string? transcription = null)
     {
         Id = id;
         Timestamp = timestamp;
@@ -58,6 +60,7 @@ public class CallLog
         Lon = lon;
         AudioPath = audioPath;
         Duration = duration;
+        Transcription = transcription;
     }
 }
 
@@ -85,5 +88,6 @@ public record ScannerState(
     string? DeviceName = null,
     string? DevicePort = null,
     SpectrumPoint[]? RfSpectrum = null,
-    GpsData? Gps = null
+    GpsData? Gps = null,
+    double? ManualHoldFrequency = null
 );

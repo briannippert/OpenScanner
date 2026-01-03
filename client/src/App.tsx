@@ -63,12 +63,14 @@ function App() {
   const [scannerState, setScannerState] = useState<ScannerState>({ status: 'IDLE', signalStrength: 0 });
   const [channels, setChannels] = useState<Channel[]>([]);
   const [callLog, setCallLog] = useState<CallLog[]>([]);
-  const [manualHold, setManualHold] = useState<number | null>(null);
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | undefined>(undefined);
   const [isManagerOpen, setIsManagerOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
   const ws = useRef<WebSocket | null>(null);
   const wakeLock = useRef<any>(null);
+
+  const manualHold = scannerState.manualHoldFrequency;
 
   // Wake Lock Manager
   useEffect(() => {
@@ -137,10 +139,8 @@ function App() {
       }
 
       if (manualHold === ch.frequency) {
-          setManualHold(null);
           sendCommand('scan');
       } else {
-          setManualHold(ch.frequency);
           sendCommand('hold', ch.frequency);
       }
   };
@@ -152,6 +152,10 @@ function App() {
     if (!window.audioCtx) return;
     try {
         const response = await fetch(`/audio/${filename}`);
+        if (!response.ok) {
+            console.error(`Failed to load audio: ${response.status} ${response.statusText}`);
+            return;
+        }
         const arrayBuffer = await response.arrayBuffer();
         const int16Array = new Int16Array(arrayBuffer);
         const float32Array = new Float32Array(int16Array.length);
@@ -259,7 +263,82 @@ function App() {
       .then(data => setCallLog(data))
       .catch(err => console.error("Failed to fetch history:", err));
 
-    ws.current = new WebSocket(wsUrl);
+    const connectWs = () => {
+        ws.current = new WebSocket(wsUrl);
+        
+        ws.current.onopen = () => {
+            setIsConnected(true);
+            console.log("WebSocket Connected");
+        };
+
+        ws.current.onclose = () => {
+            setIsConnected(false);
+            console.log("WebSocket Disconnected, retrying in 3s...");
+            setTimeout(connectWs, 3000);
+        };
+
+        ws.current.onmessage = async (event) => {
+          if (event.data instanceof Blob) {
+            // Handle Audio
+            // console.log("Audio Packet Received:", event.data.size, "bytes");
+            const arrayBuffer = await event.data.arrayBuffer();
+            const int16Array = new Int16Array(arrayBuffer);
+            const float32Array = new Float32Array(int16Array.length);
+            for (let i = 0; i < int16Array.length; i++) {
+                float32Array[i] = int16Array[i] / 32768;
+            }
+            
+            if (!window.audioCtx) {
+                window.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
+                const analyser = window.audioCtx.createAnalyser();
+                analyser.fftSize = 1024;
+                analyser.connect(window.audioCtx.destination);
+                setAudioAnalyser(analyser);
+                (window.audioCtx as any)._analyser = analyser;
+            }
+            
+            const ctx = window.audioCtx;
+            if (ctx.state === 'suspended') ctx.resume();
+            const analyser = (ctx as any)._analyser;
+
+            const audioBuffer = ctx.createBuffer(1, float32Array.length, 8000);
+            audioBuffer.copyToChannel(float32Array, 0);
+
+            const source = ctx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(analyser);
+            
+            // Scheduler to prevent crackling/overlaps
+            const currentTime = ctx.currentTime;
+            const JITTER_BUFFER = 0.35; // 350ms buffer for stability
+
+            if (nextStartTime.current < currentTime) {
+                nextStartTime.current = currentTime + JITTER_BUFFER;
+            }
+            
+            source.start(nextStartTime.current);
+            nextStartTime.current += audioBuffer.duration;
+          } else {
+            // Handle JSON
+            try {
+                const message = JSON.parse(event.data);
+                if (message.type === 'STATE_UPDATE') {
+                  const newState = message.payload as ScannerState;
+                  setScannerState(newState);
+                } else if (message.type === 'NEW_LOG') {
+                  const newEntry = message.payload as CallLog;
+                  setCallLog(log => [newEntry, ...log].slice(0, 100));
+                } else if (message.type === 'ERROR') {
+                  setErrorMsg(message.payload);
+                }
+            } catch (e) {
+                console.warn('Unknown message:', event.data);
+            }
+          }
+        };
+    };
+
+    connectWs();
 
     const resumeAudio = () => {
         if (window.audioCtx && window.audioCtx.state === 'suspended') {
@@ -267,66 +346,6 @@ function App() {
         }
     };
     window.addEventListener('click', resumeAudio);
-    
-    ws.current.onmessage = async (event) => {
-      if (event.data instanceof Blob) {
-        // Handle Audio
-        // console.log("Audio Packet Received:", event.data.size, "bytes");
-        const arrayBuffer = await event.data.arrayBuffer();
-        const int16Array = new Int16Array(arrayBuffer);
-        const float32Array = new Float32Array(int16Array.length);
-        for (let i = 0; i < int16Array.length; i++) {
-            float32Array[i] = int16Array[i] / 32768;
-        }
-        
-        if (!window.audioCtx) {
-            window.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
-            const analyser = window.audioCtx.createAnalyser();
-            analyser.fftSize = 1024;
-            analyser.connect(window.audioCtx.destination);
-            setAudioAnalyser(analyser);
-            (window.audioCtx as any)._analyser = analyser;
-        }
-        
-        const ctx = window.audioCtx;
-        if (ctx.state === 'suspended') ctx.resume();
-        const analyser = (ctx as any)._analyser;
-
-        const audioBuffer = ctx.createBuffer(1, float32Array.length, 8000);
-        audioBuffer.copyToChannel(float32Array, 0);
-
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(analyser);
-        
-        // Scheduler to prevent crackling/overlaps
-        const currentTime = ctx.currentTime;
-        const JITTER_BUFFER = 0.35; // 350ms buffer for stability
-
-        if (nextStartTime.current < currentTime) {
-            nextStartTime.current = currentTime + JITTER_BUFFER;
-        }
-        
-        source.start(nextStartTime.current);
-        nextStartTime.current += audioBuffer.duration;
-      } else {
-        // Handle JSON
-        try {
-            const message = JSON.parse(event.data);
-            if (message.type === 'STATE_UPDATE') {
-              const newState = message.payload as ScannerState;
-              setScannerState(newState);
-            } else if (message.type === 'NEW_LOG') {
-              const newEntry = message.payload as CallLog;
-              setCallLog(log => [newEntry, ...log].slice(0, 100));
-            } else if (message.type === 'ERROR') {
-              setErrorMsg(message.payload);
-            }
-        } catch (e) {
-            console.warn('Unknown message:', event.data);
-        }
-      }
-    };
 
     return () => {
       window.removeEventListener('click', resumeAudio);
@@ -343,9 +362,32 @@ function App() {
           height: '100vh', 
           width: '100vw',
           bgcolor: 'background.default',
-          overflow: 'hidden' 
+          overflow: 'hidden',
+          position: 'relative'
       }}>
         
+        {!isConnected && (
+            <Box sx={{
+                position: 'absolute',
+                top: 0, left: 0, right: 0, bottom: 0,
+                bgcolor: 'rgba(0,0,0,0.8)',
+                zIndex: 9999,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backdropFilter: 'blur(4px)'
+            }}>
+                <Paper sx={{ p: 4, textAlign: 'center', border: '1px solid #ff0000', bgcolor: '#111' }}>
+                    <Typography variant="h5" color="error" fontWeight="bold" gutterBottom>
+                        CONNECTION LOST
+                    </Typography>
+                    <Typography color="textSecondary">
+                        Attempting to reconnect to OpenScanner server...
+                    </Typography>
+                </Paper>
+            </Box>
+        )}
+
         {/* Header */}
         <AppBar position="static" elevation={0}>
             <Toolbar variant="dense">
@@ -403,13 +445,13 @@ function App() {
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                     <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '10px' }}>ALT</Typography>
                                     <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'white' }}>
-                                        {Math.round(scannerState.gps.alt)}m
+                                        {Math.round(scannerState.gps.alt * 3.28084)}ft
                                     </Typography>
                                 </Box>
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                     <SpeedIcon sx={{ fontSize: 16, color: 'primary.main' }} />
                                     <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'white' }}>
-                                        {Math.round(scannerState.gps.speed * 3.6)} km/h
+                                        {Math.round(scannerState.gps.speed * 2.23694)} mph
                                     </Typography>
                                 </Box>
                             </>
@@ -425,7 +467,6 @@ function App() {
                             color="primary" 
                             size="small" 
                             onClick={() => {
-                                setManualHold(null);
                                 sendCommand('scan');
                             }}
                             icon={<PlayArrowIcon />} 
@@ -440,8 +481,8 @@ function App() {
         <Box sx={{ flexGrow: 1, p: 2, height: '100%', overflow: 'hidden' }}>
             <Grid container spacing={2} sx={{ height: '100%' }}>
                 
-                {/* Left Column: Active Scanner & Channel Grid */}
-                <Grid size={{ xs: 12, md: 8, lg: 9.5 }} sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                {/* Left Column: Active Scanner & Channel Grid (Compact) */}
+                <Grid size={{ xs: 12, md: 4, lg: 3 }} sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
                     
                     {/* Hero Widget */}
                     <Box sx={{ mb: 2 }}>
@@ -450,10 +491,8 @@ function App() {
                             analyser={audioAnalyser}
                             channels={channels}
                             onScan={() => {
-                                setManualHold(null);
                                 sendCommand('scan');
                             }}
-                            onSquelchChange={(val) => sendCommand('set_squelch', undefined, val)}
                         />
                     </Box>
 
@@ -470,7 +509,7 @@ function App() {
                         </Box>
                         <Grid container spacing={2}>
                             {channels.map((ch) => (
-                                <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }} key={ch.frequency}>
+                                <Grid size={{ xs: 12 }} key={ch.frequency}>
                                     <Card 
                                         sx={{ 
                                             border: manualHold === ch.frequency ? '1px solid #ff9800' : '1px solid #333',
@@ -506,8 +545,8 @@ function App() {
                     </Paper>
                 </Grid>
 
-                {/* Right Column: Transmission Log */}
-                <Grid size={{ xs: 12, md: 4, lg: 2.5 }} sx={{ height: '100%' }}>
+                {/* Right Column: Transmission Log (Expanded) */}
+                <Grid size={{ xs: 12, md: 8, lg: 9 }} sx={{ height: '100%' }}>
                     <Paper sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: '#0a0a0a', border: '1px solid #222', borderRadius: 2 }}>
                         <Box sx={{ p: 2, borderBottom: '1px solid #222' }} display="flex" alignItems="center" gap={1}>
                             <HistoryIcon color="primary" fontSize="small" />
@@ -558,6 +597,11 @@ function App() {
                                                     {log.lat && (
                                                         <Typography variant="caption" sx={{ color: '#444', fontSize: '9px', display: 'block' }}>
                                                             📍 {log.lat.toFixed(3)}, {log.lon!.toFixed(3)} • {log.duration?.toFixed(1)}s
+                                                        </Typography>
+                                                    )}
+                                                    {log.transcription && (
+                                                        <Typography variant="body2" sx={{ color: '#aaa', fontStyle: 'italic', mt: 0.5, fontSize: '11px', borderLeft: '2px solid #333', pl: 1 }}>
+                                                            "{log.transcription}"
                                                         </Typography>
                                                     )}
                                                 </Box>

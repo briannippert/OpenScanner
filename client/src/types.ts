@@ -12,6 +12,9 @@ export interface Channel {
 
 export interface ScannerState {
     status: 'SCANNING' | 'RECEIVING' | 'MONITORING' | 'IDLE';
+    isHardwareConnected?: boolean;
+    deviceName?: string;
+    devicePort?: string;
     currentFrequency?: number;
     currentChannel?: Channel;
     signalStrength: number; // 0-100
@@ -28,6 +31,7 @@ export interface ScannerState {
         fix: number;
         sats: number;
     };
+    manualHoldFrequency?: number;
 }
 
 export interface CallLog {
@@ -40,6 +44,7 @@ export interface CallLog {
     lon?: number;
     audio_path?: string;
     duration?: number;
+    transcription?: string;
 }
 
 declare global {

@@ -126,8 +126,32 @@ apt-get update -qq
 apt-get install -y -qq git cmake build-essential \
     libitpp-dev libsndfile1-dev libusb-1.0-0-dev libncurses-dev \
     rtl-sdr librtlsdr-dev libcodec2-dev libpulse-dev libasound2-dev \
-    gpsd gpsd-clients > /dev/null
+    gpsd gpsd-clients ffmpeg > /dev/null
 log_success "Libraries installed."
+
+# --- Whisper.cpp Setup ---
+log_step "Checking Whisper.cpp..."
+if [ ! -d "$PROJECT_ROOT/whisper.cpp" ]; then
+    log_info "Cloning whisper.cpp..."
+    sudo -u "$REAL_USER" git clone https://github.com/ggerganov/whisper.cpp.git "$PROJECT_ROOT/whisper.cpp"
+fi
+
+if [ ! -f "$PROJECT_ROOT/whisper.cpp/build/bin/whisper-cli" ]; then
+    log_info "Building whisper.cpp..."
+    cd "$PROJECT_ROOT/whisper.cpp"
+    # Using cmake for consistent build path expected by server
+    sudo -u "$REAL_USER" cmake -B build
+    sudo -u "$REAL_USER" cmake --build build --config Release -j$(nproc)
+    log_success "Whisper.cpp built."
+fi
+
+if [ ! -f "$PROJECT_ROOT/whisper.cpp/models/ggml-tiny.en.bin" ]; then
+    log_info "Downloading Whisper model..."
+    cd "$PROJECT_ROOT/whisper.cpp"
+    sudo -u "$REAL_USER" bash ./models/download-ggml-model.sh tiny.en
+    log_success "Whisper model downloaded."
+fi
+cd "$PROJECT_ROOT"
 
 # Configure GPSD
 log_info "Configuring GPSD..."
@@ -236,7 +260,7 @@ chown -R "$REAL_USER":"$REAL_USER" "$PROJECT_ROOT"
 # Restore executable bits for scripts
 chmod +x "$PROJECT_ROOT"/*.sh
 
-IP_ADDR=$(hostname -I | awk '{print }')
+IP_ADDR=$(hostname -I | awk '{print $1}')
 
 echo ""
 echo "================================================"

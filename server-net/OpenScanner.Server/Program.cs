@@ -50,10 +50,14 @@ if (Directory.Exists(clientDistPath))
 var recordingsPath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "../../data/recordings"));
 if (!Directory.Exists(recordingsPath)) Directory.CreateDirectory(recordingsPath);
 
+var provider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+provider.Mappings[".raw"] = "application/octet-stream";
+
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new PhysicalFileProvider(recordingsPath),
-    RequestPath = "/audio"
+    RequestPath = "/audio",
+    ContentTypeProvider = provider
 });
 
 var db = app.Services.GetRequiredService<Database>();
@@ -123,12 +127,16 @@ app.MapPost("/api/control", ([FromBody] JsonElement body) =>
         case "stop": radio.Stop(); break;
         case "scan": radio.ResumeScan(); break;
         case "hold": 
-            if (body.TryGetProperty("frequency", out var f))
-                radio.HoldFrequency(double.Parse(f.ToString()));
+            if (body.TryGetProperty("frequency", out var f) && f.ValueKind == JsonValueKind.Number)
+                radio.HoldFrequency(f.GetDouble());
+            else if (body.TryGetProperty("frequency", out var fs) && double.TryParse(fs.GetString(), out var fd))
+                 radio.HoldFrequency(fd);
             break;
         case "set_squelch":
-             if (body.TryGetProperty("value", out var v))
-                radio.SetSquelch(double.Parse(v.ToString()));
+             if (body.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.Number)
+                radio.SetSquelch(v.GetDouble());
+             else if (body.TryGetProperty("value", out var vs) && double.TryParse(vs.GetString(), out var vd))
+                radio.SetSquelch(vd);
             break;
     }
     return Results.Ok();
