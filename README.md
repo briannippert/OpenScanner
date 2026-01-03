@@ -58,11 +58,10 @@ For API documentation, visit:
 - [ ] **Multi-SDR Support**: Rapid trunking by dedicated SDR for Control Channel.
 - [ ] **Talkgroup Aliasing**: Name digital IDs (e.g., "101" -> "Main Dispatch").
 - [ ] **Mobile PWA**: "Install to Home Screen" support for mobile devices.
-- [ ] **Mapping**: Plot transmission locations on a live map.
 
 ## Acknowledgments
 
-- **DSD-FME**: Excellent digital voice decoding.
-- **whisper.cpp**: High-performance local AI transcription.
-- **FftSharp**: Fast FFT calculations for the live spectrum.
-- **NSwag**: OpenAPI/Swagger integration.
+- [DSD-FME](https://github.com/lwvmobile/dsd-fme): Digital voice decoding.
+- [whisper.cpp](https://github.com/ggerganov/whisper.cpp): High-performance local AI transcription.
+- [FftSharp](https://github.com/swharden/FftSharp): Fast FFT calculations for the live spectrum.
+- [NSwag](https://github.com/RicoSuter/NSwag): OpenAPI/Swagger integration.
