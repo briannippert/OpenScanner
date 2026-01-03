@@ -1,0 +1,6 @@
+@OpenScanner.Server_HostAddress = http://localhost:5212
+
+GET {{OpenScanner.Server_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
