@@ -13,11 +13,11 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
 
-log_info() { echo -e "${BLUE}ℹ️  ${NC} $1"; }
-log_step() { echo -e "\n${BLUE}${BOLD}==> $1${NC}"; }
-log_success() { echo -e "${GREEN}✅ $1${NC}"; }
-log_warn() { echo -e "${YELLOW}⚠️  $1${NC}"; }
-log_error() { echo -e "${RED}❌ $1${NC}"; }
+log_info() { echo -e "${BLUE}ℹ️  ${NC} "; }
+log_step() { echo -e "\n${BLUE}${BOLD}==> ${NC}"; }
+log_success() { echo -e "${GREEN}✅ ${NC}"; }
+log_warn() { echo -e "${YELLOW}⚠️  ${NC}"; }
+log_error() { echo -e "${RED}❌ ${NC}"; }
 
 # Check Root
 if [ "$EUID" -ne 0 ]; then
@@ -63,19 +63,37 @@ else
 fi
 
 # ----------------------------------------------------------------
-# 3. Dependency Checks (Node.js)
+# 3. Dependency Checks (Node.js for Client, .NET for Server)
 # ----------------------------------------------------------------
-log_step "Checking Node.js Environment..."
+log_step "Checking Environment..."
 
-# Try to find node in PATH first
+# --- Check .NET SDK ---
+if ! command -v dotnet &> /dev/null; then
+    log_info ".NET SDK not found. Attempting to install..."
+    
+    # Simple check for apt/debian based systems
+    if command -v apt-get &> /dev/null; then
+        # Add Microsoft repository (Standard robust method for Debian/Ubuntu)
+        wget https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+        dpkg -i packages-microsoft-prod.deb
+        rm packages-microsoft-prod.deb
+        
+        apt-get update -qq
+        apt-get install -y -qq dotnet-sdk-8.0
+        log_success ".NET SDK installed."
+    else
+         log_warn "Could not install .NET SDK automatically. Please install .NET 8.0 SDK manually."
+    fi
+else
+    DOTNET_VER=$(dotnet --version)
+    log_success "Found .NET SDK: $DOTNET_VER"
+fi
+
+# --- Check Node.js (For Client Build) ---
 NODE_PATH=$(which node || true)
-
-# If not found, check NVM locations
 if [ -z "$NODE_PATH" ]; then
     log_info "Node not in root PATH. Checking user's NVM..."
-    # Find the latest version of node in .nvm/versions/node/
     NVM_NODE=$(find "$REAL_HOME/.nvm/versions/node" -maxdepth 3 -name node -type f 2>/dev/null | grep "/bin/node" | sort -V | tail -n 1)
-    
     if [ -n "$NVM_NODE" ]; then
         NODE_PATH="$NVM_NODE"
         export PATH="$(dirname "$NODE_PATH"):$PATH"
@@ -94,20 +112,16 @@ if [ -z "$NODE_PATH" ]; then
 fi
 
 if [ -z "$NODE_PATH" ]; then
-    log_error "Node.js not found! Please install Node.js."
-    exit 1
-fi
-
-log_info "Using Node: $NODE_PATH"
-if ! command -v npm &> /dev/null; then
-    log_error "npm not found!"
-    exit 1
+    log_warn "Node.js not found! Client build might fail."
+else
+    log_success "Found Node: $NODE_PATH"
 fi
 
 # ----------------------------------------------------------------
 # 4. System Dependencies
 # ----------------------------------------------------------------
 log_step "Installing System Libraries..."
+
 apt-get update -qq
 apt-get install -y -qq git cmake build-essential \
     libitpp-dev libsndfile1-dev libusb-1.0-0-dev libncurses-dev \
@@ -117,14 +131,16 @@ log_success "Libraries installed."
 
 # Configure GPSD
 log_info "Configuring GPSD..."
-cat <<EOF > /etc/default/gpsd
+if [ ! -f /etc/default/gpsd ]; then
+    cat <<EOF > /etc/default/gpsd
 START_DAEMON="true"
 USBAUTO="true"
 DEVICES="/dev/ttyACM0"
 GPSD_OPTIONS="-n"
 GPSD_SOCKET="/var/run/gpsd.sock"
 EOF
-systemctl restart gpsd
+    systemctl restart gpsd
+fi
 
 # Check Hardware Drivers
 log_step "Checking Hardware Drivers..."
@@ -151,39 +167,28 @@ log_step "Building Application..."
 # Build Client
 log_info "Building Client..."
 cd "$PROJECT_ROOT/client"
-# Clean install for reliability
-if [ -f "package-lock.json" ]; then
+if [ -f "package-lock.json" ] && [ -n "$NODE_PATH" ]; then
     npm ci --silent
-    # If npm ci fails (e.g. lockfile mismatch), fallback to install
     if [ $? -ne 0 ]; then npm install --silent; fi
+    
+    # Fix permissions
+    chmod +x node_modules/.bin/* || true
+
+    if npm run build; then
+        log_success "Client built."
+    else
+        log_error "Client build failed."
+        exit 1
+    fi
 else
-    npm install --silent
+    log_warn "Skipping Client build (Node missing or no package.json)"
 fi
 
-# Fix permissions on binaries before build
-chmod +x node_modules/.bin/* || true
-
-if npm run build; then
-    log_success "Client built."
-else
-    log_error "Client build failed."
-    exit 1
-fi
-
-# Build Server
-log_info "Building Server..."
-cd "$PROJECT_ROOT/server"
-if [ -f "package-lock.json" ]; then
-    npm ci --silent || npm install --silent
-else
-    npm install --silent
-fi
-
-# Fix permissions on binaries before build
-chmod +x node_modules/.bin/* || true
-
-if npm run build; then
-    log_success "Server built."
+# Build Server (.NET)
+log_info "Building Server (.NET)..."
+cd "$PROJECT_ROOT/server-net/OpenScanner.Server"
+if dotnet build -c Release -o bin/Release/net10.0/publish; then
+    log_success "Server built successfully."
 else
     log_error "Server build failed."
     exit 1
@@ -194,22 +199,25 @@ fi
 # ----------------------------------------------------------------
 log_step "Configuring Systemd Service..."
 SERVICE_FILE="/etc/systemd/system/openscanner.service"
+NET_EXEC="$PROJECT_ROOT/server-net/OpenScanner.Server/bin/Release/net10.0/publish/OpenScanner.Server"
+
+# Ensure executable permission
+chmod +x "$NET_EXEC"
 
 cat <<EOF > "$SERVICE_FILE"
 [Unit]
-Description=OpenScanner Radio Service
+Description=OpenScanner Radio Service (.NET)
 After=network.target sound.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=$PROJECT_ROOT/server
-ExecStart=$NODE_PATH dist/index.js
+WorkingDirectory=$PROJECT_ROOT/server-net/OpenScanner.Server
+ExecStart=$NET_EXEC --urls "http://0.0.0.0:80"
 Restart=always
 RestartSec=5
-Environment=PORT=80
-Environment=USE_REAL_RADIO=true
-Environment=NODE_ENV=production
+Environment=DOTNET_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://0.0.0.0:80
 
 [Install]
 WantedBy=multi-user.target
@@ -228,7 +236,7 @@ chown -R "$REAL_USER":"$REAL_USER" "$PROJECT_ROOT"
 # Restore executable bits for scripts
 chmod +x "$PROJECT_ROOT"/*.sh
 
-IP_ADDR=$(hostname -I | awk '{print $1}')
+IP_ADDR=$(hostname -I | awk '{print }')
 
 echo ""
 echo "================================================"
