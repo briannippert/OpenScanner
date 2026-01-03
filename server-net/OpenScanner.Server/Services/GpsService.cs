@@ -58,7 +58,7 @@ public class GpsService : BackgroundService
                             }
                         }
                     }
-                    catch (Exception ex)
+                    catch (Exception)
                     {
                         // Ignore parse errors
                     }
@@ -72,7 +72,7 @@ public class GpsService : BackgroundService
         }
     }
 
-    private void ParseSky(JsonElement root)
+    internal void ParseSky(JsonElement root)
     {
         // Count satellites used in solution (u=true)
         int satsUsed = 0;

@@ -9,20 +9,31 @@ public class Database
     private readonly string _connectionString;
     private readonly string _dataDir;
 
-    public Database(string connectionString = "Data Source=../../data/openscanner.db")
+    public Database(string? connectionString = null)
     {
-        // Adjust path if needed
         var root = Directory.GetCurrentDirectory();
-        // Assuming we run from server-net/OpenScanner.Server, data is in ../../data
-        // But let's check absolute path behavior or use environment variable.
-        // For now, hardcode relative to project root assuming debugging.
-        // In production, this should be configurable.
-        
-        // Ensure data directory exists
         _dataDir = Path.Combine(root, "../../data");
-        if (!Directory.Exists(_dataDir)) Directory.CreateDirectory(_dataDir);
 
-        _connectionString = $"Data Source={Path.Combine(_dataDir, "openscanner.db")}";
+        if (!string.IsNullOrEmpty(connectionString))
+        {
+            _connectionString = connectionString;
+            
+            // Try to extract directory from connection string for _dataDir if it's a Sqlite connection string
+            if (_connectionString.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase))
+            {
+                var path = _connectionString.Substring("Data Source=".Length).Split(';')[0];
+                if (!string.IsNullOrEmpty(path) && path != ":memory:")
+                {
+                    var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+                    if (dir != null) _dataDir = dir;
+                }
+            }
+        }
+        else
+        {
+            if (!Directory.Exists(_dataDir)) Directory.CreateDirectory(_dataDir);
+            _connectionString = $"Data Source={Path.Combine(_dataDir, "openscanner.db")}";
+        }
         
         Initialize();
     }
