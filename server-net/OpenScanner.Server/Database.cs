@@ -116,7 +116,7 @@ public class Database
     public IEnumerable<CallLog> GetHistory(int limit = 100)
     {
         using var conn = GetConnection();
-        return conn.Query<CallLog>("SELECT * FROM transmissions ORDER BY timestamp DESC LIMIT @Limit", new { Limit = limit });
+        return conn.Query<CallLog>("SELECT id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path as AudioPath, duration FROM transmissions ORDER BY timestamp DESC LIMIT @Limit", new { Limit = limit });
     }
     
     public void DeleteTransmission(string id)

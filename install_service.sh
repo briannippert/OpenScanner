@@ -13,11 +13,11 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
 
-log_info() { echo -e "${BLUE}ℹ️  ${NC} "; }
-log_step() { echo -e "\n${BLUE}${BOLD}==> ${NC}"; }
-log_success() { echo -e "${GREEN}✅ ${NC}"; }
-log_warn() { echo -e "${YELLOW}⚠️  ${NC}"; }
-log_error() { echo -e "${RED}❌ ${NC}"; }
+log_info() { echo -e "${BLUE}ℹ️  ${NC} $1"; }
+log_step() { echo -e "\n${BLUE}${BOLD}==> $1${NC}"; }
+log_success() { echo -e "${GREEN}✅ $1${NC}"; }
+log_warn() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+log_error() { echo -e "${RED}❌ $1${NC}"; }
 
 # Check Root
 if [ "$EUID" -ne 0 ]; then

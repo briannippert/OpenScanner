@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, List, ListItem, ListItemText, Divider, Paper, Chip, IconButton, Snackbar, Alert } from '@mui/material';
+import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, List, ListItem, ListItemText, Divider, Paper, Chip, IconButton, Snackbar, Alert, Tooltip } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
 import ChannelManager from './components/ChannelManager';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -10,6 +10,8 @@ import LocationOnIcon from '@mui/icons-material/LocationOn';
 import SpeedIcon from '@mui/icons-material/Speed';
 import SatelliteAltIcon from '@mui/icons-material/SatelliteAlt';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import UsbIcon from '@mui/icons-material/Usb';
+import UsbOffIcon from '@mui/icons-material/UsbOff';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -81,7 +83,7 @@ function App() {
                console.log('Wake Lock released');
             });
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error(`${err.name}, ${err.message}`);
         }
       } else if (wakeLock.current && scannerState.status === 'IDLE') {
@@ -157,7 +159,7 @@ function App() {
             float32Array[i] = int16Array[i] / 32768;
         }
 
-        const buffer = window.audioCtx.createBuffer(1, float32Array.length, 48000);
+        const buffer = window.audioCtx.createBuffer(1, float32Array.length, 8000);
         buffer.copyToChannel(float32Array, 0);
         const source = window.audioCtx.createBufferSource();
         source.buffer = buffer;
@@ -245,7 +247,7 @@ function App() {
 
     const httpUrl = `${protocol}//${backendHost}${portSuffix}/api/channels`;
     const historyUrl = `${protocol}//${backendHost}${portSuffix}/api/history`;
-    const wsUrl = `${wsProtocol}//${backendHost}${portSuffix}`;
+    const wsUrl = `${wsProtocol}//${backendHost}${portSuffix}/ws`;
 
     fetch(httpUrl)
       .then(res => res.json())
@@ -290,7 +292,7 @@ function App() {
         if (ctx.state === 'suspended') ctx.resume();
         const analyser = (ctx as any)._analyser;
 
-        const audioBuffer = ctx.createBuffer(1, float32Array.length, 48000);
+        const audioBuffer = ctx.createBuffer(1, float32Array.length, 8000);
         audioBuffer.copyToChannel(float32Array, 0);
 
         const source = ctx.createBufferSource();
@@ -299,7 +301,7 @@ function App() {
         
         // Scheduler to prevent crackling/overlaps
         const currentTime = ctx.currentTime;
-        const JITTER_BUFFER = 0.15; // 150ms buffer for stability
+        const JITTER_BUFFER = 0.35; // 350ms buffer for stability
 
         if (nextStartTime.current < currentTime) {
             nextStartTime.current = currentTime + JITTER_BUFFER;
@@ -350,6 +352,19 @@ function App() {
                 <Typography variant="h6" component="div" sx={{ flexGrow: 1, color: '#00ff00', fontWeight: '900', letterSpacing: 3 }}>
                     OPENSCANNER <span style={{fontSize: '0.7em', color: '#666'}}>P25</span>
                 </Typography>
+
+                <Box sx={{ mr: 2 }}>
+                    <Tooltip title={scannerState.isHardwareConnected ? `${scannerState.deviceName || 'RTL-SDR Device'} (${scannerState.devicePort || 'USB'})` : 'No Device Detected'}>
+                        <Chip 
+                            icon={scannerState.isHardwareConnected ? <UsbIcon /> : <UsbOffIcon />}
+                            label={scannerState.isHardwareConnected ? "SDR READY" : "SDR DISCONNECTED"}
+                            size="small"
+                            color={scannerState.isHardwareConnected ? "success" : "error"}
+                            variant="outlined"
+                            sx={{ fontWeight: 'bold', fontSize: '10px' }}
+                        />
+                    </Tooltip>
+                </Box>
 
                 <Box sx={{ mr: 3, px: 2, py: 0.5, bgcolor: '#111', borderRadius: 1, border: '1px solid #333', display: 'flex', alignItems: 'center', gap: 1 }}>
                     {scannerState.gps?.time && scannerState.gps.fix >= 2 
@@ -426,7 +441,7 @@ function App() {
             <Grid container spacing={2} sx={{ height: '100%' }}>
                 
                 {/* Left Column: Active Scanner & Channel Grid */}
-                <Grid size={{ xs: 12, md: 8, lg: 9.5 }} sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                <Grid size={{ xs: 12, md: 8, lg: 9.5 }} sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
                     
                     {/* Hero Widget */}
                     <Box sx={{ mb: 2 }}>
@@ -443,7 +458,7 @@ function App() {
                     </Box>
 
                     {/* Channel Grid */}
-                    <Paper sx={{ flexGrow: 1, p: 2, bgcolor: '#0a0a0a', border: '1px solid #222', borderRadius: 2, overflowY: 'auto' }}>
+                    <Paper sx={{ flexGrow: 1, p: 2, bgcolor: '#0a0a0a', border: '1px solid #222', borderRadius: 2, overflowY: 'auto', minHeight: 0 }}>
                         <Box display="flex" alignItems="center" mb={2} justifyContent="space-between">
                             <Box display="flex" alignItems="center" gap={1}>
                                 <AssessmentIcon color="primary" fontSize="small" />

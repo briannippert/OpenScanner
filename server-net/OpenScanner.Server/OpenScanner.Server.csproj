@@ -11,6 +11,7 @@
     <PackageReference Include="FftSharp" Version="2.2.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0-rc.2.25502.107" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.1" />
+    <PackageReference Include="NSwag.AspNetCore" Version="14.0.7" />
   </ItemGroup>
 
 </Project>

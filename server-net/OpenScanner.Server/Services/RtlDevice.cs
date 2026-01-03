@@ -106,9 +106,10 @@ public class RtlDevice : BackgroundService
         Task.Delay(500).ContinueWith(_ => StartScanning());
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        return Task.CompletedTask;
+        await Task.Delay(1000, stoppingToken);
+        Start();
     }
 
     private void UpdateState(ScannerState newState)
@@ -159,6 +160,8 @@ public class RtlDevice : BackgroundService
         try 
         {
             _scannerProcess = Process.Start(psi);
+            // Assume connected if process starts, confirm via stderr later
+            UpdateState(_state with { IsHardwareConnected = true });
         }
         catch (Exception ex)
         {
@@ -178,7 +181,7 @@ public class RtlDevice : BackgroundService
                     var line = await _scannerProcess.StandardError.ReadLineAsync(token);
                     if (string.IsNullOrEmpty(line)) continue;
                     
-                    if (line.Contains("Found")) 
+                    if (line.Contains("Found") || line.Contains("Using device")) 
                         UpdateState(_state with { IsHardwareConnected = true });
                     if (line.Contains("No supported devices"))
                     {
