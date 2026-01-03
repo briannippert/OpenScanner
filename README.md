@@ -4,7 +4,7 @@ OpenScanner is a high-performance, web-based digital radio scanner designed for 
 
 ![OpenScanner UI](https://via.placeholder.com/800x400?text=OpenScanner+Dashboard)
 
-## 🚀 Key Features
+## Key Features
 
 - **Digital Voice Decoding**: Stable P25 Phase 1 decoding via `rtl_fm` and `dsd-fme`.
 - **AI Transcriptions**: Integrated **Whisper AI** (`whisper.cpp`) for automatic speech-to-text logging.
@@ -17,14 +17,14 @@ OpenScanner is a high-performance, web-based digital radio scanner designed for 
 - **Swagger Documentation**: Full OpenAPI/Swagger UI for API exploration.
 - **Service-Ready**: Automated installer configures OpenScanner as a systemd service on port 80.
 
-## 🛠 Hardware Requirements
+## Hardware Requirements
 
 - **Raspberry Pi**: (Pi 5 highly recommended for Whisper AI performance).
 - **RTL-SDR Dongle**: (RTL2832U based, such as RTLSDRv3 or v4).
 - **GPS Receiver**: (Optional, any USB GPS receiver compatible with `gpsd`).
 - **Antenna**: Tuned for your local 150-800MHz public safety bands.
 
-## 📦 Quick Start
+## Quick Start
 
 ### 1. Install Hardware Drivers
 Ensure your Pi has the necessary radio tools installed. You can use the included `install_dsd.sh` if you are starting from a clean OS:
@@ -47,20 +47,20 @@ Once installed, open your browser to:
 For API documentation, visit:
 `http://<your-pi-ip>/swagger`
 
-## 🔧 Management
+## Management
 
 - **Status Check**: `systemctl status openscanner`
 - **View Logs**: `journalctl -u openscanner -f`
 - **Data Location**: Database and recordings are stored in the `/data` directory in the project root.
 
-## 🗺 Roadmap
+## Roadmap
 
 - [ ] **Multi-SDR Support**: Rapid trunking by dedicated SDR for Control Channel.
 - [ ] **Talkgroup Aliasing**: Name digital IDs (e.g., "101" -> "Main Dispatch").
 - [ ] **Mobile PWA**: "Install to Home Screen" support for mobile devices.
 - [ ] **Mapping**: Plot transmission locations on a live map.
 
-## 📜 Acknowledgments
+## Acknowledgments
 
 - **DSD-FME**: Excellent digital voice decoding.
 - **whisper.cpp**: High-performance local AI transcription.

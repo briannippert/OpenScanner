@@ -13,11 +13,11 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
 
-log_info() { echo -e "${BLUE}ℹ️  ${NC} $1"; }
+log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_step() { echo -e "\n${BLUE}${BOLD}==> $1${NC}"; }
-log_success() { echo -e "${GREEN}✅ $1${NC}"; }
-log_warn() { echo -e "${YELLOW}⚠️  $1${NC}"; }
-log_error() { echo -e "${RED}❌ $1${NC}"; }
+log_success() { echo -e "${GREEN}[OK] $1${NC}"; }
+log_warn() { echo -e "${YELLOW}[WARN] $1${NC}"; }
+log_error() { echo -e "${RED}[ERROR] $1${NC}"; }
 
 # Check Root
 if [ "$EUID" -ne 0 ]; then
@@ -263,10 +263,10 @@ chmod +x "$PROJECT_ROOT"/*.sh
 IP_ADDR=$(hostname -I | awk '{print $1}')
 
 echo ""
-echo "================================================"
+echo "================================================="
 log_success "Installation Complete!"
-echo "================================================"
+echo "================================================="
 echo -e "   ${BOLD}Status:${NC} systemctl status openscanner"
 echo -e "   ${BOLD}Logs:${NC}   journalctl -u openscanner -f"
 echo -e "   ${BOLD}Web UI:${NC} http://$IP_ADDR"
-echo "================================================"
+echo "================================================="

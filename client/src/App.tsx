@@ -596,7 +596,7 @@ function App() {
                                                     </Typography>
                                                     {log.lat && (
                                                         <Typography variant="caption" sx={{ color: '#444', fontSize: '9px', display: 'block' }}>
-                                                            📍 {log.lat.toFixed(3)}, {log.lon!.toFixed(3)} • {log.duration?.toFixed(1)}s
+                                                            LOC: {log.lat.toFixed(3)}, {log.lon!.toFixed(3)} • {log.duration?.toFixed(1)}s
                                                         </Typography>
                                                     )}
                                                     {log.transcription && (

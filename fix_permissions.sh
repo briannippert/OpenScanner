@@ -3,7 +3,7 @@
 # OpenScanner Permission Fixer
 
 if [ "$EUID" -ne 0 ]; then
-  echo "❌ Please run as root (e.g. sudo ./fix_permissions.sh)"
+  echo "[ERROR] Please run as root (e.g. sudo ./fix_permissions.sh)"
   exit 1
 fi
 
@@ -11,7 +11,7 @@ fi
 REAL_USER=${SUDO_USER:-$USER}
 PROJECT_ROOT=$(pwd)
 
-echo "🔧 Fixing permissions in $PROJECT_ROOT for user: $REAL_USER"
+echo "[INFO] Fixing permissions in $PROJECT_ROOT for user: $REAL_USER"
 
 # 1. Change ownership of everything to the real user
 chown -R "$REAL_USER":"$REAL_USER" "$PROJECT_ROOT"
@@ -25,4 +25,4 @@ find "$PROJECT_ROOT" -type f -exec chmod 644 {} +
 # 4. Restore execution bits for scripts
 find "$PROJECT_ROOT" -name "*.sh" -exec chmod +x {} +
 
-echo "✅ Permissions restored. You can now build and run as $REAL_USER."
+echo "[OK] Permissions restored. You can now build and run as $REAL_USER."
