@@ -693,7 +693,7 @@ public class RtlDevice : BackgroundService
 
         // 1. Convert RAW (8k s16le) to WAV (16k)
         var ffmpegArgs = $"-f s16le -ar 8000 -ac 1 -i \"{rawPath}\" -ar 16000 -ac 1 \"{wavPath}\" -y";
-        var convertStart = new ProcessStartInfo("ffmpeg", ffmpegArgs)
+        var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg", ffmpegArgs)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -703,7 +703,15 @@ public class RtlDevice : BackgroundService
         
         using (var proc = Process.Start(convertStart))
         {
-            proc?.WaitForExit();
+            if (proc != null)
+            {
+                var stderr = proc.StandardError.ReadToEnd();
+                proc.WaitForExit();
+                if (proc.ExitCode != 0)
+                {
+                    _logger.LogError($"FFmpeg conversion failed with exit code {proc.ExitCode}. Stderr: {stderr}");
+                }
+            }
         }
 
         if (!File.Exists(wavPath)) return null;
@@ -711,7 +719,7 @@ public class RtlDevice : BackgroundService
         // 2. Run Whisper with Radio Context
         // Prompt helps Whisper bias towards radio terminology and style
         var prompt = "Police radio dispatch. 10-4 copy that. Suspect vehicle description. Fire department responding. EMS on scene. Traffic stop. Code 3.";
-        var whisperArgs = $"-m \"{modelPath}\" -f \"{wavPath}\" -nt -otxt -l en -p \"{prompt}\""; 
+        var whisperArgs = $"-m \"{modelPath}\" -f \"{wavPath}\" -nt -otxt -l en --prompt \"{prompt}\""; 
         
         var whisperStart = new ProcessStartInfo(whisperBin, whisperArgs)
         {
@@ -738,9 +746,9 @@ public class RtlDevice : BackgroundService
                 else
                 {
                     var stderr = stderrTask.Result;
-                    if (!string.IsNullOrEmpty(stderr))
+                    if (proc.ExitCode != 0)
                     {
-                        // _logger.LogDebug($"Whisper Stderr: {stderr}");
+                        _logger.LogError($"Whisper failed with exit code {proc.ExitCode}. Stderr: {stderr}");
                     }
                 }
             }
