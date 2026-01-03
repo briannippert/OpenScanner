@@ -1,74 +1,68 @@
-# OpenScanner P25
+# OpenScanner
 
-OpenScanner is a web-based P25 digital radio scanner designed for the Raspberry Pi. It provides a modern, responsive UI for monitoring local public safety frequencies using an RTL-SDR dongle.
+OpenScanner is a high-performance, web-based digital radio scanner designed for the Raspberry Pi (optimized for Pi 5). It combines a robust **.NET backend** with a modern **React frontend** to provide real-time P25 digital voice decoding, live spectrum analysis, and AI-powered transcriptions.
 
-![OpenScanner UI](https://via.placeholder.com/800x400?text=OpenScanner+P25+Dashboard)
+![OpenScanner UI](https://via.placeholder.com/800x400?text=OpenScanner+Dashboard)
 
-## 🚀 Features
+## 🚀 Key Features
 
-- **P25 Digital Decoding**: Real-time decoding of P25 Phase 1 digital voice.
-- **Web-Based Dashboard**: Access your scanner from any device on your network.
-- **Live Waterfall**: Visual scrolling spectrogram of decoded audio.
-- **GPS Integration**: Displays live location, altitude, speed, and satellite count.
-- **Transmission Logging**: Automatic logging of active voice calls.
-- **Service-Ready**: Includes a dedicated installer to run OpenScanner as a system service on port 80.
+- **Digital Voice Decoding**: Stable P25 Phase 1 decoding via `rtl_fm` and `dsd-fme`.
+- **AI Transcriptions**: Integrated **Whisper AI** (`whisper.cpp`) for automatic speech-to-text logging.
+- **Real-Time Synchronization**: State (locks, holds, status) is synced instantly across all connected browsers.
+- **Modern Dashboard**:
+    - **Live Waterfall**: Visual scrolling spectrogram of decoded audio.
+    - **Transmission History**: Detailed log of calls with instant playback and AI text.
+    - **Channel Control**: One-click frequency hold and scan resume.
+- **GPS Integration**: Live tracking of location, altitude (Imperial units), and satellite count.
+- **Swagger Documentation**: Full OpenAPI/Swagger UI for API exploration.
+- **Service-Ready**: Automated installer configures OpenScanner as a systemd service on port 80.
 
 ## 🛠 Hardware Requirements
 
-- **Raspberry Pi**: (Pi 4 or Pi 5 recommended).
+- **Raspberry Pi**: (Pi 5 highly recommended for Whisper AI performance).
 - **RTL-SDR Dongle**: (RTL2832U based, such as RTLSDRv3 or v4).
-- **GPS Receiver**: (Optional, any NMEA-compatible USB GPS receiver like u-blox).
+- **GPS Receiver**: (Optional, any USB GPS receiver compatible with `gpsd`).
 - **Antenna**: Tuned for your local 150-800MHz public safety bands.
 
-## 📦 Installation
+## 📦 Quick Start
 
-### 1. Clone the repository
-```bash
-git clone https://github.com/briannippert/OpenScanner.git
-cd OpenScanner
-```
-
-### 2. Install Hardware Dependencies
-Run the included script to build and install `dsd-fme`, `mbelib`, and `rtl-sdr` tools:
+### 1. Install Hardware Drivers
+Ensure your Pi has the necessary radio tools installed. You can use the included `install_dsd.sh` if you are starting from a clean OS:
 ```bash
 chmod +x install_dsd.sh
 ./install_dsd.sh
 ```
 
-### 3. Install as a System Service
-OpenScanner can be installed to run automatically at boot on port 80:
+### 2. Deploy OpenScanner
+The unified installer builds the .NET backend, the React frontend, and sets up Whisper AI:
 ```bash
 chmod +x install_service.sh
 sudo ./install_service.sh
 ```
 
-## 🖥 Usage
-
-Once installed as a service, access the dashboard at:
+### 3. Access the UI
+Once installed, open your browser to:
 `http://<your-pi-ip>`
 
-### Manual Controls:
-- **Click a Channel**: Hold the scanner on a specific frequency.
-- **Resume Scan**: Return to scanning all configured channels.
-- **Audio Activation**: Browsers block audio by default; click anywhere on the page once it loads to enable sound.
+For API documentation, visit:
+`http://<your-pi-ip>/swagger`
 
-## 🔧 Configuration
+## 🔧 Management
 
-### Adding Channels
-Edit `server/src/models.ts` to add your local frequencies:
-```typescript
-{
-    frequency: 155.0325,
-    alphaTag: "Local Police",
-    description: "Dispatch",
-    mode: "P25"
-}
-```
-After editing, re-run `sudo ./install_service.sh` to apply changes.
+- **Status Check**: `systemctl status openscanner`
+- **View Logs**: `journalctl -u openscanner -f`
+- **Data Location**: Database and recordings are stored in the `/data` directory in the project root.
+
+## 🗺 Roadmap
+
+- [ ] **Multi-SDR Support**: Rapid trunking by dedicated SDR for Control Channel.
+- [ ] **Talkgroup Aliasing**: Name digital IDs (e.g., "101" -> "Main Dispatch").
+- [ ] **Mobile PWA**: "Install to Home Screen" support for mobile devices.
+- [ ] **Mapping**: Plot transmission locations on a live map.
 
 ## 📜 Acknowledgments
 
-OpenScanner leverages these amazing open-source projects:
-- [DSD-FME](https://github.com/lwvmobile/dsd-fme) - Digital Speech Decoder (Florida Man Edition)
-- [rtl-sdr](https://osmocom.org/projects/rtl-sdr/wiki/Rtl-sdr) - RTL2832-based SDR driver
-- [gpsd](https://gpsd.gitlab.io/gpsd/) - GPS Service Daemon
+- **DSD-FME**: Excellent digital voice decoding.
+- **whisper.cpp**: High-performance local AI transcription.
+- **FftSharp**: Fast FFT calculations for the live spectrum.
+- **NSwag**: OpenAPI/Swagger integration.

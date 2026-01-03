@@ -33,23 +33,18 @@ fi
 cd ..
 
 # Start Backend
-echo "📡 Starting Backend Server..."
-cd server
-USE_REAL_RADIO=$REAL_MODE npx ts-node src/index.ts &
+echo "📡 Starting Backend Server (.NET)..."
+cd server-net/OpenScanner.Server
+dotnet run -c Release --urls "http://0.0.0.0:80" &
 SERVER_PID=$!
 
-# Start Frontend
-echo "💻 Starting Frontend UI..."
-cd ../client
-npm run dev &
-CLIENT_PID=$!
-
 HOSTNAME=$(hostname)
+IP_ADDR=$(hostname -I | awk '{print $1}')
 echo "------------------------------------------------"
 echo "✅ OpenScanner is initializing!"
-echo "Backend:  http://$HOSTNAME:3001"
-echo "Frontend: http://$HOSTNAME:5173"
-echo "Press Ctrl+C to stop both servers."
+echo "Dashboard: http://$IP_ADDR"
+echo "API Docs:  http://$IP_ADDR/swagger"
+echo "Press Ctrl+C to stop the server."
 echo "------------------------------------------------"
 
 # Keep script running
