@@ -453,13 +453,16 @@ public class RtlDevice : BackgroundService
         StopDecoding();
         _decodeCts = new CancellationTokenSource();
         
-        var cmd = $"rtl_fm -f {channel.Frequency}M -s 48000 -g 45 -p 0 -M fm - | dsd-fme -f1 -i - -o - -s 48000";
+        // Use absolute paths and ensure -f1 (P25 Phase 1) and -P (p25 audio) are correct for dsd-fme
+        var cmd = $"rtl_fm -f {channel.Frequency}M -s 48000 -g 45 -p 0 -M fm - | /usr/local/bin/dsd-fme -f1 -i - -o - -s 48000";
         var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
         };
+
+        _logger.LogInformation($"Decoder starting: {cmd}");
 
         // Delay slightly
         Task.Delay(300).ContinueWith(_ => 
@@ -482,25 +485,38 @@ public class RtlDevice : BackgroundService
             var token = _decodeCts.Token;
             Task.Run(async () => 
             {
-                var readBuffer = new byte[4096];
-                var sendBuffer = new List<byte>(8192);
+                var readBuffer = new byte[2048];
+                var sendBuffer = new List<byte>(4096);
                 var stream = _decoderProcess.StandardOutput.BaseStream;
+                var lastSend = DateTime.UtcNow;
+                bool hadData = false;
+
                 try
                 {
                     while (!token.IsCancellationRequested)
                     {
-                        var read = await stream.ReadAsync(readBuffer, 0, readBuffer.Length, token);
-                        if (read == 0) break;
-
-                        for (int i = 0; i < read; i++) sendBuffer.Add(readBuffer[i]);
-
-                        // Send in consistent 4096 byte chunks (~250ms)
-                        while (sendBuffer.Count >= 4096)
+                        // Use a timeout to flush small buffers
+                        var readTask = stream.ReadAsync(readBuffer, 0, readBuffer.Length, token);
+                        var delayTask = Task.Delay(200, token); // 200ms flush timeout
+                        
+                        var completedTask = await Task.WhenAny(readTask, delayTask);
+                        
+                        if (completedTask == readTask)
                         {
-                            var chunk = sendBuffer.Take(4096).ToArray();
-                            sendBuffer.RemoveRange(0, 4096);
+                            int read = await readTask;
+                            if (read == 0) break;
+                            if (!hadData) { _logger.LogInformation("Decoder: Received first audio bytes"); hadData = true; }
+                            for (int i = 0; i < read; i++) sendBuffer.Add(readBuffer[i]);
+                        }
+
+                        // Send if we have enough or if it's been too long
+                        if (sendBuffer.Count >= 1024 || (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 300))
+                        {
+                            var chunk = sendBuffer.ToArray();
+                            sendBuffer.Clear();
                             
                             OnAudio?.Invoke(chunk);
+                            lastSend = DateTime.UtcNow;
 
                             if (_recordingStream != null)
                             {
@@ -510,7 +526,10 @@ public class RtlDevice : BackgroundService
                         }
                     }
                 }
-                catch {}
+                catch (Exception ex) when (!(ex is OperationCanceledException))
+                {
+                    _logger.LogError(ex, "Decoder audio read error");
+                }
             }, token);
 
             // Handle Metadata (Stderr)
@@ -529,9 +548,11 @@ public class RtlDevice : BackgroundService
                             {
                                 HandleActivity();
                             }
-                            if (!line.Contains("██") && !line.Contains("Version")) // Filter progress bars
+                            
+                            // Log significant lines for debugging
+                            if (line.Contains("P25") && !line.Contains("██"))
                             {
-                                // _logger.LogInformation($"[DSD] {line}");
+                                // _logger.LogDebug($"[DSD] {line}");
                             }
                         }
                     }
