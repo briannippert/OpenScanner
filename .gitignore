@@ -39,3 +39,11 @@ build_deps/
 server/data/
 server/[0-9]*M
 server/-Z
+
+# .NET / C#
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+
