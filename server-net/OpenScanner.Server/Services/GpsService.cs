@@ -72,7 +72,7 @@ public class GpsService : BackgroundService
         }
     }
 
-    private void ParseSky(JsonElement root)
+    internal void ParseSky(JsonElement root)
     {
         // Count satellites used in solution (u=true)
         int sats = 0;
@@ -106,7 +106,7 @@ public class GpsService : BackgroundService
         OnGpsUpdate?.Invoke(_lastGps);
     }
 
-    private void ParseTpv(JsonElement root)
+    internal void ParseTpv(JsonElement root)
     {
         // "mode": 2 (2D), 3 (3D)
         if (!root.TryGetProperty("mode", out var modeProp) || modeProp.GetInt32() < 2) return;

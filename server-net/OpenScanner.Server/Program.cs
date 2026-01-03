@@ -173,4 +173,4 @@ app.MapFallback(async context =>
     }
 });
 
-app.Run();
+app.Run();public partial class Program { }
