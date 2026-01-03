@@ -27,6 +27,8 @@ public class RtlDevice : BackgroundService
     private Stream? _recordingStream;
     private string? _currentRecordingPath;
     private long _recordingStartTime;
+    private int? _currentSourceID;
+    private int? _currentTargetID;
     private DateTime _recordingLockoutUntil = DateTime.MinValue;
     
     // Timers (using CancellationTokenSources for cancellation)
@@ -546,7 +548,46 @@ public class RtlDevice : BackgroundService
                             if (line.Contains("Sync:") || line.Contains("Voice") || line.Contains("P25") || 
                                 line.Contains("LDU") || line.Contains("VDU") || line.Contains("TDU"))
                             {
-                                HandleActivity();
+                                int? src = null;
+                                int? tgt = null;
+
+                                // Parse Source/Target if present in line
+                                // DSD-FME often outputs: "Source: 12345 Target: 67890" or "Src: 12345 Tgt: 67890"
+                                if (line.Contains("Source:"))
+                                {
+                                    var parts = line.Split("Source:");
+                                    if (parts.Length > 1) {
+                                        var val = parts[1].Trim().Split(' ')[0];
+                                        if (int.TryParse(val, out var s)) src = s;
+                                    }
+                                }
+                                else if (line.Contains("Src:"))
+                                {
+                                     var parts = line.Split("Src:");
+                                    if (parts.Length > 1) {
+                                        var val = parts[1].Trim().Split(' ')[0];
+                                        if (int.TryParse(val, out var s)) src = s;
+                                    }
+                                }
+
+                                if (line.Contains("Target:"))
+                                {
+                                    var parts = line.Split("Target:");
+                                    if (parts.Length > 1) {
+                                        var val = parts[1].Trim().Split(' ')[0];
+                                        if (int.TryParse(val, out var t)) tgt = t;
+                                    }
+                                }
+                                else if (line.Contains("Tgt:"))
+                                {
+                                     var parts = line.Split("Tgt:");
+                                    if (parts.Length > 1) {
+                                        var val = parts[1].Trim().Split(' ')[0];
+                                        if (int.TryParse(val, out var t)) tgt = t;
+                                    }
+                                }
+
+                                HandleActivity(src, tgt);
                             }
                             
                             // Log significant lines for debugging
@@ -563,18 +604,18 @@ public class RtlDevice : BackgroundService
         });
     }
 
-    private void HandleActivity()
+    private void HandleActivity(int? src = null, int? tgt = null)
     {
         // Valid Frame detected
-        if (_state.Status != "RECEIVING")
+        if (_state.Status != "RECEIVING" || (src.HasValue && _state.SourceID != src))
         {
-            UpdateState(_state with { Status = "RECEIVING" });
+            UpdateState(_state with { Status = "RECEIVING", SourceID = src, TargetID = tgt });
         }
         
         // Start recording if not already started
         if (_recordingStream == null)
         {
-            StartRecording();
+            StartRecording(src, tgt);
         }
 
         // Reset inactivity timer
@@ -598,7 +639,7 @@ public class RtlDevice : BackgroundService
         });
     }
 
-    private void StartRecording()
+    private void StartRecording(int? src = null, int? tgt = null)
     {
         if (_recordingStream != null || _state.CurrentChannel == null) return;
         if (DateTime.UtcNow < _recordingLockoutUntil) return;
@@ -610,6 +651,8 @@ public class RtlDevice : BackgroundService
 
         _currentRecordingPath = Path.Combine(dataDir, filename);
         _recordingStartTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        _currentSourceID = src;
+        _currentTargetID = tgt;
         
         try 
         {
@@ -659,11 +702,13 @@ public class RtlDevice : BackgroundService
                  _state.Gps?.Lon,
                  Path.GetFileName(_currentRecordingPath),
                  duration,
-                 transcription
+                 transcription,
+                 _currentSourceID,
+                 _currentTargetID
              );
 
              _db.SaveTransmission(log);
-             _logger.LogInformation($"Saved transmission: {duration:F1}s | Text: {transcription}");
+             _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {_currentSourceID} | Text: {transcription}");
              OnNewLog?.Invoke(log);
         }
         else if (_currentRecordingPath != null)
@@ -672,6 +717,7 @@ public class RtlDevice : BackgroundService
         }
         
         _currentRecordingPath = null;
+        UpdateState(_state with { SourceID = null, TargetID = null });
     }
 
     private string? TranscribeAudio(string rawPath)
@@ -718,7 +764,7 @@ public class RtlDevice : BackgroundService
 
         // 2. Run Whisper with Radio Context
         // Prompt helps Whisper bias towards radio terminology and style
-        var prompt = "Police radio dispatch. 10-4 copy that. Suspect vehicle description. Fire department responding. EMS on scene. Traffic stop. Code 3.";
+        var prompt = "Police, Fire, and EMS radio dispatch. 10-4 copy that. Unit identifiers like Engine 5, Rescue 2, or Unit 402. Phonetic alphabet: Alpha, Bravo, Charlie, Delta, Echo, Foxtrot. Suspect descriptions, vehicle plates, and street addresses. Dispatching priority calls and status updates. Roger, over and out. Signal 10, Code 3, 10-20 location.";
         var whisperArgs = $"-m \"{modelPath}\" -f \"{wavPath}\" -nt -otxt -l en --prompt \"{prompt}\""; 
         
         var whisperStart = new ProcessStartInfo(whisperBin, whisperArgs)

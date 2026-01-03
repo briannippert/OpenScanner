@@ -34,6 +34,8 @@ export interface ScannerState {
     };
     manualHoldFrequency?: number;
     lastTranscription?: string;
+    sourceID?: number;
+    targetID?: number;
 }
 
 export interface CallLog {
@@ -47,6 +49,8 @@ export interface CallLog {
     audio_path?: string;
     duration?: number;
     transcription?: string;
+    sourceID?: number;
+    targetID?: number;
 }
 
 declare global {

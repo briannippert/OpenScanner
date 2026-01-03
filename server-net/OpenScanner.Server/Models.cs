@@ -42,6 +42,8 @@ public class CallLog
     public double? Lat { get; set; }
     public double? Lon { get; set; }
     public double? Alt { get; set; }
+    public int? SourceID { get; set; }
+    public int? TargetID { get; set; }
     
     [JsonPropertyName("audio_path")]
     public string? AudioPath { get; set; }
@@ -52,7 +54,7 @@ public class CallLog
 
     public CallLog() { }
 
-    public CallLog(string id, string timestamp, double frequency, string alphaTag, string description, double? lat, double? lon, string? audioPath, double? duration, string? transcription = null)
+    public CallLog(string id, string timestamp, double frequency, string alphaTag, string description, double? lat, double? lon, string? audioPath, double? duration, string? transcription = null, int? sourceID = null, int? targetID = null)
     {
         Id = id;
         Timestamp = timestamp;
@@ -64,6 +66,8 @@ public class CallLog
         AudioPath = audioPath;
         Duration = duration;
         Transcription = transcription;
+        SourceID = sourceID;
+        TargetID = targetID;
     }
 }
 
@@ -94,6 +98,9 @@ public record ScannerState(
     string? DevicePort = null,
     SpectrumPoint[]? RfSpectrum = null,
     GpsData? Gps = null,
-    double? ManualHoldFrequency = null,
-    string? LastTranscription = null
-);
+        double? ManualHoldFrequency = null,
+        string? LastTranscription = null,
+        int? SourceID = null,
+        int? TargetID = null
+    );
+    

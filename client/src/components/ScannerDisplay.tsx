@@ -139,6 +139,17 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                 />
                             )}
                         </Box>
+                        {isReceiving && state.sourceID && (
+                            <Typography variant="caption" sx={{ 
+                                color: state.sourceID < 100 ? '#00ffff' : '#ffaa00', 
+                                fontWeight: 'bold',
+                                mt: 0.5,
+                                display: 'block',
+                                letterSpacing: 1
+                            }}>
+                                {state.sourceID < 100 ? `[BASE]` : `[UNIT ${state.sourceID}]`}
+                            </Typography>
+                        )}
                     </Box>
                     
                     {/* VU Meter (Only when receiving) */}

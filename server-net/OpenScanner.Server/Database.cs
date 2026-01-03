@@ -53,7 +53,9 @@ public class Database
                 alt REAL,
                 audio_path TEXT,
                 duration REAL,
-                transcription TEXT
+                transcription TEXT,
+                sourceID INTEGER,
+                targetID INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS channels (
@@ -74,6 +76,8 @@ public class Database
         
         // Simple migration for existing table
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN transcription TEXT;"); } catch {}
+        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN sourceID INTEGER;"); } catch {}
+        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN targetID INTEGER;"); } catch {}
         try { conn.Execute("ALTER TABLE channels ADD COLUMN lat REAL;"); } catch {}
         try { conn.Execute("ALTER TABLE channels ADD COLUMN lon REAL;"); } catch {}
         try { conn.Execute("ALTER TABLE channels ADD COLUMN range REAL;"); } catch {}
@@ -155,14 +159,14 @@ public class Database
     {
         using var conn = GetConnection();
         conn.Execute(@"
-            INSERT INTO transmissions (id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path, duration, transcription)
-            VALUES (@Id, datetime('now'), @Frequency, @AlphaTag, @Description, @Lat, @Lon, 0, @AudioPath, @Duration, @Transcription)", log);
+            INSERT INTO transmissions (id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path, duration, transcription, sourceID, targetID)
+            VALUES (@Id, datetime('now'), @Frequency, @AlphaTag, @Description, @Lat, @Lon, 0, @AudioPath, @Duration, @Transcription, @SourceID, @TargetID)", log);
     }
 
     public IEnumerable<CallLog> GetHistory(int limit = 100)
     {
         using var conn = GetConnection();
-        return conn.Query<CallLog>("SELECT id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path as AudioPath, duration, transcription FROM transmissions ORDER BY timestamp DESC LIMIT @Limit", new { Limit = limit });
+        return conn.Query<CallLog>("SELECT id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path as AudioPath, duration, transcription, sourceID, targetID FROM transmissions ORDER BY timestamp DESC LIMIT @Limit", new { Limit = limit });
     }
     
     public void DeleteTransmission(string id)

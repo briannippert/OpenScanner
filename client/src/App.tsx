@@ -16,6 +16,8 @@ import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
+import FullscreenIcon from '@mui/icons-material/Fullscreen';
+import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import type { ScannerState, Channel, CallLog } from './types';
 
 const darkTheme = createTheme({
@@ -69,11 +71,31 @@ function App() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const ws = useRef<WebSocket | null>(null);
   const wakeLock = useRef<any>(null);
   const activeSource = useRef<AudioBufferSourceNode | null>(null);
 
   const manualHold = scannerState.manualHoldFrequency;
+
+  // Fullscreen Manager
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
 
   // Wake Lock Manager
   useEffect(() => {
@@ -512,6 +534,12 @@ function App() {
                         />
                     </Box>
                 )}
+
+                <Tooltip title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
+                    <IconButton color="inherit" onClick={toggleFullscreen} sx={{ ml: 1 }}>
+                        {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+                    </IconButton>
+                </Tooltip>
             </Toolbar>
         </AppBar>
 
@@ -632,7 +660,15 @@ function App() {
                                             secondary={
                                                 <Box component="span">
                                                     <Typography variant="caption" color="gray" sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                                        <span>{log.frequency} MHz</span>
+                                                        <span>{log.frequency} MHz {log.sourceID && (
+                                                            <span style={{ 
+                                                                color: log.sourceID < 100 ? '#00ffff' : '#ffaa00',
+                                                                marginLeft: '8px',
+                                                                fontWeight: 'bold'
+                                                            }}>
+                                                                {log.sourceID < 100 ? `[BASE]` : `[UNIT ${log.sourceID}]`}
+                                                            </span>
+                                                        )}</span>
                                                         <span>{new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                     </Typography>
                                                     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
