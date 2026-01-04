@@ -101,8 +101,6 @@ public class GpsService : BackgroundService
         // Only update if we actually got satellite info to prevent flickering to 0
         if (totalSeen == 0) return;
 
-        _logger.LogInformation($"GPS SKY: Seen {totalSeen}, Used {satsUsed}");
-
         // Update state preserving other data
         if (_lastGps != null)
         {
@@ -117,8 +115,29 @@ public class GpsService : BackgroundService
 
     internal void ParseTpv(JsonElement root)
     {
-        // "mode": 2 (2D), 3 (3D)
-        if (!root.TryGetProperty("mode", out var modeProp) || modeProp.GetInt32() < 2) return;
+        // "mode": 0 (n/a), 1 (no fix), 2 (2D), 3 (3D)
+        int mode = root.TryGetProperty("mode", out var modeProp) ? modeProp.GetInt32() : 0;
+        bool hasFix = mode >= 2;
+        bool wasFixed = (_lastGps?.Fix ?? 0) >= 2;
+
+        if (hasFix && !wasFixed)
+        {
+            _logger.LogInformation($"GPS Fix Acquired ({mode}D)");
+        }
+        else if (!hasFix && wasFixed)
+        {
+            _logger.LogWarning("GPS Fix Lost");
+        }
+
+        if (!hasFix) 
+        {
+            if (_lastGps != null && _lastGps.Fix != mode)
+            {
+                _lastGps = _lastGps with { Fix = mode };
+                OnGpsUpdate?.Invoke(_lastGps);
+            }
+            return;
+        }
         
         double lat = root.TryGetProperty("lat", out var l) ? l.GetDouble() : (_lastGps?.Lat ?? 0);
         double lon = root.TryGetProperty("lon", out var ln) ? ln.GetDouble() : (_lastGps?.Lon ?? 0);
