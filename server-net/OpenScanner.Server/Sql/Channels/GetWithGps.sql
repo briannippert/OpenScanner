@@ -1,0 +1,1 @@
+SELECT * FROM channels WHERE lat IS NOT NULL AND lon IS NOT NULL

@@ -8,7 +8,7 @@ using System.Text.Json;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add Services
-builder.Services.AddSingleton<Database>();
+builder.Services.AddSingleton<IDatabase, Database>();
 builder.Services.AddSingleton<GpsService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GpsService>());
 builder.Services.AddSingleton<RtlDevice>();
@@ -61,20 +61,20 @@ app.UseStaticFiles(new StaticFileOptions
     ContentTypeProvider = provider
 });
 
-var db = app.Services.GetRequiredService<Database>();
+var db = app.Services.GetRequiredService<IDatabase>();
 var radio = app.Services.GetRequiredService<RtlDevice>();
 var wsBroadcaster = app.Services.GetRequiredService<WebSocketBroadcaster>();
 
 // --- API Routes ---
 
-app.MapGet("/api/channels", () => db.GetAllChannels())
+app.MapGet("/api/channels", async () => await db.GetAllChannelsAsync())
     .WithSummary("Get all channels")
     .WithDescription("Retrieves the list of all configured radio channels.")
     .Produces<IEnumerable<Channel>>(StatusCodes.Status200OK);
 
-app.MapPost("/api/channels", (Channel channel) => 
+app.MapPost("/api/channels", async (Channel channel) => 
 {
-    var id = db.AddChannel(channel);
+    var id = await db.AddChannelAsync(channel);
     channel.Id = id;
     radio.ReloadChannels();
     return Results.Created($"/api/channels/{id}", channel);
@@ -83,10 +83,10 @@ app.MapPost("/api/channels", (Channel channel) =>
     .WithDescription("Adds a new radio channel to the configuration and reloads the scanner.")
     .Produces<Channel>(StatusCodes.Status201Created);
 
-app.MapPut("/api/channels/{id}", (int id, Channel channel) => 
+app.MapPut("/api/channels/{id}", async (int id, Channel channel) => 
 {
     channel.Id = id;
-    db.UpdateChannel(channel);
+    await db.UpdateChannelAsync(channel);
     radio.ReloadChannels();
     return Results.Ok();
 })
@@ -94,9 +94,9 @@ app.MapPut("/api/channels/{id}", (int id, Channel channel) =>
     .WithDescription("Updates an existing channel's configuration.")
     .Produces(StatusCodes.Status200OK);
 
-app.MapDelete("/api/channels/{id}", (int id) => 
+app.MapDelete("/api/channels/{id}", async (int id) => 
 {
-    db.DeleteChannel(id);
+    await db.DeleteChannelAsync(id);
     radio.ReloadChannels();
     return Results.Ok();
 })
@@ -104,39 +104,39 @@ app.MapDelete("/api/channels/{id}", (int id) =>
     .WithDescription("Removes a channel from the configuration.")
     .Produces(StatusCodes.Status200OK);
 
-app.MapGet("/api/history", () => db.GetHistory(100))
+app.MapGet("/api/history", async () => await db.GetHistoryAsync(100))
     .WithSummary("Get call history")
     .WithDescription("Retrieves the last 100 radio transmission logs.")
     .Produces<IEnumerable<CallLog>>(StatusCodes.Status200OK);
 
-app.MapGet("/api/history/years", () => db.GetTransmissionYears())
+app.MapGet("/api/history/years", async () => await db.GetTransmissionYearsAsync())
     .WithSummary("Get available years")
     .Produces<IEnumerable<string>>(StatusCodes.Status200OK);
 
-app.MapGet("/api/history/{year}/months", (string year) => db.GetTransmissionMonths(year))
+app.MapGet("/api/history/{year}/months", async (string year) => await db.GetTransmissionMonthsAsync(year))
     .WithSummary("Get available months for a year")
     .Produces<IEnumerable<string>>(StatusCodes.Status200OK);
 
-app.MapGet("/api/history/{year}/{month}/days", (string year, string month) => db.GetTransmissionDays(year, month))
+app.MapGet("/api/history/{year}/{month}/days", async (string year, string month) => await db.GetTransmissionDaysAsync(year, month))
     .WithSummary("Get available days for a month")
     .Produces<IEnumerable<string>>(StatusCodes.Status200OK);
 
-app.MapGet("/api/history/{year}/{month}/{day}/channels", (string year, string month, string day) => db.GetTransmissionChannels(year, month, day))
+app.MapGet("/api/history/{year}/{month}/{day}/channels", async (string year, string month, string day) => await db.GetTransmissionChannelsAsync(year, month, day))
     .WithSummary("Get available channels for a day")
     .Produces<IEnumerable<dynamic>>(StatusCodes.Status200OK);
 
-app.MapGet("/api/history/filter", (string year, string month, string day, string alphaTag, double frequency) => 
-    db.GetTransmissions(year, month, day, alphaTag, frequency))
+app.MapGet("/api/history/filter", async (string year, string month, string day, string alphaTag, double frequency) => 
+    await db.GetTransmissionsAsync(year, month, day, alphaTag, frequency))
     .WithSummary("Get filtered transmissions")
     .Produces<IEnumerable<CallLog>>(StatusCodes.Status200OK);
 
-app.MapGet("/api/history/search", (string q) => db.SearchTransmissions(q))
+app.MapGet("/api/history/search", async (string q) => await db.SearchTransmissionsAsync(q))
     .WithSummary("Search transmissions")
     .Produces<IEnumerable<CallLog>>(StatusCodes.Status200OK);
 
-app.MapDelete("/api/history/{id}", (string id) => 
+app.MapDelete("/api/history/{id}", async (string id) => 
 {
-    db.DeleteTransmission(id);
+    await db.DeleteTransmissionAsync(id);
     return Results.Ok();
 })
     .WithSummary("Delete a log entry")
