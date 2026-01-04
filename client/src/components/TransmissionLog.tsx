@@ -341,6 +341,9 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog, playingId
                             <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#aaa' }}>
                                 {new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                             </Typography>
+                            <Typography variant="caption" sx={{ color: '#fff', fontWeight: 'bold', fontSize: '0.8rem' }}>
+                                {log.alphaTag}
+                            </Typography>
                             {log.duration && (
                                 <Typography variant="caption" sx={{ color: '#555', fontSize: '9px' }}>
                                     {log.duration.toFixed(1)}s
@@ -361,7 +364,7 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog, playingId
                                         {log.sourceID < 100 ? `BASE` : `UNIT ${log.sourceID}`}
                                     </Typography>
                                 )}
-                                {log.lat && (
+                                {log.lat && log.lat !== 0 && (
                                     <Typography variant="caption" sx={{ color: '#444', fontSize: '10px' }}>
                                         {log.lat.toFixed(3)}, {log.lon?.toFixed(3)}
                                     </Typography>
