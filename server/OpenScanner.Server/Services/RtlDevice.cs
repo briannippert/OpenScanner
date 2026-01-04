@@ -37,6 +37,12 @@ public class RtlDevice : BackgroundService
     private int? _currentTargetID;
     private DateTime _lastActivityReset = DateTime.MinValue;
 
+    // Pre-roll buffer to capture start of transmissions
+    private readonly LinkedList<byte[]> _preRollBuffer = new();
+    private int _preRollSize = 0;
+    private const int MaxPreRollBytes = 48000 * 2 * 2; // 2 seconds (48k, 16bit)
+    private readonly object _audioLock = new();
+
     public RtlDevice(IDatabase db, ILogger<RtlDevice> logger, GpsService gps)
     {
         _db = db;
@@ -590,11 +596,27 @@ public class RtlDevice : BackgroundService
                             OnAudio?.Invoke(chunk);
                             lastSend = DateTime.UtcNow;
 
-                            if (_recordingStream != null)
+                            lock (_audioLock)
                             {
-                                await _recordingStream.WriteAsync(chunk, 0, chunk.Length, token);
-                                await _recordingStream.FlushAsync(token);
-                                ResetActivityTimeout(); // Keep recording alive while audio flows
+                                // Update pre-roll
+                                _preRollBuffer.AddLast(chunk);
+                                _preRollSize += chunk.Length;
+                                while (_preRollSize > MaxPreRollBytes)
+                                {
+                                    var first = _preRollBuffer.First;
+                                    if (first != null)
+                                    {
+                                        _preRollSize -= first.Value.Length;
+                                        _preRollBuffer.RemoveFirst();
+                                    }
+                                }
+
+                                if (_recordingStream != null)
+                                {
+                                    _recordingStream.Write(chunk, 0, chunk.Length);
+                                    _recordingStream.Flush();
+                                    ResetActivityTimeout(); // Keep recording alive while audio flows
+                                }
                             }
                         }
                     }
@@ -761,8 +783,17 @@ public class RtlDevice : BackgroundService
         
         try 
         {
-            _recordingStream = new FileStream(_currentRecordingPath, FileMode.Create);
-            _logger.LogInformation($"Starting recording: {filename}");
+            lock (_audioLock)
+            {
+                _recordingStream = new FileStream(_currentRecordingPath, FileMode.Create);
+                _logger.LogInformation($"Starting recording: {filename}");
+
+                // Flush pre-roll buffer
+                foreach (var chunk in _preRollBuffer)
+                {
+                    _recordingStream.Write(chunk, 0, chunk.Length);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -772,20 +803,27 @@ public class RtlDevice : BackgroundService
 
     private void StopRecording()
     {
-        if (_recordingStream == null) return;
+        string? recordingPath;
+        long startTime;
 
-        _recordingStream.Close();
-        _recordingStream = null;
+        lock (_audioLock)
+        {
+            if (_recordingStream == null) return;
+            _recordingStream.Close();
+            _recordingStream = null;
+            recordingPath = _currentRecordingPath;
+            startTime = _recordingStartTime;
+        }
         
-        var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - _recordingStartTime) / 1000.0;
+        var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
         
-        if (duration >= 0.5 && _currentRecordingPath != null && File.Exists(_currentRecordingPath) && _state.CurrentChannel != null)
+        if (duration >= 0.5 && recordingPath != null && File.Exists(recordingPath) && _state.CurrentChannel != null)
         {
              // Run Transcription
              string? transcription = null;
              try 
              {
-                 transcription = TranscribeAudio(_currentRecordingPath);
+                 transcription = TranscribeAudio(recordingPath);
              }
              catch (Exception ex)
              {
@@ -805,7 +843,7 @@ public class RtlDevice : BackgroundService
                  _state.CurrentChannel.Description,
                  (_state.Gps?.Lat != 0) ? _state.Gps?.Lat : null,
                  (_state.Gps?.Lon != 0) ? _state.Gps?.Lon : null,
-                 Path.GetFileName(_currentRecordingPath),
+                 Path.GetFileName(recordingPath),
                  duration,
                  transcription,
                  _currentSourceID,
@@ -819,13 +857,21 @@ public class RtlDevice : BackgroundService
              _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {_currentSourceID} | Text: {transcription}");
              OnNewLog?.Invoke(log);
         }
-        else if (_currentRecordingPath != null)
+        else if (recordingPath != null)
         {
-            try { File.Delete(_currentRecordingPath); } catch { }
+            try { File.Delete(recordingPath); } catch { }
         }
         
-        _currentRecordingPath = null;
         UpdateState(_state with { SourceID = null, TargetID = null, CurrentTone = null });
+
+        // Only clear the path if we haven't started a new recording
+        lock (_audioLock)
+        {
+            if (_recordingStream == null && _currentRecordingPath == recordingPath)
+            {
+                _currentRecordingPath = null;
+            }
+        }
     }
 
     private string? TranscribeAudio(string rawPath)
@@ -846,7 +892,8 @@ public class RtlDevice : BackgroundService
         }
 
         // 1. Convert RAW (8k or 48k s16le) to WAV (16k)
-        int inputRate = (_state.CurrentChannel?.Mode == "WFM") ? 48000 : 8000;
+        // inputRate must match the output of the decoder pipeline (which is 48k for both WFM and others due to ffmpeg upsampling)
+        int inputRate = 48000;
         var ffmpegArgs = $"-f s16le -ar {inputRate} -ac 1 -i \"{rawPath}\" -ar 16000 -ac 1 \"{wavPath}\" -y";
         var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg", ffmpegArgs)
         {
