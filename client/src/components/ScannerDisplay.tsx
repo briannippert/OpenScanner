@@ -44,7 +44,7 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
         <Paper 
             elevation={6} 
             sx={{ 
-                p: 2, 
+                p: { xs: 1, sm: 2 }, 
                 bgcolor: '#0a0a0a', 
                 color: '#fff', 
                 borderRadius: 2,
@@ -66,7 +66,7 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
 
             <Box position="relative" zIndex={1}>
                 {/* Header Status Line */}
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} sx={{ flexWrap: 'wrap', gap: 1 }}>
                     <Box display="flex" alignItems="center" gap={1}>
                         <RadioIcon sx={{ color: activeColor }} />
                         <Typography variant="overline" sx={{ color: activeColor, fontWeight: 'bold', letterSpacing: 2 }}>
@@ -76,7 +76,7 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                     <Box display="flex" gap={1} alignItems="center">
                         {onScan && state.status !== 'SCANNING' && state.status !== 'IDLE' && (
                             <Chip 
-                                label={state.status === 'RECEIVING' || state.status === 'MONITORING' ? "SKIP" : "RESUME SCAN"} 
+                                label={state.status === 'RECEIVING' || state.status === 'MONITORING' ? "SKIP" : "RESUME"} 
                                 color="primary" 
                                 variant="outlined" 
                                 size="small" 

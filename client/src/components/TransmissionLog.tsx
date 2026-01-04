@@ -284,7 +284,7 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete }:
 
     return (
         <>
-            <ListItemButton onClick={handleToggle} sx={{ pl: 8, borderBottom: '1px solid #1a1a1a', bgcolor: open ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
+            <ListItemButton onClick={handleToggle} sx={{ pl: { xs: 4, sm: 8 }, borderBottom: '1px solid #1a1a1a', bgcolor: open ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
                 <Radio sx={{ mr: 2, color: '#00ff00', fontSize: 16 }} />
                 <ListItemText 
                     primary={channel.alphaTag || `${channel.frequency} MHz`} 
@@ -310,7 +310,7 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog, playingId
         <React.Fragment>
             <ListItem 
                 sx={{ 
-                    pl: 10, 
+                    pl: { xs: 4, sm: 10 }, 
                     pr: 2,
                     py: 1,
                     '& .MuiListItemSecondaryAction-root': {

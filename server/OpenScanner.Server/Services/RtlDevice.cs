@@ -509,9 +509,10 @@ public class RtlDevice : BackgroundService
         }
         else
         {
-            // DSD-FME outputs 8k by default for voice. Upsample to 48k to match WFM and Client expectation.
+            // DSD-FME outputs {outputRate} (48k) because of the -s flag. 
+            // FFmpeg input rate (-ar) must match dsd-fme output rate.
             // Added -fflags nobuffer -flags low_delay to reduce latency and choppiness
-            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | /usr/bin/ffmpeg -f s16le -ar 8000 -ac 1 -i - -f s16le -ar 48000 -ac 1 -fflags nobuffer -flags low_delay - -loglevel quiet";
+            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | /usr/bin/ffmpeg -f s16le -ar {outputRate} -ac 1 -i - -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay - -loglevel quiet";
         }
 
         var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
