@@ -207,8 +207,8 @@ function App() {
             float32Array[i] = int16Array[i] / 32768;
         }
 
-        // Recorded files are 8000Hz s16le
-        const buffer = window.audioCtx.createBuffer(1, float32Array.length, 8000);
+        // Recorded files are 48000Hz s16le (Unified Rate)
+        const buffer = window.audioCtx.createBuffer(1, float32Array.length, 48000);
         buffer.copyToChannel(float32Array, 0);
         const source = window.audioCtx.createBufferSource();
         source.buffer = buffer;
@@ -358,7 +358,7 @@ function App() {
             if (ctx.state === 'suspended') ctx.resume();
             const analyser = (ctx as any)._analyser;
 
-            const audioBuffer = ctx.createBuffer(1, float32Array.length, 8000);
+            const audioBuffer = ctx.createBuffer(1, float32Array.length, 48000);
             audioBuffer.copyToChannel(float32Array, 0);
 
             const source = ctx.createBufferSource();

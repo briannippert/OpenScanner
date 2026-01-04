@@ -486,11 +486,13 @@ public class RtlDevice : BackgroundService
         if (mode == "WFM")
         {
             // WFM: Bypass dsd-fme (it doesn't handle WFM well) and output raw audio from rtl_fm
+            // Output is already 48k (outputRate)
             cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
         }
         else
         {
-            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate}";
+            // DSD-FME outputs 8k by default for voice. Upsample to 48k to match WFM and Client expectation.
+            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | /usr/bin/ffmpeg -f s16le -ar 8000 -ac 1 -i - -f s16le -ar 48000 -ac 1 - -loglevel quiet";
         }
 
         var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
