@@ -596,7 +596,11 @@ function App() {
                                                 </Typography>
                                             </Box>
                                             <Box mt={1} display="flex" alignItems="center" gap={1}>
-                                                <Chip label={ch.mode} size="small" sx={{ height: 20, fontSize: '0.65rem', bgcolor: '#333' }} />
+                                                <Chip 
+                                                    label={['FM', 'AM', 'WFM'].includes(ch.mode?.toUpperCase()) ? `${ch.mode} (EXP)` : ch.mode} 
+                                                    size="small" 
+                                                    sx={{ height: 20, fontSize: '0.65rem', bgcolor: '#333' }} 
+                                                />
                                                 <Box flexGrow={1} />
                                                 {manualHold === ch.frequency ? <PauseIcon fontSize="small" color="warning" /> : <PlayArrowIcon fontSize="small" sx={{ opacity: 0.3 }} />}
                                             </Box>
