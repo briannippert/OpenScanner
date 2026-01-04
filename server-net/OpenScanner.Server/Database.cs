@@ -158,9 +158,15 @@ public class Database
     public void SaveTransmission(CallLog log)
     {
         using var conn = GetConnection();
+        // If timestamp is not provided, default to now
+        if (string.IsNullOrEmpty(log.Timestamp))
+        {
+            log.Timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+        }
+
         conn.Execute(@"
             INSERT INTO transmissions (id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path, duration, transcription, sourceID, targetID)
-            VALUES (@Id, datetime('now'), @Frequency, @AlphaTag, @Description, @Lat, @Lon, 0, @AudioPath, @Duration, @Transcription, @SourceID, @TargetID)", log);
+            VALUES (@Id, @Timestamp, @Frequency, @AlphaTag, @Description, @Lat, @Lon, 0, @AudioPath, @Duration, @Transcription, @SourceID, @TargetID)", log);
     }
 
     public IEnumerable<CallLog> GetHistory(int limit = 100)
