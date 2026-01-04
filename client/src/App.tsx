@@ -15,6 +15,7 @@ import UsbOffIcon from '@mui/icons-material/UsbOff';
 import EditIcon from '@mui/icons-material/Edit';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
+import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import type { ScannerState, Channel, CallLog } from './types';
 
 const darkTheme = createTheme({
@@ -92,6 +93,23 @@ function App() {
     } else {
       document.exitFullscreen();
     }
+  };
+
+  const downloadSupportPackage = () => {
+    const isDev = window.location.port === '5173';
+    const port = isDev ? '3001' : window.location.port || '80';
+    const protocol = window.location.protocol;
+    const backendHost = window.location.hostname;
+    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
+    const url = `${protocol}//${backendHost}${portSuffix}/api/support/package`;
+    
+    // Create a temporary link to trigger download with a better UX than window.location.href
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', ''); // Request download
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Wake Lock Manager
@@ -545,6 +563,12 @@ function App() {
                 <Tooltip title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
                     <IconButton color="inherit" onClick={toggleFullscreen} sx={{ ml: 1 }}>
                         {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+                    </IconButton>
+                </Tooltip>
+
+                <Tooltip title="Download Support Package">
+                    <IconButton color="inherit" onClick={downloadSupportPackage} sx={{ ml: 1 }}>
+                        <SupportAgentIcon />
                     </IconButton>
                 </Tooltip>
             </Toolbar>
