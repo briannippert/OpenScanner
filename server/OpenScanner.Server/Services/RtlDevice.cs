@@ -277,7 +277,7 @@ public class RtlDevice : BackgroundService
             }
 
             // Loop exited
-            if (_scannerProcess.HasExited && _scannerProcess.ExitCode != 0)
+            if (_scannerProcess != null && _scannerProcess.HasExited && _scannerProcess.ExitCode != 0)
             {
                 _logger.LogError($"Scanner process exited unexpectedly with code {_scannerProcess.ExitCode}");
                 UpdateState(_state with { IsHardwareConnected = false, Status = "IDLE" });
@@ -489,7 +489,7 @@ public class RtlDevice : BackgroundService
             captureRate = 170000; // WFM needs higher bandwidth
         } else if (mode == "P25") {
             rtlMode = "fm";
-            dsdArgs = "-f1";
+            dsdArgs = "-f1 -C"; // P25 with Control Channel support
         } else {
             // Unknown, try auto
             rtlMode = "fm";
@@ -646,6 +646,9 @@ public class RtlDevice : BackgroundService
                         var line = await _decoderProcess.StandardError.ReadLineAsync(token);
                         if (line != null)
                         {
+                            // Log all decoder output for debugging the "missing audio" issue
+                            _logger.LogDebug($"Decoder: {line}");
+
                             // Expand detection to capture more frame types and analog activity
                             // STRICTER FILTER: Ignore "Sync:" and "P25" to avoid locking on Control Channels (TSBK)
                             // We only want to lock on Voice frames (LDU/VDU) or Analog indicators.
