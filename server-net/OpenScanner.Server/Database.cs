@@ -1,24 +1,36 @@
 using Dapper;
 using Microsoft.Data.Sqlite;
 using OpenScanner.Server.Models;
+using Microsoft.Extensions.Configuration;
 
 namespace OpenScanner.Server;
 
-public class Database
+public class Database : IDatabase
 {
     private readonly string _connectionString;
     private readonly string _dataDir;
+    private readonly ILogger<Database> _logger;
 
-    public Database(string? connectionString = null)
+    public Database(IConfiguration configuration, ILogger<Database> logger)
     {
+        _logger = logger;
         var root = Directory.GetCurrentDirectory();
-        _dataDir = Path.Combine(root, "../../data");
-
-        if (!string.IsNullOrEmpty(connectionString))
+        
+        var configDataDir = configuration["Database:DataDir"];
+        if (!string.IsNullOrEmpty(configDataDir))
         {
-            _connectionString = connectionString;
+            _dataDir = Path.IsPathRooted(configDataDir) ? configDataDir : Path.GetFullPath(Path.Combine(root, configDataDir));
+        }
+        else
+        {
+            _dataDir = Path.GetFullPath(Path.Combine(root, "../../data"));
+        }
+
+        var configConnString = configuration.GetConnectionString("DefaultConnection");
+        if (!string.IsNullOrEmpty(configConnString))
+        {
+            _connectionString = configConnString;
             
-            // Try to extract directory from connection string for _dataDir if it's a Sqlite connection string
             if (_connectionString.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase))
             {
                 var path = _connectionString.Substring("Data Source=".Length).Split(';')[0];
@@ -41,40 +53,9 @@ public class Database
     private void Initialize()
     {
         using var conn = GetConnection();
-        conn.Execute(@"
-            CREATE TABLE IF NOT EXISTS transmissions (
-                id TEXT PRIMARY KEY,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                frequency REAL,
-                alphaTag TEXT,
-                description TEXT,
-                lat REAL,
-                lon REAL,
-                alt REAL,
-                audio_path TEXT,
-                duration REAL,
-                transcription TEXT,
-                sourceID INTEGER,
-                targetID INTEGER
-            );
-
-            CREATE TABLE IF NOT EXISTS channels (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                frequency REAL UNIQUE,
-                license TEXT,
-                type TEXT,
-                tone TEXT,
-                alphaTag TEXT,
-                description TEXT,
-                mode TEXT,
-                tag TEXT,
-                lat REAL,
-                lon REAL,
-                range REAL
-            );
-        ");
+        var sql = SqlLoader.GetSql("Initialize.sql");
+        conn.Execute(sql);
         
-        // Simple migration for existing table
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN transcription TEXT;"); } catch {}
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN sourceID INTEGER;"); } catch {}
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN targetID INTEGER;"); } catch {}
@@ -82,7 +63,6 @@ public class Database
         try { conn.Execute("ALTER TABLE channels ADD COLUMN lon REAL;"); } catch {}
         try { conn.Execute("ALTER TABLE channels ADD COLUMN range REAL;"); } catch {}
 
-        // Seed if empty
         var count = conn.ExecuteScalar<int>("SELECT count(*) FROM channels");
         if (count == 0)
         {
@@ -91,31 +71,29 @@ public class Database
                 new Channel(155.0325, "Salem Police", "Police Operations", "P25", "RM", "117 NAC", "Law Dispatch", "WQGI420"),
                 new Channel(155.8875, "Salem Fire", "Fire Operations", "P25", "RM", "117 NAC", "Fire Dispatch", "WPMN513")
             };
-            conn.Execute(@"
-                INSERT INTO channels (frequency, license, type, tone, alphaTag, description, mode, tag)
-                VALUES (@Frequency, @License, @Type, @Tone, @AlphaTag, @Description, @Mode, @Tag)", seed);
+            var seedSql = SqlLoader.GetSql("Channels/Seed.sql");
+            conn.Execute(seedSql, seed);
         }
     }
 
     public SqliteConnection GetConnection() => new SqliteConnection(_connectionString);
 
-    public IEnumerable<Channel> GetAllChannels()
+    public async Task<IEnumerable<Channel>> GetAllChannelsAsync()
     {
         using var conn = GetConnection();
-        return conn.Query<Channel>("SELECT * FROM channels ORDER BY frequency ASC");
+        return await conn.QueryAsync<Channel>(SqlLoader.GetSql("Channels/GetAll.sql"));
     }
 
-    public IEnumerable<Channel> GetChannelsNear(double lat, double lon)
+    public async Task<IEnumerable<Channel>> GetChannelsNearAsync(double lat, double lon)
     {
         using var conn = GetConnection();
-        var all = conn.Query<Channel>("SELECT * FROM channels WHERE lat IS NOT NULL AND lon IS NOT NULL");
+        var all = await conn.QueryAsync<Channel>(SqlLoader.GetSql("Channels/GetWithGps.sql"));
         
-        // Filter by distance in C# (easier than SQLite math functions)
         return all.Where(c => 
         {
             if (!c.Lat.HasValue || !c.Lon.HasValue) return false;
             double distance = CalculateDistance(lat, lon, c.Lat.Value, c.Lon.Value);
-            return distance <= (c.Range ?? 25); // Default to 25 mile range
+            return distance <= (c.Range ?? 25);
         }).OrderBy(c => c.Frequency);
     }
 
@@ -126,121 +104,95 @@ public class Database
         var d2 = lat2 * (Math.PI / 180.0);
         var num2 = lon2 * (Math.PI / 180.0) - num1;
         var d3 = Math.Pow(Math.Sin((d2 - d1) / 2.0), 2.0) + Math.Cos(d1) * Math.Cos(d2) * Math.Pow(Math.Sin(num2 / 2.0), 2.0);
-        return 6376500.0 * (2.0 * Math.Atan2(Math.Sqrt(d3), Math.Sqrt(1.0 - d3))) * 0.000621371; // result in miles
+        return 6376500.0 * (2.0 * Math.Atan2(Math.Sqrt(d3), Math.Sqrt(1.0 - d3))) * 0.000621371;
     }
 
-    public int AddChannel(Channel channel)
+    public async Task<int> AddChannelAsync(Channel channel)
     {
         using var conn = GetConnection();
-        return conn.ExecuteScalar<int>(@"
-            INSERT INTO channels (frequency, license, type, tone, alphaTag, description, mode, tag, lat, lon, range)
-            VALUES (@Frequency, @License, @Type, @Tone, @AlphaTag, @Description, @Mode, @Tag, @Lat, @Lon, @Range)
-            RETURNING id", channel);
+        return await conn.ExecuteScalarAsync<int>(SqlLoader.GetSql("Channels/Insert.sql"), channel);
     }
 
-    public void UpdateChannel(Channel channel)
+    public async Task UpdateChannelAsync(Channel channel)
     {
         using var conn = GetConnection();
-        conn.Execute(@"
-            UPDATE channels 
-            SET frequency=@Frequency, license=@License, type=@Type, tone=@Tone, 
-                alphaTag=@AlphaTag, description=@Description, mode=@Mode, tag=@Tag,
-                lat=@Lat, lon=@Lon, range=@Range
-            WHERE id=@Id", channel);
+        await conn.ExecuteAsync(SqlLoader.GetSql("Channels/Update.sql"), channel);
     }
 
-    public void DeleteChannel(int id)
+    public async Task DeleteChannelAsync(int id)
     {
         using var conn = GetConnection();
-        conn.Execute("DELETE FROM channels WHERE id = @Id", new { Id = id });
+        await conn.ExecuteAsync(SqlLoader.GetSql("Channels/Delete.sql"), new { Id = id });
     }
 
-    public void SaveTransmission(CallLog log)
+    public async Task SaveTransmissionAsync(CallLog log)
     {
         using var conn = GetConnection();
-        // If timestamp is not provided, default to now
         if (string.IsNullOrEmpty(log.Timestamp))
         {
             log.Timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
         }
 
-        conn.Execute(@"
-            INSERT INTO transmissions (id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path, duration, transcription, sourceID, targetID)
-            VALUES (@Id, @Timestamp, @Frequency, @AlphaTag, @Description, @Lat, @Lon, 0, @AudioPath, @Duration, @Transcription, @SourceID, @TargetID)", log);
+        await conn.ExecuteAsync(SqlLoader.GetSql("Transmissions/Insert.sql"), log);
     }
 
-    public IEnumerable<CallLog> GetHistory(int limit = 100)
+    public async Task<IEnumerable<CallLog>> GetHistoryAsync(int limit = 100)
     {
         using var conn = GetConnection();
-        return conn.Query<CallLog>("SELECT id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path as AudioPath, duration, transcription, sourceID, targetID FROM transmissions ORDER BY timestamp DESC LIMIT @Limit", new { Limit = limit });
+        return await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetHistory.sql"), new { Limit = limit });
     }
     
-    public IEnumerable<string> GetTransmissionYears()
+    public async Task<IEnumerable<string>> GetTransmissionYearsAsync()
     {
         using var conn = GetConnection();
-        return conn.Query<string>("SELECT DISTINCT strftime('%Y', timestamp) FROM transmissions ORDER BY 1 DESC");
+        return await conn.QueryAsync<string>(SqlLoader.GetSql("Transmissions/GetYears.sql"));
     }
 
-    public IEnumerable<string> GetTransmissionMonths(string year)
+    public async Task<IEnumerable<string>> GetTransmissionMonthsAsync(string year)
     {
         using var conn = GetConnection();
-        return conn.Query<string>("SELECT DISTINCT strftime('%m', timestamp) FROM transmissions WHERE strftime('%Y', timestamp) = @Year ORDER BY 1 DESC", new { Year = year });
+        return await conn.QueryAsync<string>(SqlLoader.GetSql("Transmissions/GetMonths.sql"), new { Year = year });
     }
 
-    public IEnumerable<string> GetTransmissionDays(string year, string month)
+    public async Task<IEnumerable<string>> GetTransmissionDaysAsync(string year, string month)
     {
         using var conn = GetConnection();
-        return conn.Query<string>("SELECT DISTINCT strftime('%d', timestamp) FROM transmissions WHERE strftime('%Y', timestamp) = @Year AND strftime('%m', timestamp) = @Month ORDER BY 1 DESC", new { Year = year, Month = month });
+        return await conn.QueryAsync<string>(SqlLoader.GetSql("Transmissions/GetDays.sql"), new { Year = year, Month = month });
     }
 
-    public IEnumerable<dynamic> GetTransmissionChannels(string year, string month, string day)
+    public async Task<IEnumerable<dynamic>> GetTransmissionChannelsAsync(string year, string month, string day)
     {
         using var conn = GetConnection();
-        // Return both alphaTag and frequency to uniquely identify/display
-        return conn.Query("SELECT DISTINCT alphaTag, frequency FROM transmissions WHERE strftime('%Y', timestamp) = @Year AND strftime('%m', timestamp) = @Month AND strftime('%d', timestamp) = @Day ORDER BY alphaTag, frequency", 
-            new { Year = year, Month = month, Day = day });
+        return await conn.QueryAsync(SqlLoader.GetSql("Transmissions/GetChannels.sql"), new { Year = year, Month = month, Day = day });
     }
 
-    public IEnumerable<CallLog> GetTransmissions(string year, string month, string day, string alphaTag, double frequency)
+    public async Task<IEnumerable<CallLog>> GetTransmissionsAsync(string year, string month, string day, string alphaTag, double frequency)
     {
         using var conn = GetConnection();
-        return conn.Query<CallLog>(@"
-            SELECT id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path as AudioPath, duration, transcription, sourceID, targetID 
-            FROM transmissions 
-            WHERE strftime('%Y', timestamp) = @Year 
-              AND strftime('%m', timestamp) = @Month 
-              AND strftime('%d', timestamp) = @Day
-              AND alphaTag = @AlphaTag
-              AND frequency = @Frequency
-            ORDER BY timestamp DESC", 
+        return await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetFiltered.sql"), 
             new { Year = year, Month = month, Day = day, AlphaTag = alphaTag, Frequency = frequency });
     }
 
-    public IEnumerable<CallLog> SearchTransmissions(string query)
+    public async Task<IEnumerable<CallLog>> SearchTransmissionsAsync(string query)
     {
         using var conn = GetConnection();
         var searchTerm = $"%{query}%";
-        return conn.Query<CallLog>(@"
-            SELECT id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path as AudioPath, duration, transcription, sourceID, targetID 
-            FROM transmissions 
-            WHERE transcription LIKE @Query 
-               OR description LIKE @Query 
-               OR alphaTag LIKE @Query 
-               OR CAST(frequency AS TEXT) LIKE @Query
-            ORDER BY timestamp DESC
-            LIMIT 100", 
-            new { Query = searchTerm });
+        return await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/Search.sql"), new { Query = searchTerm });
     }
 
-    public void DeleteTransmission(string id)
+    public async Task DeleteTransmissionAsync(string id)
     {
         using var conn = GetConnection();
-        var path = conn.QueryFirstOrDefault<string>("SELECT audio_path FROM transmissions WHERE id = @Id", new { Id = id });
+        var path = await conn.QueryFirstOrDefaultAsync<string>(SqlLoader.GetSql("Transmissions/GetAudioPath.sql"), new { Id = id });
         if (!string.IsNullOrEmpty(path))
         {
             var fullPath = Path.Combine(_dataDir, "recordings", path);
-            if (File.Exists(fullPath)) File.Delete(fullPath);
+            if (File.Exists(fullPath)) 
+            {
+                try { File.Delete(fullPath); } 
+                catch (Exception ex) { _logger.LogError(ex, "Failed to delete audio file {Path}", fullPath); }
+            }
         }
-        conn.Execute("DELETE FROM transmissions WHERE id = @Id", new { Id = id });
+        await conn.ExecuteAsync(SqlLoader.GetSql("Transmissions/Delete.sql"), new { Id = id });
     }
 }

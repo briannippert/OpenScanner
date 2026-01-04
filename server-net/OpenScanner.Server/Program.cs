@@ -8,7 +8,8 @@ using System.Text.Json;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add Services
-builder.Services.AddSingleton<Database>();
+builder.Services.AddControllers(); // Added for Controllers
+builder.Services.AddSingleton<IDatabase, Database>();
 builder.Services.AddSingleton<GpsService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GpsService>());
 builder.Services.AddSingleton<RtlDevice>();
@@ -61,117 +62,10 @@ app.UseStaticFiles(new StaticFileOptions
     ContentTypeProvider = provider
 });
 
-var db = app.Services.GetRequiredService<Database>();
-var radio = app.Services.GetRequiredService<RtlDevice>();
-var wsBroadcaster = app.Services.GetRequiredService<WebSocketBroadcaster>();
-
-// --- API Routes ---
-
-app.MapGet("/api/channels", () => db.GetAllChannels())
-    .WithSummary("Get all channels")
-    .WithDescription("Retrieves the list of all configured radio channels.")
-    .Produces<IEnumerable<Channel>>(StatusCodes.Status200OK);
-
-app.MapPost("/api/channels", (Channel channel) => 
-{
-    var id = db.AddChannel(channel);
-    channel.Id = id;
-    radio.ReloadChannels();
-    return Results.Created($"/api/channels/{id}", channel);
-})
-    .WithSummary("Add a new channel")
-    .WithDescription("Adds a new radio channel to the configuration and reloads the scanner.")
-    .Produces<Channel>(StatusCodes.Status201Created);
-
-app.MapPut("/api/channels/{id}", (int id, Channel channel) => 
-{
-    channel.Id = id;
-    db.UpdateChannel(channel);
-    radio.ReloadChannels();
-    return Results.Ok();
-})
-    .WithSummary("Update a channel")
-    .WithDescription("Updates an existing channel's configuration.")
-    .Produces(StatusCodes.Status200OK);
-
-app.MapDelete("/api/channels/{id}", (int id) => 
-{
-    db.DeleteChannel(id);
-    radio.ReloadChannels();
-    return Results.Ok();
-})
-    .WithSummary("Delete a channel")
-    .WithDescription("Removes a channel from the configuration.")
-    .Produces(StatusCodes.Status200OK);
-
-app.MapGet("/api/history", () => db.GetHistory(100))
-    .WithSummary("Get call history")
-    .WithDescription("Retrieves the last 100 radio transmission logs.")
-    .Produces<IEnumerable<CallLog>>(StatusCodes.Status200OK);
-
-app.MapGet("/api/history/years", () => db.GetTransmissionYears())
-    .WithSummary("Get available years")
-    .Produces<IEnumerable<string>>(StatusCodes.Status200OK);
-
-app.MapGet("/api/history/{year}/months", (string year) => db.GetTransmissionMonths(year))
-    .WithSummary("Get available months for a year")
-    .Produces<IEnumerable<string>>(StatusCodes.Status200OK);
-
-app.MapGet("/api/history/{year}/{month}/days", (string year, string month) => db.GetTransmissionDays(year, month))
-    .WithSummary("Get available days for a month")
-    .Produces<IEnumerable<string>>(StatusCodes.Status200OK);
-
-app.MapGet("/api/history/{year}/{month}/{day}/channels", (string year, string month, string day) => db.GetTransmissionChannels(year, month, day))
-    .WithSummary("Get available channels for a day")
-    .Produces<IEnumerable<dynamic>>(StatusCodes.Status200OK);
-
-app.MapGet("/api/history/filter", (string year, string month, string day, string alphaTag, double frequency) => 
-    db.GetTransmissions(year, month, day, alphaTag, frequency))
-    .WithSummary("Get filtered transmissions")
-    .Produces<IEnumerable<CallLog>>(StatusCodes.Status200OK);
-
-app.MapGet("/api/history/search", (string q) => db.SearchTransmissions(q))
-    .WithSummary("Search transmissions")
-    .Produces<IEnumerable<CallLog>>(StatusCodes.Status200OK);
-
-app.MapDelete("/api/history/{id}", (string id) => 
-{
-    db.DeleteTransmission(id);
-    return Results.Ok();
-})
-    .WithSummary("Delete a log entry")
-    .WithDescription("Deletes a specific transmission log and its associated audio file.")
-    .Produces(StatusCodes.Status200OK);
-
-app.MapPost("/api/control", ([FromBody] JsonElement body) => 
-{
-    var action = body.GetProperty("action").GetString();
-    
-    switch (action)
-    {
-        case "start": radio.Start(); break;
-        case "stop": radio.Stop(); break;
-        case "scan": radio.ResumeScan(); break;
-        case "hold": 
-            if (body.TryGetProperty("frequency", out var f) && f.ValueKind == JsonValueKind.Number)
-                radio.HoldFrequency(f.GetDouble());
-            else if (body.TryGetProperty("frequency", out var fs) && double.TryParse(fs.GetString(), out var fd))
-                 radio.HoldFrequency(fd);
-            break;
-        case "set_squelch":
-             if (body.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.Number)
-                radio.SetSquelch(v.GetDouble());
-             else if (body.TryGetProperty("value", out var vs) && double.TryParse(vs.GetString(), out var vd))
-                radio.SetSquelch(vd);
-            break;
-    }
-    return Results.Ok();
-})
-    .WithSummary("Control the scanner")
-    .WithDescription("Sends control commands (start, stop, scan, hold, set_squelch) to the radio hardware.")
-    .Produces(StatusCodes.Status200OK);
+app.MapControllers(); // Map the controllers
 
 // --- WebSockets ---
+var wsBroadcaster = app.Services.GetRequiredService<WebSocketBroadcaster>();
 app.Map("/ws", async (HttpContext context) =>
 {
     if (context.WebSockets.IsWebSocketRequest)
@@ -200,4 +94,6 @@ app.MapFallback(async context =>
     }
 });
 
-app.Run();public partial class Program { }
+app.Run();
+
+public partial class Program { }

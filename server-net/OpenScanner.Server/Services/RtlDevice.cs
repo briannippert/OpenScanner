@@ -8,42 +8,35 @@ namespace OpenScanner.Server.Services;
 
 public class RtlDevice : BackgroundService
 {
-    private readonly Database _db;
+    private readonly IDatabase _db;
     private readonly ILogger<RtlDevice> _logger;
     private readonly GpsService _gps;
-    private ScannerState _state;
-    
-    // Processes
-    private Process? _scannerProcess;
-    private Process? _decoderProcess;
-    
-    // Control
-    private CancellationTokenSource? _scanCts;
-    private CancellationTokenSource? _decodeCts;
-    private bool _manualOverride = false;
-    private List<Channel> _channels = new();
-    
-    // Audio / Recording
-    private Stream? _recordingStream;
+
+    public event Action<ScannerState>? OnStateChanged;
+    public event Action<CallLog>? OnNewLog;
+    public event Action<byte[]>? OnAudio;
+
     private string? _currentRecordingPath;
+    private ScannerState _state = new ScannerState("IDLE", 0);
+    private List<Channel> _channels = new();
+    private bool _manualOverride = false;
+    
+    private (double Lat, double Lon)? _lastGeoPosition;
+    private DateTime _recordingLockoutUntil = DateTime.MinValue;
+    private CancellationTokenSource? _scanCts;
+    private Process? _scannerProcess;
+    private Dictionary<double, int> _channelHits = new();
+    private DateTime _scanStartTime;
+    private CancellationTokenSource? _sessionTimeoutCts;
+    private FileStream? _recordingStream;
+    private CancellationTokenSource? _decodeCts;
+    private Process? _decoderProcess;
+    private CancellationTokenSource? _activityTimeoutCts;
     private long _recordingStartTime;
     private int? _currentSourceID;
     private int? _currentTargetID;
-    private DateTime _recordingLockoutUntil = DateTime.MinValue;
-    
-    // Timers (using CancellationTokenSources for cancellation)
-    private CancellationTokenSource? _sessionTimeoutCts;
-    private CancellationTokenSource? _activityTimeoutCts;
-    private Dictionary<double, int> _channelHits = new();
-    private DateTime _scanStartTime = DateTime.MinValue;
-    private (double Lat, double Lon)? _lastGeoPosition;
 
-    // Events
-    public event Action<ScannerState>? OnStateChanged;
-    public event Action<byte[]>? OnAudio;
-    public event Action<CallLog>? OnNewLog;
-
-    public RtlDevice(Database db, ILogger<RtlDevice> logger, GpsService gps)
+    public RtlDevice(IDatabase db, ILogger<RtlDevice> logger, GpsService gps)
     {
         _db = db;
         _logger = logger;
@@ -79,15 +72,14 @@ public class RtlDevice : BackgroundService
 
     private void RefreshGeoChannels(double lat, double lon)
     {
-        var localChannels = _db.GetChannelsNear(lat, lon).ToList();
-        if (localChannels.Count > 0)
-        {
-            _logger.LogInformation($"Geo-Sync: Found {localChannels.Count} local channels.");
-            // Merge with static channels or replace? 
-            // For "Auto Scan", let's prioritize these.
-            _channels = localChannels; 
-            // If we are currently scanning, the new list will be picked up on the next loop or restart
-        }
+        Task.Run(async () => {
+            var localChannels = (await _db.GetChannelsNearAsync(lat, lon)).ToList();
+            if (localChannels.Count > 0)
+            {
+                _logger.LogInformation($"Geo-Sync: Found {localChannels.Count} local channels.");
+                _channels = localChannels; 
+            }
+        });
     }
 
     private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
@@ -104,8 +96,10 @@ public class RtlDevice : BackgroundService
 
     public void ReloadChannels()
     {
-        _channels = _db.GetAllChannels().ToList();
-        _logger.LogInformation($"Loaded {_channels.Count} channels.");
+        Task.Run(async () => {
+            _channels = (await _db.GetAllChannelsAsync()).ToList();
+            _logger.LogInformation($"Loaded {_channels.Count} channels.");
+        });
     }
 
     public void SetSquelch(double db)
@@ -707,7 +701,10 @@ public class RtlDevice : BackgroundService
                  _currentTargetID
              );
 
-             _db.SaveTransmission(log);
+             _db.SaveTransmissionAsync(log).ContinueWith(t => {
+                 if (t.IsFaulted) _logger.LogError(t.Exception, "Failed to save transmission");
+             });
+
              _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {_currentSourceID} | Text: {transcription}");
              OnNewLog?.Invoke(log);
         }
