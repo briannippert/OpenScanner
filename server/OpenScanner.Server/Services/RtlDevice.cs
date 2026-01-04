@@ -521,7 +521,7 @@ public class RtlDevice : BackgroundService
 
             if (_decoderProcess == null) return;
 
-            // WFM Keep-Alive (Since we bypassed dsd-fme, we have no activity detection)
+            // WFM Keep-Alive
             if (mode == "WFM")
             {
                 var kaToken = _decodeCts.Token;
@@ -529,6 +529,11 @@ public class RtlDevice : BackgroundService
                      try {
                         while (!kaToken.IsCancellationRequested) {
                             HandleActivity(null, null, null);
+                            
+                            // If we are scanning (not holding), trigger once then let it timeout (5s)
+                            // This prevents getting stuck on a WFM channel forever.
+                            if (!_manualOverride) break;
+
                             await Task.Delay(2000, kaToken);
                         }
                      } catch {}
