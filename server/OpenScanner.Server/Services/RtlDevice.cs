@@ -603,9 +603,15 @@ public class RtlDevice : BackgroundService
                         if (line != null)
                         {
                             // Expand detection to capture more frame types and analog activity
-                            if (line.Contains("Sync:") || line.Contains("Voice") || line.Contains("P25") || 
-                                line.Contains("LDU") || line.Contains("VDU") || line.Contains("TDU") ||
-                                line.Contains("CTCSS") || line.Contains("DCS") || line.Contains("ANALOG"))
+                            // STRICTER FILTER: Ignore "Sync:" and "P25" to avoid locking on Control Channels (TSBK)
+                            // We only want to lock on Voice frames (LDU/VDU) or Analog indicators.
+                            bool isActivity = 
+                                line.Contains("Voice") || 
+                                line.Contains("LDU") || line.Contains("VDU") || // P25 Voice Frames
+                                line.Contains("TDU") || // P25 Terminator
+                                line.Contains("CTCSS") || line.Contains("DCS") || line.Contains("ANALOG");
+
+                            if (isActivity)
                             {
                                 int? src = null;
                                 int? tgt = null;
