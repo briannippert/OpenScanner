@@ -629,7 +629,7 @@ public class RtlDevice : BackgroundService
         // Valid Frame detected
         if (_state.Status != "RECEIVING" || (src.HasValue && _state.SourceID != src))
         {
-            UpdateState(_state with { Status = "RECEIVING", SourceID = src, TargetID = tgt });
+            UpdateState(_state with { Status = "RECEIVING", SourceID = src, TargetID = tgt, LastTranscription = null });
         }
         
         // Start recording if not already started
