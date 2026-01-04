@@ -32,7 +32,7 @@ import type { CallLog } from '../types';
 interface Props {
     liveLogs: CallLog[];
     playingId: string | null;
-    onPlay: (id: string, path: string) => void;
+    onPlay: (id: string, path: string, duration?: number) => void;
     onDelete: (id: string) => void;
 }
 
@@ -321,7 +321,7 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog, playingId
                 secondaryAction={
                     <Box sx={{ display: 'flex', gap: 0.5 }}>
                         {log.audio_path && (
-                            <IconButton size="small" onClick={() => onPlay(log.id, log.audio_path!)}>
+                            <IconButton size="small" onClick={() => onPlay(log.id, log.audio_path!, log.duration)}>
                                 {playingId === log.id 
                                     ? <StopCircle sx={{ color: 'error.main', fontSize: 20 }} />
                                     : <PlayCircleOutline sx={{ color: 'primary.main', fontSize: 20 }} />

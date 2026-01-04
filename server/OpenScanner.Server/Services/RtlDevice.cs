@@ -454,7 +454,8 @@ public class RtlDevice : BackgroundService
         
         string rtlMode = "fm";
         string dsdArgs = "-f1"; // Default P25
-        int sampleRate = 48000;
+        int captureRate = 48000;
+        int outputRate = 48000;
 
         string mode = channel.Mode?.ToUpper() ?? "P25";
         
@@ -464,6 +465,10 @@ public class RtlDevice : BackgroundService
         } else if (mode == "FM" || mode == "NFM") {
             rtlMode = "fm";
             dsdArgs = "-A"; // Force analog
+        } else if (mode == "WFM") {
+            rtlMode = "wbfm";
+            dsdArgs = "-A"; // Force analog
+            captureRate = 170000; // WFM needs higher bandwidth
         } else if (mode == "P25") {
             rtlMode = "fm";
             dsdArgs = "-f1";
@@ -476,7 +481,20 @@ public class RtlDevice : BackgroundService
         // If a specific CTCSS tone is requested in the channel config, we could pass it here,
         // but dsd-fme -A will find any tone and report it.
 
-        var cmd = $"rtl_fm -f {channel.Frequency}M -s {sampleRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {sampleRate}";
+        // Always resample to 48k for dsd-fme consistency
+        string cmd;
+        if (mode == "WFM")
+        {
+            // WFM: Bypass dsd-fme (it doesn't handle WFM well) and output raw audio from rtl_fm
+            // Output is already 48k (outputRate)
+            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
+        }
+        else
+        {
+            // DSD-FME outputs 8k by default for voice. Upsample to 48k to match WFM and Client expectation.
+            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | /usr/bin/ffmpeg -f s16le -ar 8000 -ac 1 -i - -f s16le -ar 48000 -ac 1 - -loglevel quiet";
+        }
+
         var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
         {
             RedirectStandardOutput = true,
@@ -502,6 +520,25 @@ public class RtlDevice : BackgroundService
             }
 
             if (_decoderProcess == null) return;
+
+            // WFM Keep-Alive
+            if (mode == "WFM")
+            {
+                var kaToken = _decodeCts.Token;
+                Task.Run(async () => {
+                     try {
+                        while (!kaToken.IsCancellationRequested) {
+                            HandleActivity(null, null, null);
+                            
+                            // If we are scanning (not holding), trigger once then let it timeout (5s)
+                            // This prevents getting stuck on a WFM channel forever.
+                            if (!_manualOverride) break;
+
+                            await Task.Delay(2000, kaToken);
+                        }
+                     } catch {}
+                }, kaToken);
+            }
 
             // Handle Audio (Stdout)
             var token = _decodeCts.Token;
@@ -566,9 +603,15 @@ public class RtlDevice : BackgroundService
                         if (line != null)
                         {
                             // Expand detection to capture more frame types and analog activity
-                            if (line.Contains("Sync:") || line.Contains("Voice") || line.Contains("P25") || 
-                                line.Contains("LDU") || line.Contains("VDU") || line.Contains("TDU") ||
-                                line.Contains("CTCSS") || line.Contains("DCS") || line.Contains("ANALOG"))
+                            // STRICTER FILTER: Ignore "Sync:" and "P25" to avoid locking on Control Channels (TSBK)
+                            // We only want to lock on Voice frames (LDU/VDU) or Analog indicators.
+                            bool isActivity = 
+                                line.Contains("Voice") || 
+                                line.Contains("LDU") || line.Contains("VDU") || // P25 Voice Frames
+                                line.Contains("TDU") || // P25 Terminator
+                                line.Contains("CTCSS") || line.Contains("DCS") || line.Contains("ANALOG");
+
+                            if (isActivity)
                             {
                                 int? src = null;
                                 int? tgt = null;
@@ -781,8 +824,9 @@ public class RtlDevice : BackgroundService
             return null;
         }
 
-        // 1. Convert RAW (8k s16le) to WAV (16k)
-        var ffmpegArgs = $"-f s16le -ar 8000 -ac 1 -i \"{rawPath}\" -ar 16000 -ac 1 \"{wavPath}\" -y";
+        // 1. Convert RAW (8k or 48k s16le) to WAV (16k)
+        int inputRate = (_state.CurrentChannel?.Mode == "WFM") ? 48000 : 8000;
+        var ffmpegArgs = $"-f s16le -ar {inputRate} -ac 1 -i \"{rawPath}\" -ar 16000 -ac 1 \"{wavPath}\" -y";
         var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg", ffmpegArgs)
         {
             RedirectStandardOutput = true,

@@ -66,7 +66,7 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                     <DialogContent>
                         <Box display="flex" flexDirection="column" gap={2} mt={1}>
                             <TextField 
-                                label="Alpha Tag" 
+                                label="Name" 
                                 value={editing.alphaTag} 
                                 onChange={e => handleChange('alphaTag', e.target.value)} 
                                 required autoFocus
@@ -93,9 +93,10 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                                         onChange={e => handleChange('mode', e.target.value)}
                                     >
                                         <MenuItem value="P25">P25 (Digital)</MenuItem>
-                                        <MenuItem value="FM">FM (Analog)</MenuItem>
-                                        <MenuItem value="NFM">NFM (Narrow FM)</MenuItem>
-                                        <MenuItem value="AM">AM (Analog)</MenuItem>
+                                        <MenuItem value="FM">FM (EXPERIMENTAL)</MenuItem>
+                                        <MenuItem value="NFM">NFM (EXPERIMENTAL)</MenuItem>
+                                        <MenuItem value="WFM">WFM (EXPERIMENTAL)</MenuItem>
+                                        <MenuItem value="AM">AM (EXPERIMENTAL)</MenuItem>
                                     </Select>
                                 </FormControl>
                                 <TextField 

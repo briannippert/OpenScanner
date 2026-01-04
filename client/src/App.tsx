@@ -170,7 +170,7 @@ function App() {
   const nextStartTime = useRef<number>(0);
 
   // Audio Playback Helper for recorded files
-  const playRawAudio = async (id: string, filename: string) => {
+  const playRawAudio = async (id: string, filename: string, duration?: number) => {
     if (!window.audioCtx) {
         window.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
     }
@@ -207,8 +207,18 @@ function App() {
             float32Array[i] = int16Array[i] / 32768;
         }
 
-        // Recorded files are 8000Hz s16le
-        const buffer = window.audioCtx.createBuffer(1, float32Array.length, 8000);
+        // Auto-detect sample rate based on duration (to support old 8k and new 48k files)
+        let sampleRate = 48000;
+        if (duration && duration > 0) {
+            const calculatedRate = int16Array.length / duration;
+            // If the rate is closer to 8000 than 48000, assume it's an old 8k recording
+            if (Math.abs(calculatedRate - 8000) < Math.abs(calculatedRate - 48000)) {
+                sampleRate = 8000;
+            }
+        }
+        console.log(`Detected Sample Rate: ${sampleRate}Hz`);
+
+        const buffer = window.audioCtx.createBuffer(1, float32Array.length, sampleRate);
         buffer.copyToChannel(float32Array, 0);
         const source = window.audioCtx.createBufferSource();
         source.buffer = buffer;
@@ -358,7 +368,7 @@ function App() {
             if (ctx.state === 'suspended') ctx.resume();
             const analyser = (ctx as any)._analyser;
 
-            const audioBuffer = ctx.createBuffer(1, float32Array.length, 8000);
+            const audioBuffer = ctx.createBuffer(1, float32Array.length, 48000);
             audioBuffer.copyToChannel(float32Array, 0);
 
             const source = ctx.createBufferSource();
@@ -596,7 +606,11 @@ function App() {
                                                 </Typography>
                                             </Box>
                                             <Box mt={1} display="flex" alignItems="center" gap={1}>
-                                                <Chip label={ch.mode} size="small" sx={{ height: 20, fontSize: '0.65rem', bgcolor: '#333' }} />
+                                                <Chip 
+                                                    label={['FM', 'AM', 'WFM'].includes(ch.mode?.toUpperCase()) ? `${ch.mode} (EXP)` : ch.mode} 
+                                                    size="small" 
+                                                    sx={{ height: 20, fontSize: '0.65rem', bgcolor: '#333' }} 
+                                                />
                                                 <Box flexGrow={1} />
                                                 {manualHold === ch.frequency ? <PauseIcon fontSize="small" color="warning" /> : <PlayArrowIcon fontSize="small" sx={{ opacity: 0.3 }} />}
                                             </Box>
