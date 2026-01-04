@@ -35,6 +35,7 @@ public class RtlDevice : BackgroundService
     private long _recordingStartTime;
     private int? _currentSourceID;
     private int? _currentTargetID;
+    private DateTime _lastActivityReset = DateTime.MinValue;
 
     public RtlDevice(IDatabase db, ILogger<RtlDevice> logger, GpsService gps)
     {
@@ -518,6 +519,7 @@ public class RtlDevice : BackgroundService
                             {
                                 await _recordingStream.WriteAsync(chunk, 0, chunk.Length, token);
                                 await _recordingStream.FlushAsync(token);
+                                ResetActivityTimeout(); // Keep recording alive while audio flows
                             }
                         }
                     }
@@ -598,31 +600,20 @@ public class RtlDevice : BackgroundService
         });
     }
 
-    private void HandleActivity(int? src = null, int? tgt = null)
+    private void ResetActivityTimeout()
     {
-        // Valid Frame detected
-        if (_state.Status != "RECEIVING" || (src.HasValue && _state.SourceID != src))
-        {
-            UpdateState(_state with { Status = "RECEIVING", SourceID = src, TargetID = tgt });
-        }
-        
-        // Start recording if not already started
-        if (_recordingStream == null)
-        {
-            StartRecording(src, tgt);
-        }
+        // Throttle updates to avoid task thrashing (e.g. max 2 times per second)
+        if ((DateTime.UtcNow - _lastActivityReset).TotalMilliseconds < 500) return;
+        _lastActivityReset = DateTime.UtcNow;
 
-        // Reset inactivity timer
         _activityTimeoutCts?.Cancel();
         _activityTimeoutCts = new CancellationTokenSource();
         
-        // Reset session timeout (Keep listening)
         if (!_manualOverride)
         {
             RestartSessionTimeout(5000); // 5s hang time
         }
 
-        // If no more activity for 2s, stop recording and revert state
         Task.Delay(2000, _activityTimeoutCts.Token).ContinueWith(t => 
         {
             if (!t.IsCanceled)
@@ -631,6 +622,23 @@ public class RtlDevice : BackgroundService
                 if (_manualOverride) UpdateState(_state with { Status = "MONITORING" });
             }
         });
+    }
+
+    private void HandleActivity(int? src = null, int? tgt = null)
+    {
+        // Valid Frame detected
+        if (_state.Status != "RECEIVING" || (src.HasValue && _state.SourceID != src))
+        {
+            UpdateState(_state with { Status = "RECEIVING", SourceID = src, TargetID = tgt, LastTranscription = null });
+        }
+        
+        // Start recording if not already started
+        if (_recordingStream == null)
+        {
+            StartRecording(src, tgt);
+        }
+
+        ResetActivityTimeout();
     }
 
     private void StartRecording(int? src = null, int? tgt = null)
