@@ -66,7 +66,7 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                     <DialogContent>
                         <Box display="flex" flexDirection="column" gap={2} mt={1}>
                             <TextField 
-                                label="Alpha Tag" 
+                                label="Name" 
                                 value={editing.alphaTag} 
                                 onChange={e => handleChange('alphaTag', e.target.value)} 
                                 required autoFocus
