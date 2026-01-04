@@ -19,10 +19,10 @@ jobs:
         dotnet-version: 10.0.x
 
     - name: Restore dependencies
-      run: dotnet restore server-net/OpenScanner.slnx
+      run: dotnet restore server/OpenScanner.slnx
 
     - name: Build
-      run: dotnet build server-net/OpenScanner.slnx --no-restore
+      run: dotnet build server/OpenScanner.slnx --no-restore
 
     - name: Test
-      run: dotnet test server-net/OpenScanner.slnx --no-build --verbosity normal
+      run: dotnet test server/OpenScanner.slnx --no-build --verbosity normal
