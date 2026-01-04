@@ -106,19 +106,19 @@ public class WebSocketBroadcaster
     private async Task BroadcastBinary(byte[] data)
     {
         var segment = new ArraySegment<byte>(data);
-        foreach (var socket in _sockets.Values)
-        {
-            if (socket.State == WebSocketState.Open)
-            {
+        var tasks = _sockets.Values
+            .Where(s => s.State == WebSocketState.Open)
+            .Select(socket => {
                 try
                 {
-                    await socket.SendAsync(segment, WebSocketMessageType.Binary, true, CancellationToken.None);
+                    return socket.SendAsync(segment, WebSocketMessageType.Binary, true, CancellationToken.None);
                 }
                 catch
                 {
-                    // Handle broken sockets
+                    return Task.CompletedTask;
                 }
-            }
-        }
+            });
+        
+        await Task.WhenAll(tasks);
     }
 }
