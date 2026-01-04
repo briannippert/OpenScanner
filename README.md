@@ -30,21 +30,15 @@ OpenScanner is a high-performance, web-based digital radio scanner designed for 
 
 ## Quick Start
 
-### 1. Install Hardware Drivers
-Ensure your Pi has the necessary radio tools installed. You can use the included `install_dsd.sh` if you are starting from a clean OS:
-```bash
-chmod +x install_dsd.sh
-./install_dsd.sh
-```
+### 1. Deploy OpenScanner
+The unified installer handles everything: it installs required radio drivers (DSD-FME, mbelib), builds the .NET backend and React frontend, and sets up Whisper AI.
 
-### 2. Deploy OpenScanner
-The unified installer builds the .NET backend, the React frontend, and sets up Whisper AI:
 ```bash
 chmod +x install_service.sh
 sudo ./install_service.sh
 ```
 
-### 3. Access the UI
+### 2. Access the UI
 Once installed, open your browser to:
 `http://<your-pi-ip>`
 
