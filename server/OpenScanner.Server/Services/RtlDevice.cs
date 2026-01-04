@@ -452,8 +452,31 @@ public class RtlDevice : BackgroundService
         StopDecoding();
         _decodeCts = new CancellationTokenSource();
         
-        // Use absolute paths and ensure -f1 (P25 Phase 1) and -P (p25 audio) are correct for dsd-fme
-        var cmd = $"rtl_fm -f {channel.Frequency}M -s 48000 -g 45 -p 0 -M fm - | /usr/local/bin/dsd-fme -f1 -i - -o - -s 48000";
+        string rtlMode = "fm";
+        string dsdArgs = "-f1"; // Default P25
+        int sampleRate = 48000;
+
+        string mode = channel.Mode?.ToUpper() ?? "P25";
+        
+        if (mode == "AM") {
+            rtlMode = "am";
+            dsdArgs = "-A"; // Force analog
+        } else if (mode == "FM" || mode == "NFM") {
+            rtlMode = "fm";
+            dsdArgs = "-A"; // Force analog
+        } else if (mode == "P25") {
+            rtlMode = "fm";
+            dsdArgs = "-f1";
+        } else {
+            // Unknown, try auto
+            rtlMode = "fm";
+            dsdArgs = "-fa";
+        }
+
+        // If a specific CTCSS tone is requested in the channel config, we could pass it here,
+        // but dsd-fme -A will find any tone and report it.
+
+        var cmd = $"rtl_fm -f {channel.Frequency}M -s {sampleRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {sampleRate}";
         var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
         {
             RedirectStandardOutput = true,
@@ -461,7 +484,7 @@ public class RtlDevice : BackgroundService
             UseShellExecute = false
         };
 
-        _logger.LogInformation($"Decoder starting: {cmd}");
+        _logger.LogInformation($"Decoder starting ({mode}): {cmd}");
 
         // Delay slightly
         Task.Delay(300).ContinueWith(_ => 
@@ -542,15 +565,16 @@ public class RtlDevice : BackgroundService
                         var line = await _decoderProcess.StandardError.ReadLineAsync(token);
                         if (line != null)
                         {
-                            // Expand detection to capture more frame types
+                            // Expand detection to capture more frame types and analog activity
                             if (line.Contains("Sync:") || line.Contains("Voice") || line.Contains("P25") || 
-                                line.Contains("LDU") || line.Contains("VDU") || line.Contains("TDU"))
+                                line.Contains("LDU") || line.Contains("VDU") || line.Contains("TDU") ||
+                                line.Contains("CTCSS") || line.Contains("DCS") || line.Contains("ANALOG"))
                             {
                                 int? src = null;
                                 int? tgt = null;
+                                string? tone = null;
 
                                 // Parse Source/Target if present in line
-                                // DSD-FME often outputs: "Source: 12345 Target: 67890" or "Src: 12345 Tgt: 67890"
                                 if (line.Contains("Source:"))
                                 {
                                     var parts = line.Split("Source:");
@@ -585,13 +609,18 @@ public class RtlDevice : BackgroundService
                                     }
                                 }
 
-                                HandleActivity(src, tgt);
-                            }
-                            
-                            // Log significant lines for debugging
-                            if (line.Contains("P25") && !line.Contains("██"))
-                            {
-                                // _logger.LogDebug($"[DSD] {line}");
+                                if (line.Contains("CTCSS:"))
+                                {
+                                    var parts = line.Split("CTCSS:");
+                                    if (parts.Length > 1) tone = parts[1].Trim().Split(' ')[0] + " Hz";
+                                }
+                                else if (line.Contains("DCS:"))
+                                {
+                                    var parts = line.Split("DCS:");
+                                    if (parts.Length > 1) tone = "D" + parts[1].Trim().Split(' ')[0];
+                                }
+
+                                HandleActivity(src, tgt, tone);
                             }
                         }
                     }
@@ -626,12 +655,20 @@ public class RtlDevice : BackgroundService
         });
     }
 
-    private void HandleActivity(int? src = null, int? tgt = null)
+    private void HandleActivity(int? src = null, int? tgt = null, string? tone = null)
     {
-        // Valid Frame detected
-        if (_state.Status != "RECEIVING" || (src.HasValue && _state.SourceID != src))
+        // Valid Activity detected
+        if (_state.Status != "RECEIVING" || 
+            (src.HasValue && _state.SourceID != src) || 
+            (tone != null && _state.CurrentTone != tone))
         {
-            UpdateState(_state with { Status = "RECEIVING", SourceID = src, TargetID = tgt, LastTranscription = null });
+            UpdateState(_state with { 
+                Status = "RECEIVING", 
+                SourceID = src ?? _state.SourceID, 
+                TargetID = tgt ?? _state.TargetID, 
+                CurrentTone = tone ?? _state.CurrentTone,
+                LastTranscription = null 
+            });
         }
         
         // Start recording if not already started
@@ -724,7 +761,7 @@ public class RtlDevice : BackgroundService
         }
         
         _currentRecordingPath = null;
-        UpdateState(_state with { SourceID = null, TargetID = null });
+        UpdateState(_state with { SourceID = null, TargetID = null, CurrentTone = null });
     }
 
     private string? TranscribeAudio(string rawPath)

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
     Dialog, DialogTitle, DialogContent, DialogActions, 
     Button, List, ListItem, ListItemText, IconButton, 
-    TextField, Box, Fab, Typography
+    TextField, Box, Fab, Typography, MenuItem, Select, FormControl, InputLabel
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -85,17 +85,25 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                                 onChange={e => handleChange('description', e.target.value)} 
                             />
                             <Box display="flex" gap={2}>
-                                <TextField 
-                                    label="Mode" 
-                                    value={editing.mode} 
-                                    onChange={e => handleChange('mode', e.target.value)} 
-                                    sx={{ flex: 1 }}
-                                />
+                                <FormControl sx={{ flex: 1 }}>
+                                    <InputLabel>Mode</InputLabel>
+                                    <Select
+                                        value={editing.mode}
+                                        label="Mode"
+                                        onChange={e => handleChange('mode', e.target.value)}
+                                    >
+                                        <MenuItem value="P25">P25 (Digital)</MenuItem>
+                                        <MenuItem value="FM">FM (Analog)</MenuItem>
+                                        <MenuItem value="NFM">NFM (Narrow FM)</MenuItem>
+                                        <MenuItem value="AM">AM (Analog)</MenuItem>
+                                    </Select>
+                                </FormControl>
                                 <TextField 
                                     label="Tone" 
                                     value={editing.tone} 
                                     onChange={e => handleChange('tone', e.target.value)} 
                                     sx={{ flex: 1 }}
+                                    placeholder="e.g. 100.0"
                                 />
                             </Box>
                             <Box display="flex" gap={2}>
