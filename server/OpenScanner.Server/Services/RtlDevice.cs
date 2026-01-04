@@ -608,6 +608,7 @@ public class RtlDevice : BackgroundService
                             bool isActivity = 
                                 line.Contains("Voice") || 
                                 line.Contains("LDU") || line.Contains("VDU") || // P25 Voice Frames
+                                line.Contains("HDU") || // P25 Header Data Unit (Start of Call)
                                 line.Contains("TDU") || // P25 Terminator
                                 line.Contains("CTCSS") || line.Contains("DCS") || line.Contains("ANALOG");
 
