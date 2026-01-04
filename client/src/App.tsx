@@ -395,7 +395,7 @@ function App() {
             
             // Scheduler to prevent crackling/overlaps
             const currentTime = ctx.currentTime;
-            const JITTER_BUFFER = 0.35; // 350ms buffer for stability
+            const JITTER_BUFFER = 0.15; // 150ms buffer for stability
 
             if (nextStartTime.current < currentTime) {
                 nextStartTime.current = currentTime + JITTER_BUFFER;

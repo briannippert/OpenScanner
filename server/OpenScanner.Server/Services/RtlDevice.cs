@@ -588,7 +588,8 @@ public class RtlDevice : BackgroundService
                         }
 
                         // Send if we have enough or if it's been too long
-                        if (sendBuffer.Count >= 1024 || (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 300))
+                        // Reduced threshold to 512 bytes (~5ms) and timeout to 50ms for smoother streaming
+                        if (sendBuffer.Count >= 512 || (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 50))
                         {
                             var chunk = sendBuffer.ToArray();
                             sendBuffer.Clear();
