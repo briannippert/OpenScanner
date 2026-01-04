@@ -377,7 +377,9 @@ public class RtlDevice : BackgroundService
             }
         }
 
-        UpdateState(_state with { CurrentSignalDb = maxDetectedDb });
+        // Map dB to 0-100% (Assumes -60dB noise floor, 0dB max)
+        double strength = Math.Clamp((maxDetectedDb + 60) / 60.0 * 100, 0, 100);
+        UpdateState(_state with { CurrentSignalDb = maxDetectedDb, SignalStrength = strength });
 
         if (bestChannel != null)
         {
@@ -728,9 +730,9 @@ public class RtlDevice : BackgroundService
     private string? TranscribeAudio(string rawPath)
     {
         var wavPath = Path.ChangeExtension(rawPath, ".wav");
-        var projectRoot = Directory.GetCurrentDirectory(); // server-net/OpenScanner.Server
+        var projectRoot = Directory.GetCurrentDirectory(); // server/OpenScanner.Server
         // Adjust path to whisper.cpp relative to execution context
-        // Execution: /home/brian/radio/OpenScanner/server-net/OpenScanner.Server
+        // Execution: /home/brian/radio/OpenScanner/server/OpenScanner.Server
         // Whisper: /home/brian/radio/OpenScanner/whisper.cpp
         var whisperRoot = Path.GetFullPath(Path.Combine(projectRoot, "../../whisper.cpp"));
         var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");

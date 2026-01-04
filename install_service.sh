@@ -166,21 +166,51 @@ EOF
     systemctl restart gpsd
 fi
 
-# Check Hardware Drivers
-log_step "Checking Hardware Drivers..."
-MISSING_DEPS=0
-for cmd in rtl_power rtl_fm dsd-fme; do
-    if ! command -v $cmd &> /dev/null; then
-        log_warn "Missing: $cmd"
-        MISSING_DEPS=1
-    else
-        log_success "Found: $cmd"
-    fi
-done
+# Check Hardware Drivers & Install dsd-fme
+log_step "Checking Radio Dependencies..."
 
-if [ $MISSING_DEPS -eq 1 ]; then
-    log_warn "Some radio tools are missing. Run ./install_dsd.sh if needed."
-    sleep 2
+if ! command -v dsd-fme &> /dev/null || ! ldconfig -p | grep -q libmbe; then
+    log_info "dsd-fme or mbelib not found. Installing..."
+    
+    mkdir -p build_deps
+    cd build_deps
+
+    # mbelib
+    if ! ldconfig -p | grep -q libmbe; then
+        log_info "Building mbelib..."
+        if [ ! -d "mbelib" ]; then
+            git clone https://github.com/szechyjs/mbelib.git
+        fi
+        cd mbelib
+        rm -rf build
+        mkdir -p build && cd build
+        cmake ..
+        make -j$(nproc)
+        make install
+        ldconfig
+        cd ../..
+    fi
+
+    # dsd-fme
+    if ! command -v dsd-fme &> /dev/null; then
+        log_info "Building dsd-fme..."
+        if [ ! -d "dsd-fme" ]; then
+            git clone https://github.com/lwvmobile/dsd-fme.git
+        fi
+        cd dsd-fme
+        git pull origin master || true
+        rm -rf build
+        mkdir -p build && cd build
+        cmake ..
+        make -j$(nproc)
+        make install
+        ldconfig
+        cd ../..
+    fi
+    cd ..
+    log_success "Radio dependencies installed."
+else
+    log_success "Radio dependencies found."
 fi
 
 # ----------------------------------------------------------------
@@ -210,7 +240,7 @@ fi
 
 # Build Server (.NET)
 log_info "Building Server (.NET)..."
-cd "$PROJECT_ROOT/server-net/OpenScanner.Server"
+cd "$PROJECT_ROOT/server/OpenScanner.Server"
 if dotnet build -c Release -o bin/Release/net10.0/publish; then
     log_success "Server built successfully."
 else
@@ -223,7 +253,7 @@ fi
 # ----------------------------------------------------------------
 log_step "Configuring Systemd Service..."
 SERVICE_FILE="/etc/systemd/system/openscanner.service"
-NET_EXEC="$PROJECT_ROOT/server-net/OpenScanner.Server/bin/Release/net10.0/publish/OpenScanner.Server"
+NET_EXEC="$PROJECT_ROOT/server/OpenScanner.Server/bin/Release/net10.0/publish/OpenScanner.Server"
 
 # Ensure executable permission
 chmod +x "$NET_EXEC"
@@ -236,7 +266,7 @@ After=network.target sound.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=$PROJECT_ROOT/server-net/OpenScanner.Server
+WorkingDirectory=$PROJECT_ROOT/server/OpenScanner.Server
 ExecStart=$NET_EXEC --urls "http://0.0.0.0:80"
 Restart=always
 RestartSec=5
