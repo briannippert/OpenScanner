@@ -269,6 +269,18 @@ public class RtlDevice : BackgroundService
 
                 ProcessSamples(buffer, bytesRead, centerFreqMhz, sampleRate);
             }
+
+            // Loop exited
+            if (_scannerProcess.HasExited && _scannerProcess.ExitCode != 0)
+            {
+                _logger.LogError($"Scanner process exited unexpectedly with code {_scannerProcess.ExitCode}");
+                UpdateState(_state with { IsHardwareConnected = false, Status = "IDLE" });
+            }
+            else if (_state.Status == "SCANNING")
+            {
+                // Clean exit or stopped
+                UpdateState(_state with { Status = "IDLE" });
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { _logger.LogError(ex, "Error in scan loop"); }
@@ -585,6 +597,13 @@ public class RtlDevice : BackgroundService
                                 ResetActivityTimeout(); // Keep recording alive while audio flows
                             }
                         }
+                    }
+
+                    // Check if process died unexpectedly
+                    if (!token.IsCancellationRequested && _decoderProcess != null && _decoderProcess.HasExited && _decoderProcess.ExitCode != 0)
+                    {
+                        _logger.LogError($"Decoder pipeline exited with code {_decoderProcess.ExitCode}");
+                        if (_state.Status == "RECEIVING") UpdateState(_state with { Status = "IDLE" });
                     }
                 }
                 catch (Exception ex) when (!(ex is OperationCanceledException))
