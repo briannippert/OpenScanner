@@ -98,9 +98,10 @@ public record ScannerState(
     string? DevicePort = null,
     SpectrumPoint[]? RfSpectrum = null,
     GpsData? Gps = null,
-        double? ManualHoldFrequency = null,
-        string? LastTranscription = null,
-        int? SourceID = null,
-        int? TargetID = null
-    );
-    
+            double? ManualHoldFrequency = null,
+            string? LastTranscription = null,
+            int? SourceID = null,
+            int? TargetID = null,
+            string? CurrentTone = null
+        );
+        

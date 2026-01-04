@@ -138,6 +138,19 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                     }} 
                                 />
                             )}
+                            {state.currentTone && (
+                                <Chip 
+                                    label={state.currentTone} 
+                                    size="small" 
+                                    sx={{ 
+                                        height: 20,
+                                        fontSize: '0.7rem',
+                                        bgcolor: 'rgba(0,255,255,0.1)', 
+                                        color: '#00ffff', 
+                                        fontFamily: 'monospace' 
+                                    }} 
+                                />
+                            )}
                         </Box>
                         {isReceiving && state.sourceID && (
                             <Typography variant="caption" sx={{ 

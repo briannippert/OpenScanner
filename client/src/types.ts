@@ -36,6 +36,7 @@ export interface ScannerState {
     lastTranscription?: string;
     sourceID?: number;
     targetID?: number;
+    currentTone?: string;
 }
 
 export interface CallLog {
