@@ -9,11 +9,18 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add Services
 builder.Services.AddControllers(); // Added for Controllers
+
+// Setup Memory Logging
+var memoryLoggerProvider = new MemoryLoggerProvider();
+builder.Logging.AddProvider(memoryLoggerProvider);
+builder.Services.AddSingleton<ILoggerProvider>(memoryLoggerProvider);
+
 builder.Services.AddSingleton<IDatabase, Database>();
 builder.Services.AddSingleton<GpsService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GpsService>());
 builder.Services.AddSingleton<RtlDevice>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RtlDevice>());
+builder.Services.AddSingleton<SupportService>();
 builder.Services.AddSingleton<WebSocketBroadcaster>();
 builder.Services.AddCors();
 builder.Services.AddEndpointsApiExplorer();
