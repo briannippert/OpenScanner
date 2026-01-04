@@ -169,6 +169,63 @@ public class Database
         return conn.Query<CallLog>("SELECT id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path as AudioPath, duration, transcription, sourceID, targetID FROM transmissions ORDER BY timestamp DESC LIMIT @Limit", new { Limit = limit });
     }
     
+    public IEnumerable<string> GetTransmissionYears()
+    {
+        using var conn = GetConnection();
+        return conn.Query<string>("SELECT DISTINCT strftime('%Y', timestamp) FROM transmissions ORDER BY 1 DESC");
+    }
+
+    public IEnumerable<string> GetTransmissionMonths(string year)
+    {
+        using var conn = GetConnection();
+        return conn.Query<string>("SELECT DISTINCT strftime('%m', timestamp) FROM transmissions WHERE strftime('%Y', timestamp) = @Year ORDER BY 1 DESC", new { Year = year });
+    }
+
+    public IEnumerable<string> GetTransmissionDays(string year, string month)
+    {
+        using var conn = GetConnection();
+        return conn.Query<string>("SELECT DISTINCT strftime('%d', timestamp) FROM transmissions WHERE strftime('%Y', timestamp) = @Year AND strftime('%m', timestamp) = @Month ORDER BY 1 DESC", new { Year = year, Month = month });
+    }
+
+    public IEnumerable<dynamic> GetTransmissionChannels(string year, string month, string day)
+    {
+        using var conn = GetConnection();
+        // Return both alphaTag and frequency to uniquely identify/display
+        return conn.Query("SELECT DISTINCT alphaTag, frequency FROM transmissions WHERE strftime('%Y', timestamp) = @Year AND strftime('%m', timestamp) = @Month AND strftime('%d', timestamp) = @Day ORDER BY alphaTag, frequency", 
+            new { Year = year, Month = month, Day = day });
+    }
+
+    public IEnumerable<CallLog> GetTransmissions(string year, string month, string day, string alphaTag, double frequency)
+    {
+        using var conn = GetConnection();
+        return conn.Query<CallLog>(@"
+            SELECT id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path as AudioPath, duration, transcription, sourceID, targetID 
+            FROM transmissions 
+            WHERE strftime('%Y', timestamp) = @Year 
+              AND strftime('%m', timestamp) = @Month 
+              AND strftime('%d', timestamp) = @Day
+              AND alphaTag = @AlphaTag
+              AND frequency = @Frequency
+            ORDER BY timestamp DESC", 
+            new { Year = year, Month = month, Day = day, AlphaTag = alphaTag, Frequency = frequency });
+    }
+
+    public IEnumerable<CallLog> SearchTransmissions(string query)
+    {
+        using var conn = GetConnection();
+        var searchTerm = $"%{query}%";
+        return conn.Query<CallLog>(@"
+            SELECT id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path as AudioPath, duration, transcription, sourceID, targetID 
+            FROM transmissions 
+            WHERE transcription LIKE @Query 
+               OR description LIKE @Query 
+               OR alphaTag LIKE @Query 
+               OR CAST(frequency AS TEXT) LIKE @Query
+            ORDER BY timestamp DESC
+            LIMIT 100", 
+            new { Query = searchTerm });
+    }
+
     public void DeleteTransmission(string id)
     {
         using var conn = GetConnection();
