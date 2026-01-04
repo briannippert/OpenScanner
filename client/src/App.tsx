@@ -170,7 +170,7 @@ function App() {
   const nextStartTime = useRef<number>(0);
 
   // Audio Playback Helper for recorded files
-  const playRawAudio = async (id: string, filename: string) => {
+  const playRawAudio = async (id: string, filename: string, duration?: number) => {
     if (!window.audioCtx) {
         window.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
     }
@@ -207,8 +207,18 @@ function App() {
             float32Array[i] = int16Array[i] / 32768;
         }
 
-        // Recorded files are 48000Hz s16le (Unified Rate)
-        const buffer = window.audioCtx.createBuffer(1, float32Array.length, 48000);
+        // Auto-detect sample rate based on duration (to support old 8k and new 48k files)
+        let sampleRate = 48000;
+        if (duration && duration > 0) {
+            const calculatedRate = int16Array.length / duration;
+            // If the rate is closer to 8000 than 48000, assume it's an old 8k recording
+            if (Math.abs(calculatedRate - 8000) < Math.abs(calculatedRate - 48000)) {
+                sampleRate = 8000;
+            }
+        }
+        console.log(`Detected Sample Rate: ${sampleRate}Hz`);
+
+        const buffer = window.audioCtx.createBuffer(1, float32Array.length, sampleRate);
         buffer.copyToChannel(float32Array, 0);
         const source = window.audioCtx.createBufferSource();
         source.buffer = buffer;
