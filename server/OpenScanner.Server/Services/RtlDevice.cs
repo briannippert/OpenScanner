@@ -482,7 +482,17 @@ public class RtlDevice : BackgroundService
         // but dsd-fme -A will find any tone and report it.
 
         // Always resample to 48k for dsd-fme consistency
-        var cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate}";
+        string cmd;
+        if (mode == "WFM")
+        {
+            // WFM: Bypass dsd-fme (it doesn't handle WFM well) and output raw audio from rtl_fm
+            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
+        }
+        else
+        {
+            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate}";
+        }
+
         var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
         {
             RedirectStandardOutput = true,
@@ -508,6 +518,20 @@ public class RtlDevice : BackgroundService
             }
 
             if (_decoderProcess == null) return;
+
+            // WFM Keep-Alive (Since we bypassed dsd-fme, we have no activity detection)
+            if (mode == "WFM")
+            {
+                var kaToken = _decodeCts.Token;
+                Task.Run(async () => {
+                     try {
+                        while (!kaToken.IsCancellationRequested) {
+                            HandleActivity(null, null, null);
+                            await Task.Delay(2000, kaToken);
+                        }
+                     } catch {}
+                }, kaToken);
+            }
 
             // Handle Audio (Stdout)
             var token = _decodeCts.Token;
@@ -787,8 +811,9 @@ public class RtlDevice : BackgroundService
             return null;
         }
 
-        // 1. Convert RAW (8k s16le) to WAV (16k)
-        var ffmpegArgs = $"-f s16le -ar 8000 -ac 1 -i \"{rawPath}\" -ar 16000 -ac 1 \"{wavPath}\" -y";
+        // 1. Convert RAW (8k or 48k s16le) to WAV (16k)
+        int inputRate = (_state.CurrentChannel?.Mode == "WFM") ? 48000 : 8000;
+        var ffmpegArgs = $"-f s16le -ar {inputRate} -ac 1 -i \"{rawPath}\" -ar 16000 -ac 1 \"{wavPath}\" -y";
         var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg", ffmpegArgs)
         {
             RedirectStandardOutput = true,
