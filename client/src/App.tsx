@@ -1,10 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
-import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, List, ListItem, ListItemText, Divider, Paper, Chip, IconButton, Snackbar, Alert, Tooltip } from '@mui/material';
+import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
 import ChannelManager from './components/ChannelManager';
+import TransmissionLog from './components/TransmissionLog';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
-import HistoryIcon from '@mui/icons-material/History';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import SpeedIcon from '@mui/icons-material/Speed';
@@ -12,9 +12,6 @@ import SatelliteAltIcon from '@mui/icons-material/SatelliteAlt';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import UsbIcon from '@mui/icons-material/Usb';
 import UsbOffIcon from '@mui/icons-material/UsbOff';
-import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
-import StopCircleIcon from '@mui/icons-material/StopCircle';
-import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
@@ -614,89 +611,12 @@ function App() {
                 {/* Right Column: Transmission Log (Expanded) */}
                 <Grid size={{ xs: 12, md: 8, lg: 9 }} sx={{ height: '100%', overflow: 'hidden' }}>
                     <Paper sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: '#0a0a0a', border: '1px solid #222', borderRadius: 2, overflowY: 'auto' }}>
-                        <Box sx={{ p: 2, borderBottom: '1px solid #222' }} display="flex" alignItems="center" gap={1}>
-                            <HistoryIcon color="primary" fontSize="small" />
-                            <Typography variant="subtitle2" fontWeight="bold" color="text.secondary">TRANSMISSION LOG</Typography>
-                        </Box>
-                        <List dense sx={{ flexGrow: 1, overflowY: 'auto', p: 0 }}>
-                            {callLog.length === 0 && (
-                                <Box sx={{ p: 4, textAlign: 'center', color: '#444' }}>
-                                    <Typography variant="body2">No Activity</Typography>
-                                </Box>
-                            )}
-                            {callLog.map((log) => (
-                                <div key={log.id}>
-                                    <ListItem 
-                                        sx={{ 
-                                            px: 2, 
-                                            py: 1,
-                                            '& .MuiListItemSecondaryAction-root': {
-                                                right: 8
-                                            }
-                                        }}
-                                        secondaryAction={
-                                            <Box sx={{ display: 'flex', gap: 0.5 }}>
-                                                {log.audio_path && (
-                                                    <IconButton size="small" onClick={() => playRawAudio(log.id, log.audio_path!)}>
-                                                        {playingId === log.id 
-                                                            ? <StopCircleIcon sx={{ color: 'error.main', fontSize: 22 }} />
-                                                            : <PlayCircleOutlineIcon sx={{ color: 'primary.main', fontSize: 22 }} />
-                                                        }
-                                                    </IconButton>
-                                                )}
-                                                <IconButton size="small" onClick={() => deleteEntry(log.id)}>
-                                                    <DeleteIcon sx={{ color: '#444', fontSize: 20 }} />
-                                                </IconButton>
-                                            </Box>
-                                        }
-                                    >
-                                        <ListItemText 
-                                            sx={{ pr: 8 }} // Add padding to prevent text overlap with buttons
-                                            primary={
-                                                <Typography variant="body2" fontWeight="bold" color="white">
-                                                    {log.alphaTag}
-                                                </Typography>
-                                            }
-                                            secondary={
-                                                <Box component="span">
-                                                    <Typography variant="caption" color="gray" sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                                                        <span>{log.frequency} MHz {log.sourceID && (
-                                                            <span style={{ 
-                                                                color: log.sourceID < 100 ? '#00ffff' : '#ffaa00',
-                                                                marginLeft: '8px',
-                                                                fontWeight: 'bold'
-                                                            }}>
-                                                                {log.sourceID < 100 ? `[BASE]` : `[UNIT ${log.sourceID}]`}
-                                                            </span>
-                                                        )}</span>
-                                                        <span>{new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                                    </Typography>
-                                                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                                                        {log.lat && (
-                                                            <Typography variant="caption" sx={{ color: '#444', fontSize: '9px' }}>
-                                                                LOC: {log.lat.toFixed(3)}, {log.lon!.toFixed(3)}
-                                                            </Typography>
-                                                        )}
-                                                        {log.lat && log.duration && <Typography variant="caption" sx={{ color: '#333', fontSize: '9px' }}>•</Typography>}
-                                                        {log.duration && (
-                                                            <Typography variant="caption" sx={{ color: '#444', fontSize: '9px' }}>
-                                                                {log.duration.toFixed(1)}s
-                                                            </Typography>
-                                                        )}
-                                                    </Box>
-                                                    {log.transcription && (
-                                                        <Typography variant="body2" sx={{ color: '#aaa', fontStyle: 'italic', mt: 0.5, fontSize: '11px', borderLeft: '2px solid #333', pl: 1 }}>
-                                                            "{log.transcription}"
-                                                        </Typography>
-                                                    )}
-                                                </Box>
-                                            }
-                                        />
-                                    </ListItem>
-                                    <Divider component="li" sx={{ borderColor: '#1a1a1a' }} />
-                                </div>
-                            ))}
-                        </List>
+                        <TransmissionLog 
+                            liveLogs={callLog} 
+                            playingId={playingId} 
+                            onPlay={playRawAudio} 
+                            onDelete={deleteEntry} 
+                        />
                     </Paper>
                 </Grid>
 

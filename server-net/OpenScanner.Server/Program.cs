@@ -109,6 +109,31 @@ app.MapGet("/api/history", () => db.GetHistory(100))
     .WithDescription("Retrieves the last 100 radio transmission logs.")
     .Produces<IEnumerable<CallLog>>(StatusCodes.Status200OK);
 
+app.MapGet("/api/history/years", () => db.GetTransmissionYears())
+    .WithSummary("Get available years")
+    .Produces<IEnumerable<string>>(StatusCodes.Status200OK);
+
+app.MapGet("/api/history/{year}/months", (string year) => db.GetTransmissionMonths(year))
+    .WithSummary("Get available months for a year")
+    .Produces<IEnumerable<string>>(StatusCodes.Status200OK);
+
+app.MapGet("/api/history/{year}/{month}/days", (string year, string month) => db.GetTransmissionDays(year, month))
+    .WithSummary("Get available days for a month")
+    .Produces<IEnumerable<string>>(StatusCodes.Status200OK);
+
+app.MapGet("/api/history/{year}/{month}/{day}/channels", (string year, string month, string day) => db.GetTransmissionChannels(year, month, day))
+    .WithSummary("Get available channels for a day")
+    .Produces<IEnumerable<dynamic>>(StatusCodes.Status200OK);
+
+app.MapGet("/api/history/filter", (string year, string month, string day, string alphaTag, double frequency) => 
+    db.GetTransmissions(year, month, day, alphaTag, frequency))
+    .WithSummary("Get filtered transmissions")
+    .Produces<IEnumerable<CallLog>>(StatusCodes.Status200OK);
+
+app.MapGet("/api/history/search", (string q) => db.SearchTransmissions(q))
+    .WithSummary("Search transmissions")
+    .Produces<IEnumerable<CallLog>>(StatusCodes.Status200OK);
+
 app.MapDelete("/api/history/{id}", (string id) => 
 {
     db.DeleteTransmission(id);

@@ -11,7 +11,11 @@ OpenScanner is a high-performance, web-based digital radio scanner designed for 
 - **Real-Time Synchronization**: State (locks, holds, status) is synced instantly across all connected browsers.
 - **Modern Dashboard**:
     - **Live Waterfall**: Visual scrolling spectrogram of decoded audio.
-    - **Transmission History**: Detailed log of calls with instant playback and AI text.
+    - **Transmission History**:
+    - **Hierarchical Tree View**: Organize logs by Year, Month, Day, and Channel for easy browsing of massive datasets.
+    - **Live Activity**: A dedicated "Recent Activity" section for monitoring incoming transmissions in real-time.
+    - **Integrated Search**: Powerful search bar to find transmissions by transcription text, channel names, or frequencies.
+    - **Instant Playback**: One-click listening for all recorded transmissions.
     - **Channel Control**: One-click frequency hold and scan resume.
 - **GPS Integration**: Live tracking of location, altitude (Imperial units), and satellite count.
 - **Swagger Documentation**: Full OpenAPI/Swagger UI for API exploration.

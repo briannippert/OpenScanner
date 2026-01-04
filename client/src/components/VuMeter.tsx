@@ -41,8 +41,11 @@ const VuMeter: React.FC<Props> = ({ analyser, height = 200, width = 20 }) => {
             ctx.clearRect(0, 0, width, height);
 
             // Draw LED Bars
-            const bars = 30;
-            const barHeight = (height / bars) - 2;
+            // Calculate number of bars based on available height to ensure visibility
+            // aim for ~3px per bar (2px height + 1px gap)
+            const bars = Math.max(5, Math.floor(height / 3)); 
+            const gap = 1;
+            const barHeight = (height - (bars * gap)) / bars;
             
             for (let i = 0; i < bars; i++) {
                 // Calculate threshold for this bar (bottom is 0, top is 1)
@@ -61,7 +64,7 @@ const VuMeter: React.FC<Props> = ({ analyser, height = 200, width = 20 }) => {
 
                 ctx.fillStyle = color;
                 // Draw from bottom up
-                const y = height - ((i + 1) * (barHeight + 2));
+                const y = height - ((i + 1) * (barHeight + gap));
                 ctx.fillRect(0, y, width, barHeight);
             }
 
