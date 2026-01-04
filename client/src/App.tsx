@@ -476,11 +476,11 @@ function App() {
         {/* Header */}
         <AppBar position="static" elevation={0}>
             <Toolbar variant="dense">
-                <Typography variant="h6" component="div" sx={{ flexGrow: 1, color: '#00ff00', fontWeight: '900', letterSpacing: 3 }}>
+                <Typography variant="h6" component="div" sx={{ flexGrow: 1, color: '#00ff00', fontWeight: '900', letterSpacing: { xs: 1, sm: 3 }, fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
                     OPENSCANNER <span style={{fontSize: '0.7em', color: '#666'}}>P25</span>
                 </Typography>
 
-                <Box sx={{ mr: 2 }}>
+                <Box sx={{ mr: 2, display: { xs: 'none', sm: 'block' } }}>
                     <Tooltip title={scannerState.isHardwareConnected ? `${scannerState.deviceName || 'RTL-SDR Device'} (${scannerState.devicePort || 'USB'})` : 'No Device Detected'}>
                         <Chip 
                             icon={scannerState.isHardwareConnected ? <UsbIcon /> : <UsbOffIcon />}
@@ -493,12 +493,12 @@ function App() {
                     </Tooltip>
                 </Box>
 
-                <Box sx={{ mr: 3, px: 2, py: 0.5, bgcolor: '#111', borderRadius: 1, border: '1px solid #333', display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Box sx={{ mr: { xs: 1, sm: 3 }, px: { xs: 1, sm: 2 }, py: 0.5, bgcolor: '#111', borderRadius: 1, border: '1px solid #333', display: 'flex', alignItems: 'center', gap: 1 }}>
                     {scannerState.gps?.time && scannerState.gps.fix >= 2 
                         ? <SatelliteAltIcon sx={{ fontSize: 16, color: 'primary.main' }} />
                         : <AccessTimeIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
                     }
-                    <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'primary.main', fontWeight: 'bold', fontSize: '14px' }}>
+                    <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'primary.main', fontWeight: 'bold', fontSize: { xs: '12px', sm: '14px' } }}>
                         {scannerState.gps?.time && scannerState.gps.fix >= 2 
                             ? new Date(scannerState.gps.time).toLocaleTimeString([], { hour12: false })
                             : currentTime.toLocaleTimeString([], { hour12: false })
@@ -507,7 +507,7 @@ function App() {
                 </Box>
                 
                 {scannerState.gps && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mr: 3, px: 2, py: 0.5, bgcolor: '#111', borderRadius: 1, border: '1px solid #333' }}>
+                    <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 2, mr: 3, px: 2, py: 0.5, bgcolor: '#111', borderRadius: 1, border: '1px solid #333' }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                             <SatelliteAltIcon sx={{ fontSize: 16, color: (scannerState.gps.satsVisible || 0) > 0 ? 'primary.main' : '#444' }} />
                             <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'white' }}>
@@ -546,9 +546,9 @@ function App() {
 
                 {manualHold && (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Chip label="MANUAL HOLD" color="warning" size="small" icon={<PauseIcon />} />
+                        <Chip label="HOLD" color="warning" size="small" icon={<PauseIcon />} sx={{ display: { xs: 'none', sm: 'flex' } }} />
                         <Chip 
-                            label="RESUME SCAN" 
+                            label="RESUME" 
                             color="primary" 
                             size="small" 
                             onClick={() => {
@@ -561,13 +561,13 @@ function App() {
                 )}
 
                 <Tooltip title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
-                    <IconButton color="inherit" onClick={toggleFullscreen} sx={{ ml: 1 }}>
+                    <IconButton color="inherit" onClick={toggleFullscreen} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>
                         {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
                     </IconButton>
                 </Tooltip>
 
                 <Tooltip title="Download Support Package">
-                    <IconButton color="inherit" onClick={downloadSupportPackage} sx={{ ml: 1 }}>
+                    <IconButton color="inherit" onClick={downloadSupportPackage} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>
                         <SupportAgentIcon />
                     </IconButton>
                 </Tooltip>
@@ -575,11 +575,11 @@ function App() {
         </AppBar>
 
         {/* Main Content Dashboard */}
-        <Box sx={{ flexGrow: 1, p: 2, height: '100%', overflowY: { xs: 'auto', md: 'hidden' } }}>
+        <Box sx={{ flexGrow: 1, p: { xs: 1, sm: 2 }, height: '100%', overflowY: { xs: 'auto', md: 'hidden' } }}>
             <Grid container spacing={2} sx={{ height: { xs: 'auto', md: '100%' } }}>
                 
                 {/* Left Column: Active Scanner & Channel Grid (Compact) */}
-                <Grid size={{ xs: 12, md: 4, lg: 3 }} sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+                <Grid size={{ xs: 12, md: 4, lg: 3 }} sx={{ display: 'flex', flexDirection: 'column', height: { xs: 'auto', md: '100%' }, overflow: { xs: 'visible', md: 'hidden' } }}>
                     
                     {/* Hero Widget */}
                     <Box sx={{ mb: 2 }}>
@@ -594,7 +594,7 @@ function App() {
                     </Box>
 
                     {/* Channel Grid */}
-                    <Paper sx={{ flexGrow: 1, p: 2, bgcolor: '#0a0a0a', border: '1px solid #222', borderRadius: 2, overflowY: 'auto', minHeight: 0 }}>
+                    <Paper sx={{ flexGrow: 1, p: 2, bgcolor: '#0a0a0a', border: '1px solid #222', borderRadius: 2, overflowY: 'auto', minHeight: { xs: '300px', md: 0 } }}>
                         <Box display="flex" alignItems="center" mb={2} justifyContent="space-between">
                             <Box display="flex" alignItems="center" gap={1}>
                                 <AssessmentIcon color="primary" fontSize="small" />
@@ -606,7 +606,7 @@ function App() {
                         </Box>
                         <Grid container spacing={2}>
                             {channels.map((ch) => (
-                                <Grid size={{ xs: 12 }} key={ch.frequency}>
+                                <Grid size={{ xs: 12, sm: 6, md: 12 }} key={ch.frequency}>
                                     <Card 
                                         sx={{ 
                                             border: manualHold === ch.frequency ? '1px solid #ff9800' : '1px solid #333',
@@ -647,7 +647,7 @@ function App() {
                 </Grid>
 
                 {/* Right Column: Transmission Log (Expanded) */}
-                <Grid size={{ xs: 12, md: 8, lg: 9 }} sx={{ height: '100%', overflow: 'hidden' }}>
+                <Grid size={{ xs: 12, md: 8, lg: 9 }} sx={{ height: { xs: '500px', md: '100%' }, overflow: 'hidden' }}>
                     <Paper sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: '#0a0a0a', border: '1px solid #222', borderRadius: 2, overflowY: 'auto' }}>
                         <TransmissionLog 
                             liveLogs={callLog} 

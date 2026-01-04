@@ -20,11 +20,26 @@ body {
   height: 100vh;
   overflow: hidden; /* App will handle scrolling */
   background-color: #000;
+  overscroll-behavior-y: none; /* Disable pull-to-refresh */
+  -webkit-tap-highlight-color: transparent;
 }
 
 #root {
   width: 100%;
   height: 100%;
+}
+
+/* PWA - prevent text selection on UI elements */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Responsive fixes for mobile */
+@media (max-width: 600px) {
+  body {
+    position: fixed; /* Prevent scrolling of the body on iOS */
+  }
 }
 
 /* Scrollbar Styling */
