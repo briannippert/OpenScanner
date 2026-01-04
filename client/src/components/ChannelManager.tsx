@@ -95,6 +95,7 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                                         <MenuItem value="P25">P25 (Digital)</MenuItem>
                                         <MenuItem value="FM">FM (Analog)</MenuItem>
                                         <MenuItem value="NFM">NFM (Narrow FM)</MenuItem>
+                                        <MenuItem value="WFM">WFM (Broadcast)</MenuItem>
                                         <MenuItem value="AM">AM (Analog)</MenuItem>
                                     </Select>
                                 </FormControl>

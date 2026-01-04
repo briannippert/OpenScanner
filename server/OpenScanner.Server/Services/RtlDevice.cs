@@ -454,7 +454,8 @@ public class RtlDevice : BackgroundService
         
         string rtlMode = "fm";
         string dsdArgs = "-f1"; // Default P25
-        int sampleRate = 48000;
+        int captureRate = 48000;
+        int outputRate = 48000;
 
         string mode = channel.Mode?.ToUpper() ?? "P25";
         
@@ -464,6 +465,10 @@ public class RtlDevice : BackgroundService
         } else if (mode == "FM" || mode == "NFM") {
             rtlMode = "fm";
             dsdArgs = "-A"; // Force analog
+        } else if (mode == "WFM") {
+            rtlMode = "wbfm";
+            dsdArgs = "-A"; // Force analog
+            captureRate = 170000; // WFM needs higher bandwidth
         } else if (mode == "P25") {
             rtlMode = "fm";
             dsdArgs = "-f1";
@@ -476,7 +481,8 @@ public class RtlDevice : BackgroundService
         // If a specific CTCSS tone is requested in the channel config, we could pass it here,
         // but dsd-fme -A will find any tone and report it.
 
-        var cmd = $"rtl_fm -f {channel.Frequency}M -s {sampleRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {sampleRate}";
+        // Always resample to 48k for dsd-fme consistency
+        var cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate}";
         var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
         {
             RedirectStandardOutput = true,
