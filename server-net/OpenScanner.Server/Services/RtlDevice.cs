@@ -35,6 +35,7 @@ public class RtlDevice : BackgroundService
     private long _recordingStartTime;
     private int? _currentSourceID;
     private int? _currentTargetID;
+    private DateTime _lastActivityReset = DateTime.MinValue;
 
     public RtlDevice(IDatabase db, ILogger<RtlDevice> logger, GpsService gps)
     {
@@ -518,6 +519,7 @@ public class RtlDevice : BackgroundService
                             {
                                 await _recordingStream.WriteAsync(chunk, 0, chunk.Length, token);
                                 await _recordingStream.FlushAsync(token);
+                                ResetActivityTimeout(); // Keep recording alive while audio flows
                             }
                         }
                     }
@@ -598,6 +600,30 @@ public class RtlDevice : BackgroundService
         });
     }
 
+    private void ResetActivityTimeout()
+    {
+        // Throttle updates to avoid task thrashing (e.g. max 2 times per second)
+        if ((DateTime.UtcNow - _lastActivityReset).TotalMilliseconds < 500) return;
+        _lastActivityReset = DateTime.UtcNow;
+
+        _activityTimeoutCts?.Cancel();
+        _activityTimeoutCts = new CancellationTokenSource();
+        
+        if (!_manualOverride)
+        {
+            RestartSessionTimeout(5000); // 5s hang time
+        }
+
+        Task.Delay(2000, _activityTimeoutCts.Token).ContinueWith(t => 
+        {
+            if (!t.IsCanceled)
+            {
+                StopRecording();
+                if (_manualOverride) UpdateState(_state with { Status = "MONITORING" });
+            }
+        });
+    }
+
     private void HandleActivity(int? src = null, int? tgt = null)
     {
         // Valid Frame detected
@@ -612,25 +638,7 @@ public class RtlDevice : BackgroundService
             StartRecording(src, tgt);
         }
 
-        // Reset inactivity timer
-        _activityTimeoutCts?.Cancel();
-        _activityTimeoutCts = new CancellationTokenSource();
-        
-        // Reset session timeout (Keep listening)
-        if (!_manualOverride)
-        {
-            RestartSessionTimeout(5000); // 5s hang time
-        }
-
-        // If no more activity for 2s, stop recording and revert state
-        Task.Delay(2000, _activityTimeoutCts.Token).ContinueWith(t => 
-        {
-            if (!t.IsCanceled)
-            {
-                StopRecording();
-                if (_manualOverride) UpdateState(_state with { Status = "MONITORING" });
-            }
-        });
+        ResetActivityTimeout();
     }
 
     private void StartRecording(int? src = null, int? tgt = null)
