@@ -553,7 +553,7 @@ public class RtlDevice : BackgroundService
                 Task.Run(async () => {
                      try {
                         while (!kaToken.IsCancellationRequested) {
-                            HandleActivity(null, null, null);
+                            HandleActivity(channel, null, null, null);
                             
                             // If we are scanning (not holding), trigger once then let it timeout (5s)
                             // This prevents getting stuck on a WFM channel forever.
@@ -600,11 +600,14 @@ public class RtlDevice : BackgroundService
                             var chunk = sendBuffer.ToArray();
                             sendBuffer.Clear();
                             
-                            OnAudio?.Invoke(chunk);
-                            lastSend = DateTime.UtcNow;
-
                             lock (_audioLock)
                             {
+                                // Strict attribution check: If we switched channels, drop this audio packet
+                                if (_state.CurrentChannel?.Frequency != channel.Frequency) continue;
+
+                                OnAudio?.Invoke(chunk);
+                                lastSend = DateTime.UtcNow;
+
                                 // Update pre-roll
                                 _preRollBuffer.AddLast(chunk);
                                 _preRollSize += chunk.Length;
@@ -717,7 +720,7 @@ public class RtlDevice : BackgroundService
                                     if (parts.Length > 1) tone = "D" + parts[1].Trim().Split(' ')[0];
                                 }
 
-                                HandleActivity(src, tgt, tone);
+                                HandleActivity(channel, src, tgt, tone);
                             }
                         }
                     }
@@ -752,8 +755,11 @@ public class RtlDevice : BackgroundService
         });
     }
 
-    private void HandleActivity(int? src = null, int? tgt = null, string? tone = null)
+    private void HandleActivity(Channel originChannel, int? src = null, int? tgt = null, string? tone = null)
     {
+        // STRICT ATTRIBUTION: Ignore activity if we have moved to a different channel
+        if (_state.CurrentChannel?.Frequency != originChannel.Frequency) return;
+
         // Valid Activity detected
         if (_state.Status != "RECEIVING" || 
             (src.HasValue && _state.SourceID != src) || 
@@ -771,15 +777,17 @@ public class RtlDevice : BackgroundService
         // Start recording if not already started
         if (_recordingStream == null)
         {
-            StartRecording(src, tgt);
+            StartRecording(originChannel, src, tgt);
         }
 
         ResetActivityTimeout();
     }
 
-    private void StartRecording(int? src = null, int? tgt = null)
+    private void StartRecording(Channel originChannel, int? src = null, int? tgt = null)
     {
-        if (_recordingStream != null || _state.CurrentChannel == null) return;
+        // Double check strict attribution
+        if (_recordingStream != null || _state.CurrentChannel?.Frequency != originChannel.Frequency) return;
+        
         if (DateTime.UtcNow < _recordingLockoutUntil) return;
 
         var filename = $"rec_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_{_state.CurrentChannel.Frequency}.raw";
@@ -895,7 +903,7 @@ public class RtlDevice : BackgroundService
         // Whisper: /home/brian/radio/OpenScanner/whisper.cpp
         var whisperRoot = Path.GetFullPath(Path.Combine(projectRoot, "../../whisper.cpp"));
         var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");
-        var modelPath = Path.Combine(whisperRoot, "models/ggml-tiny.en.bin");
+        var modelPath = Path.Combine(whisperRoot, "models/ggml-base.en.bin"); // Upgraded to base model
 
         if (!File.Exists(whisperBin) || !File.Exists(modelPath))
         {
@@ -906,7 +914,8 @@ public class RtlDevice : BackgroundService
         // 1. Convert RAW (8k or 48k s16le) to WAV (16k)
         // inputRate must match the output of the decoder pipeline (which is 48k for both WFM and others due to ffmpeg upsampling)
         int inputRate = 48000;
-        var ffmpegArgs = $"-f s16le -ar {inputRate} -ac 1 -i \"{rawPath}\" -ar 16000 -ac 1 \"{wavPath}\" -y";
+        // Added Audio Filtering: Highpass 200Hz, Lowpass 3000Hz (Voice Band), and Compression to boost quiet audio
+        var ffmpegArgs = $"-f s16le -ar {inputRate} -ac 1 -i \"{rawPath}\" -af \"highpass=f=200,lowpass=f=3000,compand=attacks=0:points=-80/-80|-20/-20|-10/-10|0/-10:gain=5\" -ar 16000 -ac 1 \"{wavPath}\" -y";
         var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg", ffmpegArgs)
         {
             RedirectStandardOutput = true,
@@ -932,7 +941,7 @@ public class RtlDevice : BackgroundService
 
         // 2. Run Whisper with Radio Context
         // Prompt helps Whisper bias towards radio terminology and style
-        var prompt = "Police, Fire, and EMS radio dispatch. 10-4 copy that. Unit identifiers like Engine 5, Rescue 2, or Unit 402. Phonetic alphabet: Alpha, Bravo, Charlie, Delta, Echo, Foxtrot. Suspect descriptions, vehicle plates, and street addresses. Dispatching priority calls and status updates. Roger, over and out. Signal 10, Code 3, 10-20 location.";
+        var prompt = "Dispatch, Unit 1, 10-4, copy, over. Priority traffic, code 3 response to street intersection. Suspect description: white male, blue jeans. License plate, vehicle registration, bolo. Structure fire, medical emergency, staging area. Status check, affirmative, negative, stand by. Channel 2, tac channel, command post. Kilo, Tango, Zulu, X-ray. 10-20 location, 10-8 in service, 10-7 out of service.";
         var whisperArgs = $"-m \"{modelPath}\" -f \"{wavPath}\" -nt -otxt -l en --prompt \"{prompt}\""; 
         
         var whisperStart = new ProcessStartInfo(whisperBin, whisperArgs)
