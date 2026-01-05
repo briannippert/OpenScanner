@@ -474,18 +474,16 @@ public class RtlDevice : BackgroundService
         string dsdArgs = "-f1"; // Default P25
         int captureRate = 48000;
         int outputRate = 48000;
-        int dsdOutputRate = 8000; // Default for Digital (synthesized voice)
+        int dsdOutputRate = 48000; // Default to 48k for all modes (Analog and Digital)
 
         string mode = channel.Mode?.ToUpper() ?? "P25";
         
         if (mode == "AM") {
             rtlMode = "am";
             dsdArgs = "-A"; // Force analog
-            dsdOutputRate = 48000; // Analog pass-through is 48k
         } else if (mode == "FM" || mode == "NFM") {
             rtlMode = "fm";
             dsdArgs = "-A"; // Force analog
-            dsdOutputRate = 48000; // Analog pass-through is 48k
         } else if (mode == "WFM") {
             rtlMode = "wbfm";
             dsdArgs = "-A"; // Force analog
@@ -493,7 +491,6 @@ public class RtlDevice : BackgroundService
         } else if (mode == "P25") {
             rtlMode = "fm";
             dsdArgs = "-f1"; // P25 Phase 1
-            dsdOutputRate = 8000;
         } else {
             // Unknown, try auto
             rtlMode = "fm";
@@ -513,8 +510,8 @@ public class RtlDevice : BackgroundService
         }
         else
         {
-            // DSD-FME outputs 8000Hz by default for voice (even with -s 48000). 
-            // FFmpeg input rate (-ar) must match dsd-fme output (8k for digital, 48k for analog pass-through).
+            // DSD-FME output is assumed to be 48k because we pass -s 48000.
+            // FFmpeg input rate (-ar) is set to 48000 to match.
             // Output rate is 48000 to match WFM and Client expectation.
             // Added -fflags nobuffer -flags low_delay to reduce latency and choppiness
             cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -i - -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay - -loglevel quiet";
@@ -897,32 +894,81 @@ public class RtlDevice : BackgroundService
     private string? TranscribeAudio(string rawPath)
     {
         var wavPath = Path.ChangeExtension(rawPath, ".wav");
-        var projectRoot = Directory.GetCurrentDirectory(); // server/OpenScanner.Server
-        // Adjust path to whisper.cpp relative to execution context
-        // Execution: /home/brian/radio/OpenScanner/server/OpenScanner.Server
-        // Whisper: /home/brian/radio/OpenScanner/whisper.cpp
-        var whisperRoot = Path.GetFullPath(Path.Combine(projectRoot, "../../whisper.cpp"));
+        
+        // Robustly find whisper.cpp root
+        var currentDir = new DirectoryInfo(Directory.GetCurrentDirectory());
+        string? whisperRoot = null;
+        
+        // 1. Try absolute path first (Server specific)
+        if (Directory.Exists("/home/brian/radio/OpenScanner/whisper.cpp"))
+        {
+            whisperRoot = "/home/brian/radio/OpenScanner/whisper.cpp";
+        }
+        else 
+        {
+            // 2. Search up
+            for (int i = 0; i < 6; i++) 
+            {
+                if (currentDir == null) break;
+                var probe = Path.Combine(currentDir.FullName, "whisper.cpp");
+                if (Directory.Exists(probe))
+                {
+                    whisperRoot = probe;
+                    break;
+                }
+                
+                probe = Path.Combine(currentDir.FullName, "../whisper.cpp");
+                 if (Directory.Exists(probe))
+                {
+                    whisperRoot = Path.GetFullPath(probe);
+                    break;
+                }
+
+                currentDir = currentDir.Parent;
+            }
+        }
+
+        if (whisperRoot == null)
+        {
+             var projectRoot = Directory.GetCurrentDirectory(); 
+             whisperRoot = Path.GetFullPath(Path.Combine(projectRoot, "../../whisper.cpp"));
+        }
+
         var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");
-        var modelPath = Path.Combine(whisperRoot, "models/ggml-base.en.bin"); // Upgraded to base model
+        var modelPath = Path.Combine(whisperRoot, "models/ggml-medium.en.bin"); 
 
         if (!File.Exists(whisperBin) || !File.Exists(modelPath))
         {
-            _logger.LogWarning($"Whisper not found at {whisperBin}");
+            _logger.LogWarning($"Whisper not found at {whisperBin} or model missing at {modelPath}. Search root was: {whisperRoot}");
             return null;
         }
 
-        // 1. Convert RAW (8k or 48k s16le) to WAV (16k)
-        // inputRate must match the output of the decoder pipeline (which is 48k for both WFM and others due to ffmpeg upsampling)
         int inputRate = 48000;
-        // Added Audio Filtering: Highpass 200Hz, Lowpass 3000Hz (Voice Band), and Compression to boost quiet audio
-        var ffmpegArgs = $"-f s16le -ar {inputRate} -ac 1 -i \"{rawPath}\" -af \"highpass=f=200,lowpass=f=3000,compand=attacks=0:points=-80/-80|-20/-20|-10/-10|0/-10:gain=5\" -ar 16000 -ac 1 \"{wavPath}\" -y";
-        var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg", ffmpegArgs)
+        
+        var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        
+        convertStart.ArgumentList.Add("-f");
+        convertStart.ArgumentList.Add("s16le");
+        convertStart.ArgumentList.Add("-ar");
+        convertStart.ArgumentList.Add(inputRate.ToString());
+        convertStart.ArgumentList.Add("-ac");
+        convertStart.ArgumentList.Add("1");
+        convertStart.ArgumentList.Add("-i");
+        convertStart.ArgumentList.Add(rawPath);
+        convertStart.ArgumentList.Add("-af");
+        convertStart.ArgumentList.Add("highpass=f=200,lowpass=f=3000,compand=attacks=0:points=-80/-80|-20/-20|-10/-10|0/-10:gain=5");
+        convertStart.ArgumentList.Add("-ar");
+        convertStart.ArgumentList.Add("16000");
+        convertStart.ArgumentList.Add("-ac");
+        convertStart.ArgumentList.Add("1");
+        convertStart.ArgumentList.Add(wavPath);
+        convertStart.ArgumentList.Add("-y");
         
         using (var proc = Process.Start(convertStart))
         {
