@@ -34,10 +34,13 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
     let displayFreq = state.currentFrequency;
     let displayAlpha = state.currentChannel?.alphaTag;
 
-    if (state.status === 'SCANNING' && channels.length > 0) {
+    // If we are scanning OR if we have a frequency that isn't in our channel list (like the center freq)
+    const isProgrammed = channels.some(c => Math.abs(c.frequency - (state.currentFrequency || 0)) < 0.001);
+    
+    if ((state.status === 'SCANNING' || !isProgrammed) && channels.length > 0) {
         // Show cycling channels
-        displayFreq = channels[scanIndex].frequency;
-        displayAlpha = channels[scanIndex].alphaTag;
+        displayFreq = channels[scanIndex % channels.length].frequency;
+        displayAlpha = channels[scanIndex % channels.length].alphaTag;
     }
 
     return (

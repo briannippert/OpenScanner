@@ -425,7 +425,7 @@ public class RtlDevice : BackgroundService
         // Safety timeout
         if (!_manualOverride)
         {
-            RestartSessionTimeout(3000); // 3s to hear something (sync up)
+            RestartSessionTimeout(5000); // 5s to hear something (sync up)
         }
     }
 
@@ -474,22 +474,26 @@ public class RtlDevice : BackgroundService
         string dsdArgs = "-f1"; // Default P25
         int captureRate = 48000;
         int outputRate = 48000;
+        int dsdOutputRate = 8000; // Default for Digital (synthesized voice)
 
         string mode = channel.Mode?.ToUpper() ?? "P25";
         
         if (mode == "AM") {
             rtlMode = "am";
             dsdArgs = "-A"; // Force analog
+            dsdOutputRate = 48000; // Analog pass-through is 48k
         } else if (mode == "FM" || mode == "NFM") {
             rtlMode = "fm";
             dsdArgs = "-A"; // Force analog
+            dsdOutputRate = 48000; // Analog pass-through is 48k
         } else if (mode == "WFM") {
             rtlMode = "wbfm";
             dsdArgs = "-A"; // Force analog
             captureRate = 170000; // WFM needs higher bandwidth
         } else if (mode == "P25") {
             rtlMode = "fm";
-            dsdArgs = "-f1 -C"; // P25 with Control Channel support
+            dsdArgs = "-f1"; // P25 Phase 1
+            dsdOutputRate = 8000;
         } else {
             // Unknown, try auto
             rtlMode = "fm";
@@ -509,10 +513,11 @@ public class RtlDevice : BackgroundService
         }
         else
         {
-            // DSD-FME outputs {outputRate} (48k) because of the -s flag. 
-            // FFmpeg input rate (-ar) must match dsd-fme output rate.
+            // DSD-FME outputs 8000Hz by default for voice (even with -s 48000). 
+            // FFmpeg input rate (-ar) must match dsd-fme output (8k for digital, 48k for analog pass-through).
+            // Output rate is 48000 to match WFM and Client expectation.
             // Added -fflags nobuffer -flags low_delay to reduce latency and choppiness
-            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | /usr/bin/ffmpeg -f s16le -ar {outputRate} -ac 1 -i - -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay - -loglevel quiet";
+            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -i - -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay - -loglevel quiet";
         }
 
         var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
@@ -589,8 +594,8 @@ public class RtlDevice : BackgroundService
                         }
 
                         // Send if we have enough or if it's been too long
-                        // Reduced threshold to 512 bytes (~5ms) and timeout to 50ms for smoother streaming
-                        if (sendBuffer.Count >= 512 || (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 50))
+                        // Increased threshold to 4096 bytes (~42ms) to reduce WebSocket overhead and crackling
+                        if (sendBuffer.Count >= 4096 || (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 60))
                         {
                             var chunk = sendBuffer.ToArray();
                             sendBuffer.Clear();
@@ -657,6 +662,7 @@ public class RtlDevice : BackgroundService
                                 line.Contains("LDU") || line.Contains("VDU") || // P25 Voice Frames
                                 line.Contains("HDU") || // P25 Header Data Unit (Start of Call)
                                 line.Contains("TDU") || // P25 Terminator
+                                (line.Contains("P25") && !line.Contains("TSBK")) || // Allow P25 sync but not control channel
                                 line.Contains("CTCSS") || line.Contains("DCS") || line.Contains("ANALOG");
 
                             if (isActivity)
@@ -810,6 +816,7 @@ public class RtlDevice : BackgroundService
     {
         string? recordingPath;
         long startTime;
+        Channel? capturedChannel = _state.CurrentChannel;
 
         lock (_audioLock)
         {
@@ -822,7 +829,7 @@ public class RtlDevice : BackgroundService
         
         var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
         
-        if (duration >= 0.5 && recordingPath != null && File.Exists(recordingPath) && _state.CurrentChannel != null)
+        if (duration >= 0.5 && recordingPath != null && File.Exists(recordingPath) && capturedChannel != null)
         {
              // Run Transcription
              string? transcription = null;
@@ -843,9 +850,9 @@ public class RtlDevice : BackgroundService
              var log = new CallLog(
                  $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
                  DateTime.UtcNow.ToString("o"),
-                 _state.CurrentChannel.Frequency,
-                 _state.CurrentChannel.AlphaTag,
-                 _state.CurrentChannel.Description,
+                 capturedChannel.Frequency,
+                 capturedChannel.AlphaTag,
+                 capturedChannel.Description,
                  (_state.Gps?.Lat != 0) ? _state.Gps?.Lat : null,
                  (_state.Gps?.Lon != 0) ? _state.Gps?.Lon : null,
                  Path.GetFileName(recordingPath),
