@@ -70,17 +70,4 @@ declare global {
         webkitAudioContext?: typeof AudioContext;
         nextStartTime?: number;
     }
-    
-    interface WakeLockSentinel extends EventTarget {
-        release(): Promise<void>;
-        readonly released: boolean;
-        readonly type: 'screen';
-        onrelease: ((this: WakeLockSentinel, ev: Event) => void) | null;
-    }
-
-    interface Navigator {
-        wakeLock?: {
-            request(type: 'screen'): Promise<WakeLockSentinel>;
-        }
-    }
 }

@@ -221,15 +221,19 @@ function App() {
 
   // Audio Playback Helper for recorded files
   const playRawAudio = async (id: string, filename: string, duration?: number) => {
-    if (!window.audioCtx) {
+    let ctx = window.audioCtx;
+    if (!ctx) {
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         if (AudioContextClass) {
-            window.audioCtx = new AudioContextClass({ sampleRate: 48000 });
+            ctx = new AudioContextClass({ sampleRate: 48000 });
+            window.audioCtx = ctx;
+        } else {
+            return;
         }
     }
     
-    if (window.audioCtx && window.audioCtx.state === 'suspended') {
-        await window.audioCtx.resume();
+    if (ctx.state === 'suspended') {
+        await ctx.resume();
     }
 
     if (playingId === id && activeSource.current) {
@@ -274,17 +278,17 @@ function App() {
             }
             console.log(`Detected Sample Rate: ${sampleRate}Hz`);
 
-            buffer = window.audioCtx.createBuffer(1, float32Array.length, sampleRate);
+            buffer = ctx.createBuffer(1, float32Array.length, sampleRate);
             buffer.copyToChannel(float32Array, 0);
         } else {
             // MP3/WAV - Use browser decoder
             console.log(`Playing compressed audio: ${filename}`);
-            buffer = await window.audioCtx.decodeAudioData(arrayBuffer);
+            buffer = await ctx.decodeAudioData(arrayBuffer);
         }
 
-        const source = window.audioCtx.createBufferSource();
+        const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.connect(window.audioCtx.destination);
+        source.connect(ctx.destination);
         
         activeSource.current = source;
         setPlayingId(id);
