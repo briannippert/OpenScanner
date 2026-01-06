@@ -3,6 +3,7 @@ import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, B
 import ScannerDisplay from './components/ScannerDisplay';
 import ChannelManager from './components/ChannelManager';
 import FireToneManager from './components/FireToneManager';
+import SettingsManager from './components/SettingsManager';
 import TransmissionLog from './components/TransmissionLog';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -18,6 +19,7 @@ import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import SupportAgentIcon from '@mui/icons-material/SupportAgent';
+import SettingsIcon from '@mui/icons-material/Settings';
 import type { ScannerState, Channel, CallLog, FireToneSet } from './types';
 
 const darkTheme = createTheme({
@@ -71,6 +73,7 @@ function App() {
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | undefined>(undefined);
   const [isManagerOpen, setIsManagerOpen] = useState(false);
   const [isToneManagerOpen, setIsToneManagerOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -713,6 +716,12 @@ function App() {
                     </IconButton>
                 </Tooltip>
 
+                <Tooltip title="Settings">
+                    <IconButton color="inherit" onClick={() => setIsSettingsOpen(true)} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>
+                        <SettingsIcon />
+                    </IconButton>
+                </Tooltip>
+
                 <Tooltip title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
                     <IconButton color="inherit" onClick={toggleFullscreen} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>
                         {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
@@ -828,6 +837,11 @@ function App() {
             tones={fireTones}
             onSave={handleSaveFireTone}
             onDelete={handleDeleteFireTone}
+        />
+
+        <SettingsManager
+            open={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
         />
 
         <Snackbar 
