@@ -59,9 +59,20 @@ public class Database : IDatabase
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN transcription TEXT;"); } catch {}
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN sourceID INTEGER;"); } catch {}
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN targetID INTEGER;"); } catch {}
+        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN detectedTone TEXT;"); } catch {}
         try { conn.Execute("ALTER TABLE channels ADD COLUMN lat REAL;"); } catch {}
         try { conn.Execute("ALTER TABLE channels ADD COLUMN lon REAL;"); } catch {}
         try { conn.Execute("ALTER TABLE channels ADD COLUMN range REAL;"); } catch {}
+
+        conn.Execute(@"
+            CREATE TABLE IF NOT EXISTS fire_tones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                frequencyA REAL,
+                frequencyB REAL,
+                description TEXT
+            );
+        ");
 
         var count = conn.ExecuteScalar<int>("SELECT count(*) FROM channels");
         if (count == 0)
@@ -211,5 +222,29 @@ public class Database : IDatabase
                 try { File.Delete(file); } catch { }
             }
         }
+    }
+
+    public async Task<IEnumerable<FireToneSet>> GetAllFireTonesAsync()
+    {
+        using var conn = GetConnection();
+        return await conn.QueryAsync<FireToneSet>("SELECT * FROM fire_tones");
+    }
+
+    public async Task<int> AddFireToneAsync(FireToneSet tone)
+    {
+        using var conn = GetConnection();
+        return await conn.ExecuteScalarAsync<int>("INSERT INTO fire_tones (name, frequencyA, frequencyB, description) VALUES (@Name, @FrequencyA, @FrequencyB, @Description); SELECT last_insert_rowid();", tone);
+    }
+
+    public async Task UpdateFireToneAsync(FireToneSet tone)
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync("UPDATE fire_tones SET name=@Name, frequencyA=@FrequencyA, frequencyB=@FrequencyB, description=@Description WHERE id=@Id", tone);
+    }
+
+    public async Task DeleteFireToneAsync(int id)
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync("DELETE FROM fire_tones WHERE id=@Id", new { Id = id });
     }
 }

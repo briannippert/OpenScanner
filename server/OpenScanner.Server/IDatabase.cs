@@ -21,4 +21,10 @@ public interface IDatabase
     Task<IEnumerable<CallLog>> SearchTransmissionsAsync(string query);
     Task DeleteTransmissionAsync(string id);
     Task ClearHistoryAsync();
+
+    // Fire Tones
+    Task<IEnumerable<FireToneSet>> GetAllFireTonesAsync();
+    Task<int> AddFireToneAsync(FireToneSet tone);
+    Task UpdateFireToneAsync(FireToneSet tone);
+    Task DeleteFireToneAsync(int id);
 }

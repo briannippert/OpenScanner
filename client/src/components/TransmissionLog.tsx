@@ -344,6 +344,11 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog, playingId
                             <Typography variant="caption" sx={{ color: '#fff', fontWeight: 'bold', fontSize: '0.8rem' }}>
                                 {log.alphaTag}
                             </Typography>
+                            {log.detectedTone && (
+                                <Typography variant="caption" sx={{ color: '#ff0000', fontWeight: 'bold', fontSize: '9px', border: '1px solid #ff0000', px: 0.5, borderRadius: 0.5 }}>
+                                    {log.detectedTone}
+                                </Typography>
+                            )}
                             {log.duration && (
                                 <Typography variant="caption" sx={{ color: '#555', fontSize: '9px' }}>
                                     {log.duration.toFixed(1)}s
