@@ -36,8 +36,6 @@ public class RtlDevice : BackgroundService
     private int? _currentSourceID;
     private int? _currentTargetID;
     private DateTime _lastActivityReset = DateTime.MinValue;
-    private long _lastRecordingEndTime;
-    private double _lastRecordingFrequency;
 
     // Pre-roll buffer to capture start of transmissions
     private readonly LinkedList<byte[]> _preRollBuffer = new();
@@ -793,13 +791,7 @@ public class RtlDevice : BackgroundService
         if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - originChannel.Frequency) > 0.001) return;
         if (DateTime.UtcNow < _recordingLockoutUntil) return;
 
-        // Prevent rapid re-triggering on same frequency (Cooldown)
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        if (Math.Abs(_lastRecordingFrequency - originChannel.Frequency) < 0.001 && (now - _lastRecordingEndTime) < 2000)
-        {
-            return;
-        }
-
         var filename = $"rec_{now}_{_state.CurrentChannel.Frequency}.raw";
         // Ensure data dir exists
         var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../data/recordings");
@@ -840,19 +832,14 @@ public class RtlDevice : BackgroundService
             long startTime;
             Channel? capturedChannel = _state.CurrentChannel;
     
-                    lock (_audioLock)
-                    {
-                        if (_recordingStream == null) return;
-                        _recordingStream.Close();
-                        _recordingStream = null;
-                        recordingPath = _currentRecordingPath;
-                        startTime = _recordingStartTime;
-                        
-                        // Update cooldown tracking
-                        _lastRecordingEndTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                        _lastRecordingFrequency = capturedChannel?.Frequency ?? 0;
-                    }            
-            var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
+                            lock (_audioLock)
+                            {
+                                if (_recordingStream == null) return;
+                                _recordingStream.Close();
+                                _recordingStream = null;
+                                recordingPath = _currentRecordingPath;
+                                startTime = _recordingStartTime;
+                            }            var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
             
             if (duration >= 0.5 && recordingPath != null && File.Exists(recordingPath))
             {
