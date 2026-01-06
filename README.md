@@ -8,15 +8,16 @@ OpenScanner is a high-performance, web-based digital radio scanner designed for 
 
 - **Digital Voice Decoding**: Stable P25 Phase 1 decoding via `rtl_fm` and `dsd-fme`.
 - **AI Transcriptions**: Integrated **Whisper AI** (`whisper.cpp`) for automatic speech-to-text logging.
+- **Fire Tone Out Detection**: Detects and alerts on specific 2-tone paging sequences (e.g., Fire/EMS dispatch).
 - **Real-Time Synchronization**: State (locks, holds, status) is synced instantly across all connected browsers.
 - **Modern Dashboard**:
     - **Live Waterfall**: Visual scrolling spectrogram of decoded audio.
     - **Transmission History**:
-    - **Hierarchical Tree View**: Organize logs by Year, Month, Day, and Channel for easy browsing of massive datasets.
-    - **Live Activity**: A dedicated "Recent Activity" section for monitoring incoming transmissions in real-time.
-    - **Integrated Search**: Powerful search bar to find transmissions by transcription text, channel names, or frequencies.
-    - **Instant Playback**: One-click listening for all recorded transmissions.
-    - **Channel Control**: One-click frequency hold and scan resume.
+        - **Hierarchical Tree View**: Organize logs by Year, Month, Day, and Channel for easy browsing of massive datasets.
+        - **Live Activity**: A dedicated "Recent Activity" section for monitoring incoming transmissions in real-time.
+        - **Integrated Search**: Powerful search bar to find transmissions by transcription text, channel names, or frequencies.
+        - **Instant Playback**: One-click listening for all recorded transmissions.
+    - **Channel Management**: Full database control to add, edit, or delete channels. Includes frequency hold and scan resume.
 - **GPS Integration**: Live tracking of location, altitude (Imperial units), and satellite count.
 - **Swagger Documentation**: Full OpenAPI/Swagger UI for API exploration.
 - **Service-Ready**: Automated installer configures OpenScanner as a systemd service on port 80.
