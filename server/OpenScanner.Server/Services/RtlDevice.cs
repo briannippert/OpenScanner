@@ -36,6 +36,8 @@ public class RtlDevice : BackgroundService
     private int? _currentSourceID;
     private int? _currentTargetID;
     private DateTime _lastActivityReset = DateTime.MinValue;
+    private long _lastRecordingEndTime;
+    private double _lastRecordingFrequency;
 
     // Pre-roll buffer to capture start of transmissions
     private readonly LinkedList<byte[]> _preRollBuffer = new();
@@ -747,7 +749,7 @@ public class RtlDevice : BackgroundService
             RestartSessionTimeout(5000); // 5s hang time
         }
 
-        Task.Delay(4000, _activityTimeoutCts.Token).ContinueWith(t => 
+        Task.Delay(6000, _activityTimeoutCts.Token).ContinueWith(t => 
         {
             if (!t.IsCanceled)
             {
@@ -787,24 +789,34 @@ public class RtlDevice : BackgroundService
 
     private void StartRecording(Channel originChannel, int? src = null, int? tgt = null)
     {
-        // Double check strict attribution
-        if (_recordingStream != null || _state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - originChannel.Frequency) > 0.001) return;
-        
+        // Double check strict attribution and lockout
+        if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - originChannel.Frequency) > 0.001) return;
         if (DateTime.UtcNow < _recordingLockoutUntil) return;
 
-        var filename = $"rec_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_{_state.CurrentChannel.Frequency}.raw";
+        // Prevent rapid re-triggering on same frequency (Cooldown)
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (Math.Abs(_lastRecordingFrequency - originChannel.Frequency) < 0.001 && (now - _lastRecordingEndTime) < 2000)
+        {
+            return;
+        }
+
+        var filename = $"rec_{now}_{_state.CurrentChannel.Frequency}.raw";
         // Ensure data dir exists
         var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../data/recordings");
         if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
 
-        _currentRecordingPath = Path.Combine(dataDir, filename);
-        _recordingStartTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        _currentSourceID = src;
-        _currentTargetID = tgt;
+        var newPath = Path.Combine(dataDir, filename);
         
-        try 
+        lock (_audioLock)
         {
-            lock (_audioLock)
+            if (_recordingStream != null) return;
+
+            _currentRecordingPath = newPath;
+            _recordingStartTime = now;
+            _currentSourceID = src;
+            _currentTargetID = tgt;
+
+            try 
             {
                 _recordingStream = new FileStream(_currentRecordingPath, FileMode.Create);
                 _logger.LogInformation($"Starting recording: {filename}");
@@ -815,10 +827,10 @@ public class RtlDevice : BackgroundService
                     _recordingStream.Write(chunk, 0, chunk.Length);
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create recording file");
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create recording file");
+            }
         }
     }
 
@@ -828,15 +840,18 @@ public class RtlDevice : BackgroundService
             long startTime;
             Channel? capturedChannel = _state.CurrentChannel;
     
-            lock (_audioLock)
-            {
-                if (_recordingStream == null) return;
-                _recordingStream.Close();
-                _recordingStream = null;
-                recordingPath = _currentRecordingPath;
-                startTime = _recordingStartTime;
-            }
-            
+                    lock (_audioLock)
+                    {
+                        if (_recordingStream == null) return;
+                        _recordingStream.Close();
+                        _recordingStream = null;
+                        recordingPath = _currentRecordingPath;
+                        startTime = _recordingStartTime;
+                        
+                        // Update cooldown tracking
+                        _lastRecordingEndTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        _lastRecordingFrequency = capturedChannel?.Frequency ?? 0;
+                    }            
             var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
             
             if (duration >= 0.5 && recordingPath != null && File.Exists(recordingPath))
