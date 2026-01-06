@@ -78,7 +78,7 @@ function App() {
   const wsControl = useRef<WebSocket | null>(null);
   const wsAudio = useRef<WebSocket | null>(null);
   const audioAnalyserRef = useRef<AnalyserNode | null>(null);
-  const wakeLock = useRef<any>(null);
+  const wakeLock = useRef<WakeLockSentinel | null>(null);
   const activeSource = useRef<AudioBufferSourceNode | null>(null);
 
   const manualHold = scannerState.manualHoldFrequency;
@@ -86,9 +86,12 @@ function App() {
   // Initialize Audio Context on Interaction
   const initAudio = async () => {
       if (!window.audioCtx) {
-          window.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) {
+              window.audioCtx = new AudioContextClass({ sampleRate: 48000 });
+          }
       }
-      if (window.audioCtx.state === 'suspended') {
+      if (window.audioCtx && window.audioCtx.state === 'suspended') {
           await window.audioCtx.resume();
       }
       setIsAudioInitialized(true);
@@ -142,18 +145,20 @@ function App() {
   // Wake Lock Manager
   useEffect(() => {
     const requestWakeLock = async () => {
-      if ('wakeLock' in navigator && scannerState.status !== 'IDLE') {
+      if ('wakeLock' in navigator && scannerState.status !== 'IDLE' && navigator.wakeLock) {
         try {
           if (!wakeLock.current) {
-            wakeLock.current = await (navigator as any).wakeLock.request('screen');
+            wakeLock.current = await navigator.wakeLock.request('screen');
             console.log('Wake Lock active');
             wakeLock.current.addEventListener('release', () => {
                wakeLock.current = null;
                console.log('Wake Lock released');
             });
           }
-        } catch (err: any) {
-          console.error(`${err.name}, ${err.message}`);
+        } catch (err: unknown) {
+          if (err instanceof Error) {
+            console.error(`${err.name}, ${err.message}`);
+          }
         }
       } else if (wakeLock.current && scannerState.status === 'IDLE') {
          wakeLock.current.release();
@@ -217,10 +222,13 @@ function App() {
   // Audio Playback Helper for recorded files
   const playRawAudio = async (id: string, filename: string, duration?: number) => {
     if (!window.audioCtx) {
-        window.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+            window.audioCtx = new AudioContextClass({ sampleRate: 48000 });
+        }
     }
     
-    if (window.audioCtx.state === 'suspended') {
+    if (window.audioCtx && window.audioCtx.state === 'suspended') {
         await window.audioCtx.resume();
     }
 
@@ -468,7 +476,7 @@ function App() {
                 } else if (message.type === 'ERROR') {
                   setErrorMsg(message.payload);
                 }
-            } catch (e) {
+            } catch {
                 console.warn('Unknown control message:', event.data);
             }
         };
@@ -501,13 +509,18 @@ function App() {
                 let ctx = window.audioCtx;
                 if (!ctx) {
                     // console.log("Initializing new AudioContext");
-                    ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
-                    window.audioCtx = ctx;
+                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                    if (AudioContextClass) {
+                        ctx = new AudioContextClass({ sampleRate: 48000 });
+                        window.audioCtx = ctx;
+                    }
                 }
 
-                if (ctx.state === 'suspended') {
+                if (ctx && ctx.state === 'suspended') {
                     await ctx.resume();
                 }
+
+                if (!ctx) return;
 
                 let analyser = audioAnalyserRef.current;
                 
