@@ -74,6 +74,19 @@ public class Database : IDatabase
             );
         ");
 
+        conn.Execute(@"
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
+        ");
+
+        var settingsCount = conn.ExecuteScalar<int>("SELECT count(*) FROM settings WHERE key = 'EnableTranscription'");
+        if (settingsCount == 0)
+        {
+            conn.Execute("INSERT INTO settings (key, value) VALUES ('EnableTranscription', 'true')");
+        }
+
         var count = conn.ExecuteScalar<int>("SELECT count(*) FROM channels");
         if (count == 0)
         {
@@ -246,5 +259,24 @@ public class Database : IDatabase
     {
         using var conn = GetConnection();
         await conn.ExecuteAsync("DELETE FROM fire_tones WHERE id=@Id", new { Id = id });
+    }
+
+    public async Task<string?> GetSettingAsync(string key)
+    {
+        using var conn = GetConnection();
+        return await conn.QueryFirstOrDefaultAsync<string>("SELECT value FROM settings WHERE key = @Key", new { Key = key });
+    }
+
+    public async Task SetSettingAsync(string key, string value)
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync("INSERT OR REPLACE INTO settings (key, value) VALUES (@Key, @Value)", new { Key = key, Value = value });
+    }
+
+    public async Task<Dictionary<string, string>> GetAllSettingsAsync()
+    {
+        using var conn = GetConnection();
+        var result = await conn.QueryAsync<(string Key, string Value)>("SELECT key, value FROM settings");
+        return result.ToDictionary(x => x.Key, x => x.Value);
     }
 }

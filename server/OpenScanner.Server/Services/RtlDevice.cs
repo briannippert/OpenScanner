@@ -964,11 +964,14 @@ public class RtlDevice : BackgroundService
             }
         }
     
-        private string? TranscribeAudio(string audioPath)
-        {
-            // Temp file for resampling to 16k
-            var tempWavPath = audioPath + ".16k.wav";
-            
+            private string? TranscribeAudio(string audioPath)
+            {
+                // Check setting
+                var enabled = _db.GetSettingAsync("EnableTranscription").GetAwaiter().GetResult();
+                if (enabled != "true") return null;
+        
+                // Temp file for resampling to 16k
+                var tempWavPath = audioPath + ".16k.wav";            
             // Robustly find whisper.cpp root
             var currentDir = new DirectoryInfo(Directory.GetCurrentDirectory());
             string? whisperRoot = null;

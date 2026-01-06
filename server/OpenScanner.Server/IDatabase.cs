@@ -27,4 +27,9 @@ public interface IDatabase
     Task<int> AddFireToneAsync(FireToneSet tone);
     Task UpdateFireToneAsync(FireToneSet tone);
     Task DeleteFireToneAsync(int id);
+
+    // Settings
+    Task<string?> GetSettingAsync(string key);
+    Task SetSettingAsync(string key, string value);
+    Task<Dictionary<string, string>> GetAllSettingsAsync();
 }

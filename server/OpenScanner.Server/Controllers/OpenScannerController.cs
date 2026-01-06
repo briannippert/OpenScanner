@@ -148,6 +148,19 @@ public class OpenScannerController : ControllerBase
         return Ok();
     }
 
+    [HttpGet("settings")]
+    public async Task<Dictionary<string, string>> GetSettings()
+    {
+        return await _db.GetAllSettingsAsync();
+    }
+
+    [HttpPost("settings/{key}")]
+    public async Task<IActionResult> UpdateSetting(string key, [FromBody] string value)
+    {
+        await _db.SetSettingAsync(key, value);
+        return Ok();
+    }
+
     [HttpPost("control")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public IActionResult ControlScanner([FromBody] JsonElement body)
