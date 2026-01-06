@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using OpenScanner.Server.Models;
 
 namespace OpenScanner.Server.Services;
@@ -9,27 +10,57 @@ namespace OpenScanner.Server.Services;
 public class WebSocketBroadcaster
 {
     private readonly RtlDevice _radio;
-    private readonly ConcurrentDictionary<string, WebSocket> _sockets = new();
+    private readonly ILogger<WebSocketBroadcaster> _logger;
+    private readonly ConcurrentDictionary<string, SocketSession> _controlSessions = new();
+    private readonly ConcurrentDictionary<string, SocketSession> _audioSessions = new();
     private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    public WebSocketBroadcaster(RtlDevice radio)
+    private class SocketSession
+    {
+        public WebSocket Socket { get; }
+        public SemaphoreSlim Lock { get; } = new(1, 1);
+
+        public SocketSession(WebSocket socket)
+        {
+            Socket = socket;
+        }
+    }
+
+    public WebSocketBroadcaster(RtlDevice radio, ILogger<WebSocketBroadcaster> logger)
     {
         _radio = radio;
+        _logger = logger;
         _radio.OnStateChanged += BroadcastState;
         _radio.OnNewLog += BroadcastLog;
         _radio.OnAudio += BroadcastAudio;
     }
 
-    public async Task HandleConnection(WebSocket socket)
+    public async Task HandleControlConnection(WebSocket socket)
     {
         var id = Guid.NewGuid().ToString();
-        _sockets.TryAdd(id, socket);
+        var session = new SocketSession(socket);
+        _controlSessions.TryAdd(id, session);
+        _logger.LogInformation($"New Control WebSocket connection: {id}");
 
         // Send initial state
         var initialState = new { type = "STATE_UPDATE", payload = _radio.GetState() };
-        await SendJsonAsync(socket, initialState);
+        await SendJsonAsync(session, initialState);
 
-        // Keep connection open until closed by client
+        await HandleSessionLoop(socket, id, _controlSessions);
+    }
+
+    public async Task HandleAudioConnection(WebSocket socket)
+    {
+        var id = Guid.NewGuid().ToString();
+        var session = new SocketSession(socket);
+        _audioSessions.TryAdd(id, session);
+        _logger.LogInformation($"New Audio WebSocket connection: {id}");
+
+        await HandleSessionLoop(socket, id, _audioSessions);
+    }
+
+    private async Task HandleSessionLoop(WebSocket socket, string id, ConcurrentDictionary<string, SocketSession> sessions)
+    {
         var buffer = new byte[1024 * 4];
         try
         {
@@ -48,19 +79,28 @@ public class WebSocketBroadcaster
         }
         finally
         {
-            _sockets.TryRemove(id, out _);
+            sessions.TryRemove(id, out _);
+            _logger.LogInformation($"WebSocket disconnected: {id}");
         }
     }
 
-    private async Task SendJsonAsync(WebSocket socket, object data)
+    private async Task SendJsonAsync(SocketSession session, object data)
     {
         var json = JsonSerializer.Serialize(data, _jsonOptions);
         var bytes = Encoding.UTF8.GetBytes(json);
         var segment = new ArraySegment<byte>(bytes);
         
-        if (socket.State == WebSocketState.Open)
+        await session.Lock.WaitAsync();
+        try
         {
-             await socket.SendAsync(segment, WebSocketMessageType.Text, true, CancellationToken.None);
+            if (session.Socket.State == WebSocketState.Open)
+            {
+                await session.Socket.SendAsync(segment, WebSocketMessageType.Text, true, CancellationToken.None);
+            }
+        }
+        finally
+        {
+            session.Lock.Release();
         }
     }
 
@@ -78,6 +118,8 @@ public class WebSocketBroadcaster
 
     private void BroadcastAudio(byte[] audioData)
     {
+        // _logger.LogInformation($"Broadcasting audio: {audioData.Length} bytes to {_audioSessions.Count} clients");
+        if (_audioSessions.IsEmpty) return;
         _ = BroadcastBinary(audioData);
     }
 
@@ -87,37 +129,45 @@ public class WebSocketBroadcaster
         var bytes = Encoding.UTF8.GetBytes(json);
         var segment = new ArraySegment<byte>(bytes);
 
-        foreach (var socket in _sockets.Values)
+        var tasks = _controlSessions.Values.Select(async session =>
         {
-            if (socket.State == WebSocketState.Open)
+            await session.Lock.WaitAsync();
+            try
             {
-                try
+                if (session.Socket.State == WebSocketState.Open)
                 {
-                    await socket.SendAsync(segment, WebSocketMessageType.Text, true, CancellationToken.None);
-                }
-                catch
-                {
-                    // Handle broken sockets?
+                    await session.Socket.SendAsync(segment, WebSocketMessageType.Text, true, CancellationToken.None);
                 }
             }
-        }
+            catch { }
+            finally
+            {
+                session.Lock.Release();
+            }
+        });
+        
+        await Task.WhenAll(tasks);
     }
 
     private async Task BroadcastBinary(byte[] data)
     {
         var segment = new ArraySegment<byte>(data);
-        var tasks = _sockets.Values
-            .Where(s => s.State == WebSocketState.Open)
-            .Select(socket => {
-                try
+        var tasks = _audioSessions.Values.Select(async session =>
+        {
+            await session.Lock.WaitAsync();
+            try
+            {
+                if (session.Socket.State == WebSocketState.Open)
                 {
-                    return socket.SendAsync(segment, WebSocketMessageType.Binary, true, CancellationToken.None);
+                    await session.Socket.SendAsync(segment, WebSocketMessageType.Binary, true, CancellationToken.None);
                 }
-                catch
-                {
-                    return Task.CompletedTask;
-                }
-            });
+            }
+            catch { }
+            finally
+            {
+                session.Lock.Release();
+            }
+        });
         
         await Task.WhenAll(tasks);
     }

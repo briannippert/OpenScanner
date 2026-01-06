@@ -18,6 +18,7 @@ builder.Services.AddSingleton<ILoggerProvider>(memoryLoggerProvider);
 builder.Services.AddSingleton<IDatabase, Database>();
 builder.Services.AddSingleton<GpsService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GpsService>());
+builder.Services.AddSingleton<ToneDetector>();
 builder.Services.AddSingleton<RtlDevice>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RtlDevice>());
 builder.Services.AddSingleton<SupportService>();
@@ -73,12 +74,26 @@ app.MapControllers(); // Map the controllers
 
 // --- WebSockets ---
 var wsBroadcaster = app.Services.GetRequiredService<WebSocketBroadcaster>();
-app.Map("/ws", async (HttpContext context) =>
+
+app.Map("/ws/control", async (HttpContext context) =>
 {
     if (context.WebSockets.IsWebSocketRequest)
     {
         using var ws = await context.WebSockets.AcceptWebSocketAsync();
-        await wsBroadcaster.HandleConnection(ws);
+        await wsBroadcaster.HandleControlConnection(ws);
+    }
+    else
+    {
+        context.Response.StatusCode = 400;
+    }
+});
+
+app.Map("/ws/audio", async (HttpContext context) =>
+{
+    if (context.WebSockets.IsWebSocketRequest)
+    {
+        using var ws = await context.WebSockets.AcceptWebSocketAsync();
+        await wsBroadcaster.HandleAudioConnection(ws);
     }
     else
     {

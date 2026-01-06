@@ -11,6 +11,7 @@ public class RtlDevice : BackgroundService
     private readonly IDatabase _db;
     private readonly ILogger<RtlDevice> _logger;
     private readonly GpsService _gps;
+    private readonly ToneDetector _toneDetector;
 
     public event Action<ScannerState>? OnStateChanged;
     public event Action<CallLog>? OnNewLog;
@@ -21,6 +22,8 @@ public class RtlDevice : BackgroundService
     private List<Channel> _channels = new();
     private bool _manualOverride = false;
     
+    private string? _lastDetectedTone;
+
     private (double Lat, double Lon)? _lastGeoPosition;
     private DateTime _recordingLockoutUntil = DateTime.MinValue;
     private CancellationTokenSource? _scanCts;
@@ -43,17 +46,23 @@ public class RtlDevice : BackgroundService
     private const int MaxPreRollBytes = 48000 * 2 * 2; // 2 seconds (48k, 16bit)
     private readonly object _audioLock = new();
 
-    public RtlDevice(IDatabase db, ILogger<RtlDevice> logger, GpsService gps)
+    public RtlDevice(IDatabase db, ILogger<RtlDevice> logger, GpsService gps, ToneDetector toneDetector)
     {
         _db = db;
         _logger = logger;
         _gps = gps;
+        _toneDetector = toneDetector;
         _state = new ScannerState("IDLE", 0);
         
         _gps.OnGpsUpdate += (data) => 
         {
             UpdateState(_state with { Gps = data });
             CheckGeoRefresh(data.Lat, data.Lon);
+        };
+
+        _toneDetector.OnToneDetected += (tone) => {
+            _lastDetectedTone = tone.Name;
+            UpdateState(_state with { LastDetectedTone = tone.Name });
         };
         
         ReloadChannels();
@@ -468,6 +477,13 @@ public class RtlDevice : BackgroundService
     private void StartDecoding(Channel channel)
     {
         StopDecoding();
+        
+        lock (_audioLock)
+        {
+            _preRollBuffer.Clear();
+            _preRollSize = 0;
+        }
+
         _decodeCts = new CancellationTokenSource();
         
         string rtlMode = "fm";
@@ -596,12 +612,15 @@ public class RtlDevice : BackgroundService
                         }
 
                         // Send if we have enough or if it's been too long
-                        // Increased threshold to 4096 bytes (~42ms) to reduce WebSocket overhead and crackling
-                        if (sendBuffer.Count >= 4096 || (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 60))
+                        // Increased threshold to 16384 bytes (~170ms) to reduce WebSocket overhead and crackling
+                        if (sendBuffer.Count >= 16384 || (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 200))
                         {
                             var chunk = sendBuffer.ToArray();
                             sendBuffer.Clear();
                             
+                            // Analyze for Fire Tone Outs
+                            _toneDetector.ProcessAudio(chunk);
+
                             lock (_audioLock)
                             {
                                 // Strict attribution check: If we switched channels, drop this audio packet
@@ -747,7 +766,7 @@ public class RtlDevice : BackgroundService
             RestartSessionTimeout(5000); // 5s hang time
         }
 
-        Task.Delay(6000, _activityTimeoutCts.Token).ContinueWith(t => 
+        Task.Delay(2000, _activityTimeoutCts.Token).ContinueWith(t => 
         {
             if (!t.IsCanceled)
             {
@@ -904,36 +923,37 @@ public class RtlDevice : BackgroundService
                          UpdateState(_state with { LastTranscription = transcription });
                      }
     
-                     var log = new CallLog(
-                         $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
-                         DateTime.UtcNow.ToString("o"),
-                         capturedChannel.Frequency,
-                         capturedChannel.AlphaTag,
-                         capturedChannel.Description,
-                         (_state.Gps?.Lat != 0) ? _state.Gps?.Lat : null,
-                         (_state.Gps?.Lon != 0) ? _state.Gps?.Lon : null,
-                         Path.GetFileName(recordingPath),
-                         duration,
-                         transcription,
-                         _currentSourceID,
-                         _currentTargetID
-                     );
-    
-                     _db.SaveTransmissionAsync(log).ContinueWith(t => {
-                         if (t.IsFaulted) _logger.LogError(t.Exception, "Failed to save transmission");
-                     });
-    
-                     _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {_currentSourceID} | Text: {transcription}");
-                     OnNewLog?.Invoke(log);
-                 }
-            }
-            else if (recordingPath != null)
-            {
-                try { File.Delete(recordingPath); } catch { }
-            }
-            
-            UpdateState(_state with { SourceID = null, TargetID = null, CurrentTone = null });
-    
+                                      var log = new CallLog(
+                                          $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
+                                          DateTime.UtcNow.ToString("o"),
+                                          capturedChannel.Frequency,
+                                          capturedChannel.AlphaTag,
+                                          capturedChannel.Description,
+                                          (_state.Gps?.Lat != 0) ? _state.Gps?.Lat : null,
+                                          (_state.Gps?.Lon != 0) ? _state.Gps?.Lon : null,
+                                          Path.GetFileName(recordingPath),
+                                          duration,
+                                          transcription,
+                                          _currentSourceID,
+                                          _currentTargetID,
+                                          _lastDetectedTone
+                                      );
+                     
+                                      _db.SaveTransmissionAsync(log).ContinueWith(t => {
+                                          if (t.IsFaulted) _logger.LogError(t.Exception, "Failed to save transmission");
+                                      });
+                     
+                                      _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {_currentSourceID} | Tone: {_lastDetectedTone} | Text: {transcription}");
+                                      OnNewLog?.Invoke(log);
+                                  }
+                             }
+                             else if (recordingPath != null)
+                             {
+                                 try { File.Delete(recordingPath); } catch { }
+                             }
+                             
+                             _lastDetectedTone = null;
+                             UpdateState(_state with { SourceID = null, TargetID = null, CurrentTone = null, LastDetectedTone = null });    
             // Only clear the path if we haven't started a new recording
             lock (_audioLock)
             {
