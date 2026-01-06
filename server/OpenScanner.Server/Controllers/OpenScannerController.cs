@@ -5,8 +5,12 @@ using System.Text.Json;
 
 namespace OpenScanner.Server.Controllers;
 
+/// <summary>
+/// Main controller for OpenScanner operations.
+/// </summary>
 [ApiController]
 [Route("api")]
+[Produces("application/json")]
 public class OpenScannerController : ControllerBase
 {
     private readonly IDatabase _db;
@@ -18,6 +22,10 @@ public class OpenScannerController : ControllerBase
         _radio = radio;
     }
 
+    /// <summary>
+    /// Retrieves all configured radio channels.
+    /// </summary>
+    /// <returns>A list of channels.</returns>
     [HttpGet("channels")]
     [ProducesResponseType(typeof(IEnumerable<Channel>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<Channel>> GetAllChannels()
@@ -25,6 +33,11 @@ public class OpenScannerController : ControllerBase
         return await _db.GetAllChannelsAsync();
     }
 
+    /// <summary>
+    /// Adds a new radio channel.
+    /// </summary>
+    /// <param name="channel">The channel details.</param>
+    /// <returns>The created channel with its ID.</returns>
     [HttpPost("channels")]
     [ProducesResponseType(typeof(Channel), StatusCodes.Status201Created)]
     public async Task<IActionResult> AddChannel(Channel channel)
@@ -35,6 +48,11 @@ public class OpenScannerController : ControllerBase
         return CreatedAtAction(nameof(GetAllChannels), new { id }, channel);
     }
 
+    /// <summary>
+    /// Updates an existing channel.
+    /// </summary>
+    /// <param name="id">The ID of the channel to update.</param>
+    /// <param name="channel">The updated channel details.</param>
     [HttpPut("channels/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> UpdateChannel(int id, Channel channel)
@@ -45,6 +63,10 @@ public class OpenScannerController : ControllerBase
         return Ok();
     }
 
+    /// <summary>
+    /// Deletes a channel.
+    /// </summary>
+    /// <param name="id">The ID of the channel to delete.</param>
     [HttpDelete("channels/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> DeleteChannel(int id)
@@ -54,6 +76,10 @@ public class OpenScannerController : ControllerBase
         return Ok();
     }
 
+    /// <summary>
+    /// Retrieves the most recent transmission logs.
+    /// </summary>
+    /// <returns>A list of the latest 100 transmission logs.</returns>
     [HttpGet("history")]
     [ProducesResponseType(typeof(IEnumerable<CallLog>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<CallLog>> GetHistory()
@@ -61,6 +87,10 @@ public class OpenScannerController : ControllerBase
         return await _db.GetHistoryAsync(100);
     }
 
+    /// <summary>
+    /// Gets all years for which transmission data exists.
+    /// </summary>
+    /// <returns>List of years (e.g., ["2023", "2024"]).</returns>
     [HttpGet("history/years")]
     [ProducesResponseType(typeof(IEnumerable<string>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<string>> GetYears()
@@ -68,6 +98,11 @@ public class OpenScannerController : ControllerBase
         return await _db.GetTransmissionYearsAsync();
     }
 
+    /// <summary>
+    /// Gets months with data for a specific year.
+    /// </summary>
+    /// <param name="year">The year (e.g., "2024").</param>
+    /// <returns>List of months.</returns>
     [HttpGet("history/{year}/months")]
     [ProducesResponseType(typeof(IEnumerable<string>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<string>> GetMonths(string year)
@@ -75,6 +110,12 @@ public class OpenScannerController : ControllerBase
         return await _db.GetTransmissionMonthsAsync(year);
     }
 
+    /// <summary>
+    /// Gets days with data for a specific month and year.
+    /// </summary>
+    /// <param name="year">The year.</param>
+    /// <param name="month">The month.</param>
+    /// <returns>List of days.</returns>
     [HttpGet("history/{year}/{month}/days")]
     [ProducesResponseType(typeof(IEnumerable<string>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<string>> GetDays(string year, string month)
@@ -82,6 +123,13 @@ public class OpenScannerController : ControllerBase
         return await _db.GetTransmissionDaysAsync(year, month);
     }
 
+    /// <summary>
+    /// Gets channels active on a specific day.
+    /// </summary>
+    /// <param name="year">The year.</param>
+    /// <param name="month">The month.</param>
+    /// <param name="day">The day.</param>
+    /// <returns>List of channels with activity counts.</returns>
     [HttpGet("history/{year}/{month}/{day}/channels")]
     [ProducesResponseType(typeof(IEnumerable<dynamic>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<dynamic>> GetChannelsForDay(string year, string month, string day)
@@ -89,6 +137,15 @@ public class OpenScannerController : ControllerBase
         return await _db.GetTransmissionChannelsAsync(year, month, day);
     }
 
+    /// <summary>
+    /// Filters transmissions by date and channel.
+    /// </summary>
+    /// <param name="year">Year.</param>
+    /// <param name="month">Month.</param>
+    /// <param name="day">Day.</param>
+    /// <param name="alphaTag">Channel Name.</param>
+    /// <param name="frequency">Frequency in MHz.</param>
+    /// <returns>Filtered logs.</returns>
     [HttpGet("history/filter")]
     [ProducesResponseType(typeof(IEnumerable<CallLog>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<CallLog>> GetFilteredTransmissions(string year, string month, string day, string alphaTag, double frequency)
@@ -96,6 +153,11 @@ public class OpenScannerController : ControllerBase
         return await _db.GetTransmissionsAsync(year, month, day, alphaTag, frequency);
     }
 
+    /// <summary>
+    /// Searches transmissions by text content (transcription or metadata).
+    /// </summary>
+    /// <param name="q">Search query string.</param>
+    /// <returns>Matching logs.</returns>
     [HttpGet("history/search")]
     [ProducesResponseType(typeof(IEnumerable<CallLog>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<CallLog>> SearchTransmissions(string q)
@@ -103,6 +165,10 @@ public class OpenScannerController : ControllerBase
         return await _db.SearchTransmissionsAsync(q);
     }
 
+    /// <summary>
+    /// Deletes a specific transmission log and its audio file.
+    /// </summary>
+    /// <param name="id">Transmission ID.</param>
     [HttpDelete("history/{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> DeleteTransmission(string id)
@@ -111,6 +177,9 @@ public class OpenScannerController : ControllerBase
         return Ok();
     }
 
+    /// <summary>
+    /// Clears the entire transmission history and deletes all audio files.
+    /// </summary>
     [HttpDelete("history")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> ClearHistory()
@@ -119,13 +188,24 @@ public class OpenScannerController : ControllerBase
         return Ok();
     }
 
+    /// <summary>
+    /// Retrieves all configured Fire Tone Out sets.
+    /// </summary>
+    /// <returns>List of fire tone sets.</returns>
     [HttpGet("firetones")]
+    [ProducesResponseType(typeof(IEnumerable<FireToneSet>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<FireToneSet>> GetFireTones()
     {
         return await _db.GetAllFireTonesAsync();
     }
 
+    /// <summary>
+    /// Adds a new Fire Tone Out set.
+    /// </summary>
+    /// <param name="tone">The tone set configuration.</param>
+    /// <returns>The created tone set.</returns>
     [HttpPost("firetones")]
+    [ProducesResponseType(typeof(FireToneSet), StatusCodes.Status201Created)]
     public async Task<IActionResult> AddFireTone(FireToneSet tone)
     {
         var id = await _db.AddFireToneAsync(tone);
@@ -133,7 +213,13 @@ public class OpenScannerController : ControllerBase
         return CreatedAtAction(nameof(GetFireTones), new { id }, tone);
     }
 
+    /// <summary>
+    /// Updates an existing Fire Tone Out set.
+    /// </summary>
+    /// <param name="id">ID of the tone set.</param>
+    /// <param name="tone">Updated configuration.</param>
     [HttpPut("firetones/{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> UpdateFireTone(int id, FireToneSet tone)
     {
         tone.Id = id;
@@ -141,28 +227,49 @@ public class OpenScannerController : ControllerBase
         return Ok();
     }
 
+    /// <summary>
+    /// Deletes a Fire Tone Out set.
+    /// </summary>
+    /// <param name="id">ID of the tone set.</param>
     [HttpDelete("firetones/{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> DeleteFireTone(int id)
     {
         await _db.DeleteFireToneAsync(id);
         return Ok();
     }
 
+    /// <summary>
+    /// Retrieves all system settings.
+    /// </summary>
+    /// <returns>Dictionary of key-value settings.</returns>
     [HttpGet("settings")]
+    [ProducesResponseType(typeof(Dictionary<string, string>), StatusCodes.Status200OK)]
     public async Task<Dictionary<string, string>> GetSettings()
     {
         return await _db.GetAllSettingsAsync();
     }
 
+    /// <summary>
+    /// Updates a specific system setting.
+    /// </summary>
+    /// <param name="key">The setting key (e.g., "EnableTranscription").</param>
+    /// <param name="value">The new value.</param>
     [HttpPost("settings/{key}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> UpdateSetting(string key, [FromBody] string value)
     {
         await _db.SetSettingAsync(key, value);
         return Ok();
     }
 
+    /// <summary>
+    /// Sends a direct control command to the scanner service.
+    /// </summary>
+    /// <param name="body">JSON payload with 'action' (start, stop, scan, hold, set_squelch) and optional parameters.</param>
     [HttpPost("control")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public IActionResult ControlScanner([FromBody] JsonElement body)
     {
         if (!body.TryGetProperty("action", out var actionProp))
