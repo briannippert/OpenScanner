@@ -474,16 +474,19 @@ public class RtlDevice : BackgroundService
         string dsdArgs = "-f1"; // Default P25
         int captureRate = 48000;
         int outputRate = 48000;
-        int dsdOutputRate = 48000; // Default to 48k for all modes (Analog and Digital)
+        int dsdOutputRate = 48000; // Default to 48k for all modes
+        string ffmpegFilter = "";
 
         string mode = channel.Mode?.ToUpper() ?? "P25";
         
         if (mode == "AM") {
             rtlMode = "am";
             dsdArgs = "-A"; // Force analog
+            dsdOutputRate = 48000; // Analog pass-through is 48k
         } else if (mode == "FM" || mode == "NFM") {
             rtlMode = "fm";
             dsdArgs = "-A"; // Force analog
+            dsdOutputRate = 48000; // Analog pass-through is 48k
         } else if (mode == "WFM") {
             rtlMode = "wbfm";
             dsdArgs = "-A"; // Force analog
@@ -491,6 +494,8 @@ public class RtlDevice : BackgroundService
         } else if (mode == "P25") {
             rtlMode = "fm";
             dsdArgs = "-f1"; // P25 Phase 1
+            dsdOutputRate = 8000; // User reported "Fast" playback with 48k, so output must be 8k
+            ffmpegFilter = ""; 
         } else {
             // Unknown, try auto
             rtlMode = "fm";
@@ -510,11 +515,11 @@ public class RtlDevice : BackgroundService
         }
         else
         {
-            // DSD-FME output is assumed to be 48k because we pass -s 48000.
-            // FFmpeg input rate (-ar) is set to 48000 to match.
-            // Output rate is 48000 to match WFM and Client expectation.
-            // Added -fflags nobuffer -flags low_delay to reduce latency and choppiness
-            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -i - -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay - -loglevel quiet";
+            // DSD-FME defaults: Input 48k (from rtl_fm), Output 8k (Digital) or 48k (Analog pass).
+            // We match FFmpeg input rate (-ar) to the expected DSD-FME output.
+            // Output rate is always 48000 to match WFM and Client expectation.
+            // Re-added -s {outputRate} because DSD-FME needs it for raw input
+            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -i - {ffmpegFilter} -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay - -loglevel quiet";
         }
 
         var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
@@ -600,7 +605,7 @@ public class RtlDevice : BackgroundService
                             lock (_audioLock)
                             {
                                 // Strict attribution check: If we switched channels, drop this audio packet
-                                if (_state.CurrentChannel?.Frequency != channel.Frequency) continue;
+                                if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - channel.Frequency) > 0.001) continue;
 
                                 OnAudio?.Invoke(chunk);
                                 lastSend = DateTime.UtcNow;
@@ -755,7 +760,7 @@ public class RtlDevice : BackgroundService
     private void HandleActivity(Channel originChannel, int? src = null, int? tgt = null, string? tone = null)
     {
         // STRICT ATTRIBUTION: Ignore activity if we have moved to a different channel
-        if (_state.CurrentChannel?.Frequency != originChannel.Frequency) return;
+        if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - originChannel.Frequency) > 0.001) return;
 
         // Valid Activity detected
         if (_state.Status != "RECEIVING" || 
@@ -783,7 +788,7 @@ public class RtlDevice : BackgroundService
     private void StartRecording(Channel originChannel, int? src = null, int? tgt = null)
     {
         // Double check strict attribution
-        if (_recordingStream != null || _state.CurrentChannel?.Frequency != originChannel.Frequency) return;
+        if (_recordingStream != null || _state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - originChannel.Frequency) > 0.001) return;
         
         if (DateTime.UtcNow < _recordingLockoutUntil) return;
 
@@ -817,228 +822,286 @@ public class RtlDevice : BackgroundService
         }
     }
 
-    private void StopRecording()
-    {
-        string? recordingPath;
-        long startTime;
-        Channel? capturedChannel = _state.CurrentChannel;
-
-        lock (_audioLock)
+        private void StopRecording()
         {
-            if (_recordingStream == null) return;
-            _recordingStream.Close();
-            _recordingStream = null;
-            recordingPath = _currentRecordingPath;
-            startTime = _recordingStartTime;
-        }
-        
-        var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
-        
-        if (duration >= 0.5 && recordingPath != null && File.Exists(recordingPath) && capturedChannel != null)
-        {
-             // Run Transcription
-             string? transcription = null;
-             try 
-             {
-                 transcription = TranscribeAudio(recordingPath);
-             }
-             catch (Exception ex)
-             {
-                 _logger.LogError(ex, "Transcription failed");
-             }
-
-             if (!string.IsNullOrEmpty(transcription))
-             {
-                 UpdateState(_state with { LastTranscription = transcription });
-             }
-
-             var log = new CallLog(
-                 $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
-                 DateTime.UtcNow.ToString("o"),
-                 capturedChannel.Frequency,
-                 capturedChannel.AlphaTag,
-                 capturedChannel.Description,
-                 (_state.Gps?.Lat != 0) ? _state.Gps?.Lat : null,
-                 (_state.Gps?.Lon != 0) ? _state.Gps?.Lon : null,
-                 Path.GetFileName(recordingPath),
-                 duration,
-                 transcription,
-                 _currentSourceID,
-                 _currentTargetID
-             );
-
-             _db.SaveTransmissionAsync(log).ContinueWith(t => {
-                 if (t.IsFaulted) _logger.LogError(t.Exception, "Failed to save transmission");
-             });
-
-             _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {_currentSourceID} | Text: {transcription}");
-             OnNewLog?.Invoke(log);
-        }
-        else if (recordingPath != null)
-        {
-            try { File.Delete(recordingPath); } catch { }
-        }
-        
-        UpdateState(_state with { SourceID = null, TargetID = null, CurrentTone = null });
-
-        // Only clear the path if we haven't started a new recording
-        lock (_audioLock)
-        {
-            if (_recordingStream == null && _currentRecordingPath == recordingPath)
+            string? recordingPath;
+            long startTime;
+            Channel? capturedChannel = _state.CurrentChannel;
+    
+            lock (_audioLock)
             {
-                _currentRecordingPath = null;
+                if (_recordingStream == null) return;
+                _recordingStream.Close();
+                _recordingStream = null;
+                recordingPath = _currentRecordingPath;
+                startTime = _recordingStartTime;
             }
-        }
-    }
-
-    private string? TranscribeAudio(string rawPath)
-    {
-        var wavPath = Path.ChangeExtension(rawPath, ".wav");
-        
-        // Robustly find whisper.cpp root
-        var currentDir = new DirectoryInfo(Directory.GetCurrentDirectory());
-        string? whisperRoot = null;
-        
-        // 1. Try absolute path first (Server specific)
-        if (Directory.Exists("/home/brian/radio/OpenScanner/whisper.cpp"))
-        {
-            whisperRoot = "/home/brian/radio/OpenScanner/whisper.cpp";
-        }
-        else 
-        {
-            // 2. Search up
-            for (int i = 0; i < 6; i++) 
+            
+            var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
+            
+            if (duration >= 0.5 && recordingPath != null && File.Exists(recordingPath))
             {
-                if (currentDir == null) break;
-                var probe = Path.Combine(currentDir.FullName, "whisper.cpp");
-                if (Directory.Exists(probe))
-                {
-                    whisperRoot = probe;
-                    break;
-                }
-                
-                probe = Path.Combine(currentDir.FullName, "../whisper.cpp");
-                 if (Directory.Exists(probe))
-                {
-                    whisperRoot = Path.GetFullPath(probe);
-                    break;
-                }
-
-                currentDir = currentDir.Parent;
+                 var fileInfo = new FileInfo(recordingPath);
+                 if (fileInfo.Length < 4096) 
+                 {
+                     try { File.Delete(recordingPath); } catch {}
+                     return;
+                 }
+    
+                 if (capturedChannel != null)
+                 {
+                     // Convert RAW to WAV (More robust than MP3)
+                     var wavPath = Path.ChangeExtension(recordingPath, ".wav");
+                     try 
+                     {
+                         var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg")
+                         {
+                             RedirectStandardOutput = true,
+                             RedirectStandardError = true,
+                             UseShellExecute = false,
+                             CreateNoWindow = true
+                         };
+                         // Input: Raw 48k
+                         convertStart.ArgumentList.Add("-f"); convertStart.ArgumentList.Add("s16le");
+                         convertStart.ArgumentList.Add("-ar"); convertStart.ArgumentList.Add("48000");
+                         convertStart.ArgumentList.Add("-ac"); convertStart.ArgumentList.Add("1");
+                         convertStart.ArgumentList.Add("-i"); convertStart.ArgumentList.Add(recordingPath);
+                         // Output: WAV PCM
+                         convertStart.ArgumentList.Add(wavPath);
+                         convertStart.ArgumentList.Add("-y");
+    
+                         using (var proc = Process.Start(convertStart))
+                         {
+                             proc?.WaitForExit();
+                         }
+    
+                         if (File.Exists(wavPath))
+                         {
+                             try { File.Delete(recordingPath); } catch {}
+                             recordingPath = wavPath;
+                         }
+                     }
+                     catch (Exception ex)
+                     {
+                         _logger.LogError(ex, "WAV conversion failed");
+                     }
+    
+                     // Run Transcription
+                     string? transcription = null;
+                     try 
+                     {
+                         transcription = TranscribeAudio(recordingPath);
+                     }
+                     catch (Exception ex)
+                     {
+                         _logger.LogError(ex, "Transcription failed");
+                     }
+    
+                     if (!string.IsNullOrEmpty(transcription))
+                     {
+                         UpdateState(_state with { LastTranscription = transcription });
+                     }
+    
+                     var log = new CallLog(
+                         $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
+                         DateTime.UtcNow.ToString("o"),
+                         capturedChannel.Frequency,
+                         capturedChannel.AlphaTag,
+                         capturedChannel.Description,
+                         (_state.Gps?.Lat != 0) ? _state.Gps?.Lat : null,
+                         (_state.Gps?.Lon != 0) ? _state.Gps?.Lon : null,
+                         Path.GetFileName(recordingPath),
+                         duration,
+                         transcription,
+                         _currentSourceID,
+                         _currentTargetID
+                     );
+    
+                     _db.SaveTransmissionAsync(log).ContinueWith(t => {
+                         if (t.IsFaulted) _logger.LogError(t.Exception, "Failed to save transmission");
+                     });
+    
+                     _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {_currentSourceID} | Text: {transcription}");
+                     OnNewLog?.Invoke(log);
+                 }
             }
-        }
-
-        if (whisperRoot == null)
-        {
-             var projectRoot = Directory.GetCurrentDirectory(); 
-             whisperRoot = Path.GetFullPath(Path.Combine(projectRoot, "../../whisper.cpp"));
-        }
-
-        var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");
-        var modelPath = Path.Combine(whisperRoot, "models/ggml-medium.en.bin"); 
-
-        if (!File.Exists(whisperBin) || !File.Exists(modelPath))
-        {
-            _logger.LogWarning($"Whisper not found at {whisperBin} or model missing at {modelPath}. Search root was: {whisperRoot}");
-            return null;
-        }
-
-        int inputRate = 48000;
-        
-        var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        
-        convertStart.ArgumentList.Add("-f");
-        convertStart.ArgumentList.Add("s16le");
-        convertStart.ArgumentList.Add("-ar");
-        convertStart.ArgumentList.Add(inputRate.ToString());
-        convertStart.ArgumentList.Add("-ac");
-        convertStart.ArgumentList.Add("1");
-        convertStart.ArgumentList.Add("-i");
-        convertStart.ArgumentList.Add(rawPath);
-        convertStart.ArgumentList.Add("-af");
-        convertStart.ArgumentList.Add("highpass=f=200,lowpass=f=3000,compand=attacks=0:points=-80/-80|-20/-20|-10/-10|0/-10:gain=5");
-        convertStart.ArgumentList.Add("-ar");
-        convertStart.ArgumentList.Add("16000");
-        convertStart.ArgumentList.Add("-ac");
-        convertStart.ArgumentList.Add("1");
-        convertStart.ArgumentList.Add(wavPath);
-        convertStart.ArgumentList.Add("-y");
-        
-        using (var proc = Process.Start(convertStart))
-        {
-            if (proc != null)
+            else if (recordingPath != null)
             {
-                var stderr = proc.StandardError.ReadToEnd();
-                proc.WaitForExit();
-                if (proc.ExitCode != 0)
+                try { File.Delete(recordingPath); } catch { }
+            }
+            
+            UpdateState(_state with { SourceID = null, TargetID = null, CurrentTone = null });
+    
+            // Only clear the path if we haven't started a new recording
+            lock (_audioLock)
+            {
+                if (_recordingStream == null && _currentRecordingPath == recordingPath)
                 {
-                    _logger.LogError($"FFmpeg conversion failed with exit code {proc.ExitCode}. Stderr: {stderr}");
+                    _currentRecordingPath = null;
                 }
             }
         }
-
-        if (!File.Exists(wavPath)) return null;
-
-        // 2. Run Whisper with Radio Context
-        // Prompt helps Whisper bias towards radio terminology and style
-        var prompt = "Dispatch, Unit 1, 10-4, copy, over. Priority traffic, code 3 response to street intersection. Suspect description: white male, blue jeans. License plate, vehicle registration, bolo. Structure fire, medical emergency, staging area. Status check, affirmative, negative, stand by. Channel 2, tac channel, command post. Kilo, Tango, Zulu, X-ray. 10-20 location, 10-8 in service, 10-7 out of service.";
-        var whisperArgs = $"-m \"{modelPath}\" -f \"{wavPath}\" -nt -otxt -l en --prompt \"{prompt}\""; 
-        
-        var whisperStart = new ProcessStartInfo(whisperBin, whisperArgs)
+    
+        private string? TranscribeAudio(string audioPath)
         {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = whisperRoot
-        };
-
-        try
-        {
-            using var proc = Process.Start(whisperStart);
-            if (proc != null)
+            // Temp file for resampling to 16k
+            var tempWavPath = audioPath + ".16k.wav";
+            
+            // Robustly find whisper.cpp root
+            var currentDir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            string? whisperRoot = null;
+            
+            // 1. Try absolute path first (Server specific)
+            if (Directory.Exists("/home/brian/radio/OpenScanner/whisper.cpp"))
             {
-                // Capture stderr to see what whisper is doing
-                var stderrTask = proc.StandardError.ReadToEndAsync();
-                
-                if (!proc.WaitForExit(30000)) // 30s timeout
+                whisperRoot = "/home/brian/radio/OpenScanner/whisper.cpp";
+            }
+            else 
+            {
+                // 2. Search up
+                for (int i = 0; i < 6; i++) 
                 {
-                    _logger.LogWarning("Whisper timed out");
-                    proc.Kill();
+                    if (currentDir == null) break;
+                    var probe = Path.Combine(currentDir.FullName, "whisper.cpp");
+                    if (Directory.Exists(probe))
+                    {
+                        whisperRoot = probe;
+                        break;
+                    }
+                    
+                    probe = Path.Combine(currentDir.FullName, "../whisper.cpp");
+                     if (Directory.Exists(probe))
+                    {
+                        whisperRoot = Path.GetFullPath(probe);
+                        break;
+                    }
+    
+                    currentDir = currentDir.Parent;
                 }
-                else
+            }
+    
+            if (whisperRoot == null)
+            {
+                 var projectRoot = Directory.GetCurrentDirectory(); 
+                 whisperRoot = Path.GetFullPath(Path.Combine(projectRoot, "../../whisper.cpp"));
+            }
+    
+            var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");
+            var modelPath = Path.Combine(whisperRoot, "models/ggml-small.en.bin"); 
+    
+            if (!File.Exists(whisperBin) || !File.Exists(modelPath))
+            {
+                _logger.LogWarning($"Whisper not found at {whisperBin} or model missing at {modelPath}. Search root was: {whisperRoot}");
+                return null;
+            }
+            
+            var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            
+            if (Path.GetExtension(audioPath).Equals(".raw", StringComparison.OrdinalIgnoreCase))
+            {
+                convertStart.ArgumentList.Add("-f");
+                convertStart.ArgumentList.Add("s16le");
+                convertStart.ArgumentList.Add("-ar");
+                convertStart.ArgumentList.Add("48000"); // Raw is always 48k now
+                convertStart.ArgumentList.Add("-ac");
+                convertStart.ArgumentList.Add("1");
+            }
+    
+            convertStart.ArgumentList.Add("-i");
+            convertStart.ArgumentList.Add(audioPath);
+            convertStart.ArgumentList.Add("-af");
+            convertStart.ArgumentList.Add("volume=15dB"); 
+            convertStart.ArgumentList.Add("-ar");
+            convertStart.ArgumentList.Add("16000");
+            convertStart.ArgumentList.Add("-ac");
+            convertStart.ArgumentList.Add("1");
+            convertStart.ArgumentList.Add(tempWavPath);
+            convertStart.ArgumentList.Add("-y");
+            
+            using (var proc = Process.Start(convertStart))
+            {
+                if (proc != null)
                 {
-                    var stderr = stderrTask.Result;
+                    var stderr = proc.StandardError.ReadToEnd();
+                    proc.WaitForExit();
                     if (proc.ExitCode != 0)
                     {
-                        _logger.LogError($"Whisper failed with exit code {proc.ExitCode}. Stderr: {stderr}");
+                        _logger.LogError($"FFmpeg conversion failed with exit code {proc.ExitCode}. Stderr: {stderr}");
                     }
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error running Whisper process");
-        }
-
-        File.Delete(wavPath); // Clean up WAV
-
-        var txtPath = wavPath + ".txt";
-        if (File.Exists(txtPath))
-        {
-            var text = File.ReadAllText(txtPath).Trim();
-            File.Delete(txtPath);
-            // Whisper sometimes outputs [BLANK_AUDIO] or metadata in brackets
-            if (text.StartsWith("[") && text.EndsWith("]")) return null;
-            return string.IsNullOrEmpty(text) ? null : text;
-        }
-
-        return null;
-    }
-}
+    
+            if (!File.Exists(tempWavPath)) return null;
+    
+            // 2. Run Whisper with Radio Context
+            // Prompt helps Whisper bias towards radio terminology and style
+            var prompt = "Dispatch, Unit 1, 10-4, copy, over. Priority traffic, code 3 response to street intersection. Suspect description: white male, blue jeans. License plate, vehicle registration, bolo. Structure fire, medical emergency, staging area. Status check, affirmative, negative, stand by. Channel 2, tac channel, command post. Kilo, Tango, Zulu, X-ray. 10-20 location, 10-8 in service, 10-7 out of service.";
+            var whisperArgs = $"-m \"{modelPath}\" -f \"{tempWavPath}\" -nt -otxt -l en --prompt \"{prompt}\""; 
+            
+            var whisperStart = new ProcessStartInfo(whisperBin, whisperArgs)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = whisperRoot
+            };
+    
+            try
+            {
+                using var proc = Process.Start(whisperStart);
+                if (proc != null)
+                {
+                    var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+                    var stderrTask = proc.StandardError.ReadToEndAsync();
+                    
+                    if (!proc.WaitForExit(60000)) // 60s timeout
+                    {
+                        _logger.LogWarning("Whisper timed out");
+                        proc.Kill();
+                    }
+                    else
+                    {
+                        var stderr = stderrTask.Result;
+                        var stdout = stdoutTask.Result;
+                        
+                        if (proc.ExitCode != 0)
+                        {
+                            _logger.LogError($"Whisper failed with exit code {proc.ExitCode}.\nStderr: {stderr}\nStdout: {stdout}");
+                        }
+                        else
+                        {
+                            // Log debug info if no file created
+                            if (!File.Exists(tempWavPath + ".txt"))
+                            {
+                                 _logger.LogWarning($"Whisper finished but no output file.\nStderr: {stderr}\nStdout: {stdout}");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error running Whisper process");
+            }
+    
+            File.Delete(tempWavPath); // Clean up WAV
+    
+            var txtPath = tempWavPath + ".txt";
+            if (File.Exists(txtPath))
+            {
+                var text = File.ReadAllText(txtPath).Trim();
+                File.Delete(txtPath);
+                // Whisper sometimes outputs [BLANK_AUDIO] or metadata in brackets
+                if (text.StartsWith("[") && text.EndsWith("]")) return null;
+                return string.IsNullOrEmpty(text) ? null : text;
+            }
+    
+            return null;
+        }}

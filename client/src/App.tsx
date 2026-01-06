@@ -217,27 +217,36 @@ function App() {
             return;
         }
         const arrayBuffer = await response.arrayBuffer();
-        const int16Array = new Int16Array(arrayBuffer);
-        console.log(`Playing audio: ${filename}, size: ${int16Array.length} samples`);
         
-        const float32Array = new Float32Array(int16Array.length);
-        for (let i = 0; i < int16Array.length; i++) {
-            float32Array[i] = int16Array[i] / 32768;
-        }
+        let buffer: AudioBuffer;
 
-        // Auto-detect sample rate based on duration (to support old 8k and new 48k files)
-        let sampleRate = 48000;
-        if (duration && duration > 0) {
-            const calculatedRate = int16Array.length / duration;
-            // If the rate is closer to 8000 than 48000, assume it's an old 8k recording
-            if (Math.abs(calculatedRate - 8000) < Math.abs(calculatedRate - 48000)) {
-                sampleRate = 8000;
+        if (filename.endsWith('.raw')) {
+            const int16Array = new Int16Array(arrayBuffer);
+            console.log(`Playing raw audio: ${filename}, size: ${int16Array.length} samples`);
+            
+            const float32Array = new Float32Array(int16Array.length);
+            for (let i = 0; i < int16Array.length; i++) {
+                float32Array[i] = int16Array[i] / 32768;
             }
-        }
-        console.log(`Detected Sample Rate: ${sampleRate}Hz`);
 
-        const buffer = window.audioCtx.createBuffer(1, float32Array.length, sampleRate);
-        buffer.copyToChannel(float32Array, 0);
+            // Auto-detect sample rate based on duration
+            let sampleRate = 48000;
+            if (duration && duration > 0) {
+                const calculatedRate = int16Array.length / duration;
+                if (Math.abs(calculatedRate - 8000) < Math.abs(calculatedRate - 48000)) {
+                    sampleRate = 8000;
+                }
+            }
+            console.log(`Detected Sample Rate: ${sampleRate}Hz`);
+
+            buffer = window.audioCtx.createBuffer(1, float32Array.length, sampleRate);
+            buffer.copyToChannel(float32Array, 0);
+        } else {
+            // MP3/WAV - Use browser decoder
+            console.log(`Playing compressed audio: ${filename}`);
+            buffer = await window.audioCtx.decodeAudioData(arrayBuffer);
+        }
+
         const source = window.audioCtx.createBufferSource();
         source.buffer = buffer;
         source.connect(window.audioCtx.destination);

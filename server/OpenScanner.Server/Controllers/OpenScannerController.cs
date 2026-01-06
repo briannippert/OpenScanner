@@ -111,6 +111,14 @@ public class OpenScannerController : ControllerBase
         return Ok();
     }
 
+    [HttpDelete("history")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ClearHistory()
+    {
+        await _db.ClearHistoryAsync();
+        return Ok();
+    }
+
     [HttpPost("control")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public IActionResult ControlScanner([FromBody] JsonElement body)

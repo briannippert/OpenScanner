@@ -20,4 +20,5 @@ public interface IDatabase
     Task<IEnumerable<CallLog>> GetTransmissionsAsync(string year, string month, string day, string alphaTag, double frequency);
     Task<IEnumerable<CallLog>> SearchTransmissionsAsync(string query);
     Task DeleteTransmissionAsync(string id);
+    Task ClearHistoryAsync();
 }

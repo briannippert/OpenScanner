@@ -195,4 +195,21 @@ public class Database : IDatabase
         }
         await conn.ExecuteAsync(SqlLoader.GetSql("Transmissions/Delete.sql"), new { Id = id });
     }
+
+    public async Task ClearHistoryAsync()
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync("DELETE FROM transmissions");
+        
+        // Delete all audio files
+        var recordingsDir = Path.Combine(_dataDir, "recordings");
+        if (Directory.Exists(recordingsDir))
+        {
+            var files = Directory.GetFiles(recordingsDir);
+            foreach (var file in files)
+            {
+                try { File.Delete(file); } catch { }
+            }
+        }
+    }
 }
