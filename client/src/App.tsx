@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
 import ChannelManager from './components/ChannelManager';
+import FireToneManager from './components/FireToneManager';
 import TransmissionLog from './components/TransmissionLog';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -13,10 +14,11 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import UsbIcon from '@mui/icons-material/Usb';
 import UsbOffIcon from '@mui/icons-material/UsbOff';
 import EditIcon from '@mui/icons-material/Edit';
+import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import SupportAgentIcon from '@mui/icons-material/SupportAgent';
-import type { ScannerState, Channel, CallLog } from './types';
+import type { ScannerState, Channel, CallLog, FireToneSet } from './types';
 
 const darkTheme = createTheme({
   palette: {
@@ -60,21 +62,49 @@ const darkTheme = createTheme({
 });
 
 function App() {
+  const [isAudioInitialized, setIsAudioInitialized] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [scannerState, setScannerState] = useState<ScannerState>({ status: 'IDLE', signalStrength: 0 });
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [fireTones, setFireTones] = useState<FireToneSet[]>([]);
   const [callLog, setCallLog] = useState<CallLog[]>([]);
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | undefined>(undefined);
   const [isManagerOpen, setIsManagerOpen] = useState(false);
+  const [isToneManagerOpen, setIsToneManagerOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const ws = useRef<WebSocket | null>(null);
-  const wakeLock = useRef<any>(null);
+  const wsControl = useRef<WebSocket | null>(null);
+  const wsAudio = useRef<WebSocket | null>(null);
+  const audioAnalyserRef = useRef<AnalyserNode | null>(null);
+  const wakeLock = useRef<WakeLockSentinel | null>(null);
   const activeSource = useRef<AudioBufferSourceNode | null>(null);
 
   const manualHold = scannerState.manualHoldFrequency;
+
+  // Initialize Audio Context on Interaction
+  const initAudio = async () => {
+      if (!window.audioCtx) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) {
+              window.audioCtx = new AudioContextClass({ sampleRate: 48000 });
+          }
+      }
+      if (window.audioCtx && window.audioCtx.state === 'suspended') {
+          await window.audioCtx.resume();
+      }
+      setIsAudioInitialized(true);
+  };
+
+  useEffect(() => {
+      window.addEventListener('click', initAudio);
+      window.addEventListener('touchstart', initAudio);
+      return () => {
+          window.removeEventListener('click', initAudio);
+          window.removeEventListener('touchstart', initAudio);
+      };
+  }, []);
 
   // Fullscreen Manager
   useEffect(() => {
@@ -97,7 +127,7 @@ function App() {
 
   const downloadSupportPackage = () => {
     const isDev = window.location.port === '5173';
-    const port = isDev ? '3001' : window.location.port || '80';
+    const port = isDev ? '5212' : window.location.port || '80';
     const protocol = window.location.protocol;
     const backendHost = window.location.hostname;
     const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
@@ -115,18 +145,20 @@ function App() {
   // Wake Lock Manager
   useEffect(() => {
     const requestWakeLock = async () => {
-      if ('wakeLock' in navigator && scannerState.status !== 'IDLE') {
+      if ('wakeLock' in navigator && scannerState.status !== 'IDLE' && navigator.wakeLock) {
         try {
           if (!wakeLock.current) {
-            wakeLock.current = await (navigator as any).wakeLock.request('screen');
+            wakeLock.current = await navigator.wakeLock.request('screen');
             console.log('Wake Lock active');
             wakeLock.current.addEventListener('release', () => {
                wakeLock.current = null;
                console.log('Wake Lock released');
             });
           }
-        } catch (err: any) {
-          console.error(`${err.name}, ${err.message}`);
+        } catch (err: unknown) {
+          if (err instanceof Error) {
+            console.error(`${err.name}, ${err.message}`);
+          }
         }
       } else if (wakeLock.current && scannerState.status === 'IDLE') {
          wakeLock.current.release();
@@ -159,7 +191,7 @@ function App() {
   // Helper to send commands
   const sendCommand = (action: string, frequency?: number, value?: number) => {
     const isDev = window.location.port === '5173';
-    const port = isDev ? '3001' : window.location.port || '80';
+    const port = isDev ? '5212' : window.location.port || '80';
     const protocol = window.location.protocol;
     const backendHost = window.location.hostname;
     const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
@@ -189,12 +221,19 @@ function App() {
 
   // Audio Playback Helper for recorded files
   const playRawAudio = async (id: string, filename: string, duration?: number) => {
-    if (!window.audioCtx) {
-        window.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
+    let ctx = window.audioCtx;
+    if (!ctx) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+            ctx = new AudioContextClass({ sampleRate: 48000 });
+            window.audioCtx = ctx;
+        } else {
+            return;
+        }
     }
     
-    if (window.audioCtx.state === 'suspended') {
-        await window.audioCtx.resume();
+    if (ctx.state === 'suspended') {
+        await ctx.resume();
     }
 
     if (playingId === id && activeSource.current) {
@@ -239,17 +278,17 @@ function App() {
             }
             console.log(`Detected Sample Rate: ${sampleRate}Hz`);
 
-            buffer = window.audioCtx.createBuffer(1, float32Array.length, sampleRate);
+            buffer = ctx.createBuffer(1, float32Array.length, sampleRate);
             buffer.copyToChannel(float32Array, 0);
         } else {
             // MP3/WAV - Use browser decoder
             console.log(`Playing compressed audio: ${filename}`);
-            buffer = await window.audioCtx.decodeAudioData(arrayBuffer);
+            buffer = await ctx.decodeAudioData(arrayBuffer);
         }
 
-        const source = window.audioCtx.createBufferSource();
+        const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.connect(window.audioCtx.destination);
+        source.connect(ctx.destination);
         
         activeSource.current = source;
         setPlayingId(id);
@@ -270,7 +309,7 @@ function App() {
 
   const deleteEntry = async (id: string) => {
     const isDev = window.location.port === '5173';
-    const port = isDev ? '3001' : window.location.port || '80';
+    const port = isDev ? '5212' : window.location.port || '80';
     const protocol = window.location.protocol;
     const backendHost = window.location.hostname;
     const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
@@ -286,7 +325,7 @@ function App() {
 
   const refreshChannels = () => {
     const isDev = window.location.port === '5173';
-    const port = isDev ? '3001' : window.location.port || '80';
+    const port = isDev ? '5212' : window.location.port || '80';
     const protocol = window.location.protocol;
     const backendHost = window.location.hostname;
     const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
@@ -296,9 +335,21 @@ function App() {
       .catch(err => console.error("Failed to fetch channels:", err));
   };
 
+  const refreshFireTones = () => {
+    const isDev = window.location.port === '5173';
+    const port = isDev ? '5212' : window.location.port || '80';
+    const protocol = window.location.protocol;
+    const backendHost = window.location.hostname;
+    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
+    fetch(`${protocol}//${backendHost}${portSuffix}/api/firetones`)
+      .then(res => res.json())
+      .then(data => setFireTones(data))
+      .catch(err => console.error("Failed to fetch fire tones:", err));
+  };
+
   const handleSaveChannel = async (channel: Channel) => {
     const isDev = window.location.port === '5173';
-    const port = isDev ? '3001' : window.location.port || '80';
+    const port = isDev ? '5212' : window.location.port || '80';
     const protocol = window.location.protocol;
     const backendHost = window.location.hostname;
     const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
@@ -321,7 +372,7 @@ function App() {
 
   const handleDeleteChannel = async (id: number) => {
     const isDev = window.location.port === '5173';
-    const port = isDev ? '3001' : window.location.port || '80';
+    const port = isDev ? '5212' : window.location.port || '80';
     const protocol = window.location.protocol;
     const backendHost = window.location.hostname;
     const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
@@ -334,85 +385,89 @@ function App() {
     }
   };
 
+  const handleSaveFireTone = async (tone: FireToneSet) => {
+    const isDev = window.location.port === '5173';
+    const port = isDev ? '5212' : window.location.port || '80';
+    const protocol = window.location.protocol;
+    const backendHost = window.location.hostname;
+    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
+    const baseUrl = `${protocol}//${backendHost}${portSuffix}/api/firetones`;
+
+    const method = tone.id ? 'PUT' : 'POST';
+    const url = tone.id ? `${baseUrl}/${tone.id}` : baseUrl;
+
+    try {
+        await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(tone)
+        });
+        refreshFireTones();
+    } catch (e) {
+        console.error("Save fire tone failed:", e);
+    }
+  };
+
+  const handleDeleteFireTone = async (id: number) => {
+    const isDev = window.location.port === '5173';
+    const port = isDev ? '5212' : window.location.port || '80';
+    const protocol = window.location.protocol;
+    const backendHost = window.location.hostname;
+    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
+    
+    try {
+        await fetch(`${protocol}//${backendHost}${portSuffix}/api/firetones/${id}`, { method: 'DELETE' });
+        refreshFireTones();
+    } catch (e) {
+        console.error("Delete fire tone failed:", e);
+    }
+  };
+
   useEffect(() => {
     const isDev = window.location.port === '5173';
-    const port = isDev ? '3001' : window.location.port || '80';
+    const port = isDev ? '5212' : window.location.port || '80';
     const protocol = window.location.protocol;
     const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
     const backendHost = window.location.hostname;
     
     const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
 
-    const httpUrl = `${protocol}//${backendHost}${portSuffix}/api/channels`;
+    const channelsUrl = `${protocol}//${backendHost}${portSuffix}/api/channels`;
+    const firetonesUrl = `${protocol}//${backendHost}${portSuffix}/api/firetones`;
     const historyUrl = `${protocol}//${backendHost}${portSuffix}/api/history`;
-    const wsUrl = `${wsProtocol}//${backendHost}${portSuffix}/ws`;
+    const wsControlUrl = `${wsProtocol}//${backendHost}${portSuffix}/ws/control`;
+    const wsAudioUrl = `${wsProtocol}//${backendHost}${portSuffix}/ws/audio`;
 
-    fetch(httpUrl)
+    fetch(channelsUrl)
       .then(res => res.json())
       .then(data => setChannels(data))
       .catch(err => console.error("Failed to fetch channels:", err));
+
+    fetch(firetonesUrl)
+      .then(res => res.json())
+      .then(data => setFireTones(data))
+      .catch(err => console.error("Failed to fetch fire tones:", err));
 
     fetch(historyUrl)
       .then(res => res.json())
       .then(data => setCallLog(data))
       .catch(err => console.error("Failed to fetch history:", err));
 
-    const connectWs = () => {
-        ws.current = new WebSocket(wsUrl);
+    const connectControlWs = () => {
+        wsControl.current = new WebSocket(wsControlUrl);
         
-        ws.current.onopen = () => {
+        wsControl.current.onopen = () => {
             setIsConnected(true);
-            console.log("WebSocket Connected");
+            console.log("Control WebSocket Connected");
         };
 
-        ws.current.onclose = () => {
+        wsControl.current.onclose = () => {
             setIsConnected(false);
-            console.log("WebSocket Disconnected, retrying in 3s...");
-            setTimeout(connectWs, 3000);
+            console.log("Control WebSocket Disconnected, retrying in 3s...");
+            setTimeout(connectControlWs, 3000);
         };
 
-        ws.current.onmessage = async (event) => {
-          if (event.data instanceof Blob) {
-            // Handle Audio
-            // console.log("Audio Packet Received:", event.data.size, "bytes");
-            const arrayBuffer = await event.data.arrayBuffer();
-            const int16Array = new Int16Array(arrayBuffer);
-            const float32Array = new Float32Array(int16Array.length);
-            for (let i = 0; i < int16Array.length; i++) {
-                float32Array[i] = int16Array[i] / 32768;
-            }
-            
-            if (!window.audioCtx) {
-                window.audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
-                const analyser = window.audioCtx.createAnalyser();
-                analyser.fftSize = 1024;
-                analyser.connect(window.audioCtx.destination);
-                setAudioAnalyser(analyser);
-                (window.audioCtx as any)._analyser = analyser;
-            }
-            
-            const ctx = window.audioCtx;
-            if (ctx.state === 'suspended') ctx.resume();
-            const analyser = (ctx as any)._analyser;
-
-            const audioBuffer = ctx.createBuffer(1, float32Array.length, 48000);
-            audioBuffer.copyToChannel(float32Array, 0);
-
-            const source = ctx.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(analyser);
-            
-            // Scheduler to prevent crackling/overlaps
-            const currentTime = ctx.currentTime;
-            const JITTER_BUFFER = 0.15; // 150ms buffer for stability
-
-            if (nextStartTime.current < currentTime) {
-                nextStartTime.current = currentTime + JITTER_BUFFER;
-            }
-            
-            source.start(nextStartTime.current);
-            nextStartTime.current += audioBuffer.duration;
-          } else {
+        wsControl.current.onmessage = async (event) => {
             // Handle JSON
             try {
                 const message = JSON.parse(event.data);
@@ -425,14 +480,96 @@ function App() {
                 } else if (message.type === 'ERROR') {
                   setErrorMsg(message.payload);
                 }
-            } catch (e) {
-                console.warn('Unknown message:', event.data);
+            } catch {
+                console.warn('Unknown control message:', event.data);
+            }
+        };
+    };
+
+    const connectAudioWs = () => {
+        wsAudio.current = new WebSocket(wsAudioUrl);
+
+        wsAudio.current.onopen = () => {
+             console.log("Audio WebSocket Connected");
+        };
+
+        wsAudio.current.onclose = () => {
+             console.log("Audio WebSocket Disconnected, retrying in 3s...");
+             setTimeout(connectAudioWs, 3000);
+        };
+
+        wsAudio.current.onmessage = async (event) => {
+          if (event.data instanceof Blob) {
+            try {
+                // Handle Audio
+                const arrayBuffer = await event.data.arrayBuffer();
+                
+                const int16Array = new Int16Array(arrayBuffer);
+                const float32Array = new Float32Array(int16Array.length);
+                for (let i = 0; i < int16Array.length; i++) {
+                    float32Array[i] = int16Array[i] / 32768;
+                }
+                
+                let ctx = window.audioCtx;
+                if (!ctx) {
+                    // console.log("Initializing new AudioContext");
+                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                    if (AudioContextClass) {
+                        ctx = new AudioContextClass({ sampleRate: 48000 });
+                        window.audioCtx = ctx;
+                    }
+                }
+
+                if (ctx && ctx.state === 'suspended') {
+                    await ctx.resume();
+                }
+
+                if (!ctx) return;
+
+                let analyser = audioAnalyserRef.current;
+                
+                // If analyser is missing or belongs to a different/closed context, recreate it
+                if (!analyser || analyser.context !== ctx || analyser.context.state === 'closed') {
+                    // console.log("Initializing AnalyserNode");
+                    analyser = ctx.createAnalyser();
+                    analyser.fftSize = 1024;
+                    analyser.connect(ctx.destination);
+                    
+                    audioAnalyserRef.current = analyser;
+                    setAudioAnalyser(analyser);
+                }
+
+                const audioBuffer = ctx.createBuffer(1, float32Array.length, 48000);
+                audioBuffer.copyToChannel(float32Array, 0);
+
+                const source = ctx.createBufferSource();
+                source.buffer = audioBuffer;
+                
+                // Safe connection
+                if (analyser) {
+                    source.connect(analyser);
+                    
+                                    // Scheduler to prevent crackling/overlaps
+                                    const currentTime = ctx.currentTime;
+                                    const JITTER_BUFFER = 0.25; // 250ms buffer for stability
+                    if (nextStartTime.current < currentTime) {
+                        nextStartTime.current = currentTime + JITTER_BUFFER;
+                    }
+                    
+                    source.start(nextStartTime.current);
+                    nextStartTime.current += audioBuffer.duration;
+                } else {
+                    console.error("AnalyserNode is invalid, dropping audio packet");
+                }
+            } catch (err) {
+                console.error("Audio processing error:", err);
             }
           }
         };
     };
 
-    connectWs();
+    connectControlWs();
+    connectAudioWs();
 
     const resumeAudio = () => {
         if (window.audioCtx && window.audioCtx.state === 'suspended') {
@@ -443,7 +580,8 @@ function App() {
 
     return () => {
       window.removeEventListener('click', resumeAudio);
-      if (ws.current) ws.current.close();
+      if (wsControl.current) wsControl.current.close();
+      if (wsAudio.current) wsAudio.current.close();
     };
   }, []);
 
@@ -569,6 +707,12 @@ function App() {
                     </Box>
                 )}
 
+                <Tooltip title="Fire Tone Outs">
+                    <IconButton color="inherit" onClick={() => setIsToneManagerOpen(true)} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>
+                        <NotificationsActiveIcon />
+                    </IconButton>
+                </Tooltip>
+
                 <Tooltip title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}>
                     <IconButton color="inherit" onClick={toggleFullscreen} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>
                         {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
@@ -677,6 +821,23 @@ function App() {
             onSave={handleSaveChannel}
             onDelete={handleDeleteChannel}
         />
+
+        <FireToneManager 
+            open={isToneManagerOpen} 
+            onClose={() => setIsToneManagerOpen(false)} 
+            tones={fireTones}
+            onSave={handleSaveFireTone}
+            onDelete={handleDeleteFireTone}
+        />
+
+        <Snackbar 
+            open={!isAudioInitialized && (scannerState.status === 'RECEIVING' || scannerState.status === 'MONITORING')} 
+            anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        >
+            <Alert severity="info" variant="filled" sx={{ width: '100%', cursor: 'pointer' }} onClick={initAudio}>
+                Click anywhere to enable live audio
+            </Alert>
+        </Snackbar>
 
         <Snackbar 
             open={!!errorMsg} 

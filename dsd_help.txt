@@ -1,0 +1,221 @@
+
+Usage: dsd-fme [options]            Decoder/Trunking Mode
+  or:  dsd-fme [options] -r <files> Read/Play saved mbe data from file(s)
+  or:  dsd-fme -h                   Show help
+
+Display Options:
+  -N            Use NCurses Terminal
+                 dsd-fme -N 2> console_log.txt 
+  -Z            Log MBE/PDU Payloads to console
+
+Device Options:
+  -O            List All Pulse Audio Input Sources and Output Sinks (devices).
+
+Input/Output options:
+  -i <device>   Audio input device (default is pulse)
+                /dev/dsp for OSS audio (Depreciated: Will require padsp wrapper in Linux) 
+                pulse for pulse audio signal input 
+                pulse:6 or pulse:virtual_sink2.monitor for pulse audio signal input on virtual_sink2 (see -O) 
+                rtl for rtl dongle (Default Values -- see below)
+                rtl:dev:freq:gain:ppm:bw:sq:vol for rtl dongle (see below)
+                tcp for tcp client SDR++/GNURadio Companion/Other (Port 7355)
+                tcp:192.168.7.5:7355 for custom address and port 
+                filename.bin for OP25/FME capture bin files
+                filename.wav for 48K/1 wav files (SDR++, GQRX)
+                filename.wav -s 96000 for 96K/1 wav files (DSDPlus)
+                (Use single quotes '/directory/audio file.wav' when directories/spaces are present)
+  -s <rate>     Sample Rate of wav input files (48000 or 96000) Mono only!
+  -o <device>   Audio output device (default is pulse)
+                /dev/dsp for OSS audio (Depreciated: Will require padsp wrapper in Linux) 
+                pulse for pulse audio decoded voice or analog output
+                pulse:1 or pulse:alsa_output.pci-0000_0d_00.3.analog-stereo for pulse audio decoded voice or analog output on device (see -O) 
+                null for no audio output
+                udp for UDP socket blaster output (default host 127.0.0.1; default port 23456)
+                udp:192.168.7.8:23470 for UDP socket blaster output (Target Address and Port
+  -d <dir>      Create mbe data files, use this directory (TDMA version is experimental)
+  -r <files>    Read/Play saved mbe data from file(s)
+  -g <float>    Audio Digital Output Gain  (Default: 0 = Auto;        )
+                                           (Manual:  1 = 2%; 50 = 100%)
+  -n <float>    Audio Analog  Output Gain  (Default: 0 = Auto; 0-100%  )
+  -6 <file>     Output raw audio .wav file (48K/1). (WARNING! Large File Sizes 1 Hour ~= 360 MB)
+  -7 <dir>      Create/Use Custom directory for Per Call decoded .wav file saving.
+                 (Use ./folder for Nested Directory!)
+                 (Use /path/to/folder for hard coded directory!)
+                 (Use Before the -P option!)
+  -8            Enable Source Audio Monitor
+                 (Set Squelch in RTL, SDR++ or GQRX, etc, if monitoring mixed analog/digital)
+  -w <file>     Output synthesized speech to a single static .wav file. (Do not use with -P Per Call Switch)
+  -P            Enable Per Call WAV file saving. (Do not use with -w filename.wav single wav file switch)
+                 (Per Call works with everything now and doesn't require ncurses terminal!)
+  -a            Enable Call Alert Beep
+                 (Warning! Might be annoying.)
+  -J <file>     Specify Filename for Event Log Output.
+  -L <file>     Specify Filename for LRRP Data Output.
+  -Q <file>     Specify Filename for OK-DMRlib Structured File Output. (placed in DSP folder)
+  -Q <file>     Specify Filename for M17 Float Stream Output. (placed in DSP folder)
+  -c <file>     Output symbol capture to .bin file
+  -q            Reverse Mute - Mute Unencrypted Voice and Unmute Encrypted Voice
+  -V <num>      Enable TDMA Voice Synthesis on Slot 1 (1), Slot 2 (2), or Both (3); Default is 3; 
+  -z            Set TDMA Voice Slot Preference when using /dev/dsp audio output (prevent lag and stuttering)
+  -y            Enable Experimental Pulse Audio Float Audio Output
+  -v <hex>      Set Filtering Bitmap Options (Advanced Option)
+                1 1 1 1 (0xF): PBF/LPF/HPF/HPFD on
+
+RTL-SDR options:
+ Usage: rtl:dev:freq:gain:ppm:bw:sq:vol
+  NOTE: all arguments after rtl are optional now for trunking, but user configuration is recommended
+  dev  <num>    RTL-SDR Device Index Number or 8 Digit Serial Number, no strings! (default 0)
+  freq <num>    RTL-SDR Frequency (851800000 or 851.8M) 
+  gain <num>    RTL-SDR Device Gain (0-49)(default = 0; Hardware AGC recommended)
+  ppm  <num>    RTL-SDR PPM Error (default = 0)
+  bw   <num>    RTL-SDR Bandwidth kHz (default = 12)(4, 6, 8, 12, 16, 24)  
+  sq   <num>    RTL-SDR Squelch Level vs RMS Value (Optional)
+  vol  <num>    RTL-SDR Sample 'Volume' Multiplier (default = 2)(1,2,3)
+ Example: dsd-fme -fs -i rtl -C cap_plus_channel.csv -T
+ Example: dsd-fme -fp -i rtl:0:851.375M:22:-2:24:0:2
+
+Decoder options:
+  -fa           Auto Detection
+  -fA           Passive Analog Audio Monitor
+  -ft           TDMA Trunking P25p1 Control and Voice, P25p2 Trunked Channels, and DMR
+  -fs           DMR TDMA BS and MS Simplex
+  -f1           Decode only P25 Phase 1
+  -f2           Decode only P25 Phase 2 (6000 sps) **
+  -fd           Decode only DSTAR
+  -fx           Decode only X2-TDMA
+  -fy           Decode only YSF
+  -fz             Decode only M17*
+  -fi             Decode only NXDN48* (6.25 kHz) / IDAS*
+  -fn             Decode only NXDN96* (12.5 kHz)
+  -fp             Decode only ProVoice*
+  -fh             Decode only EDACS Standard/ProVoice*
+  -fH             Decode only EDACS Standard/ProVoice with ESK 0xA0*
+  -fh344          Decode only EDACS Standard/ProVoice and set AFS to 344 or similar custom 11-bit scheme*
+  -fH434          Decode only EDACS Standard/ProVoice and set AFS to custom 11-bit scheme with ESK 0xA0*
+  -fe             Decode only EDACS EA/ProVoice*
+  -fE             Decode only EDACS EA/ProVoice with ESK 0xA0*
+  -fm             Decode only dPMR*
+  -l            Disable DMR, dPMR, NXDN, M17 input filtering
+  -u <num>      Unvoiced speech quality (default=3)
+  -xx           Expect non-inverted X2-TDMA signal
+  -xr           Expect inverted DMR signal
+  -xd           Expect inverted ICOM dPMR signal
+
+  * denotes frame types that cannot be auto-detected.
+  ** Phase 2 Single Frequency may require user to manually set WACN/SYSID/CC parameters if MAC_SIGNAL not present.
+
+Advanced Decoder options:
+  -X <hex>      Manually Set P2 Parameters (WACN, SYSID, CC/NAC)
+                 (-X BEE00ABC123)
+  -_ <dec>      Manually Set NXDN PN95 Dibit Scrambler Seed (1-511)
+                 (-* 261)
+  -D <dec>      Manually Set TIII DMR Location Area n bit len (0-10)(10 max)
+                 (Value defaults to max n bit value for site model size)
+                 (Setting 0 will show full Site ID, no area/subarea)
+
+  -ma           Auto-select modulation optimizations
+  -mc           Use only C4FM modulation optimizations (default)
+  -mg           Use only GFSK modulation optimizations
+  -mq           Use only QPSK modulation optimizations
+  -m2           Use P25p2 6000 sps QPSK modulation optimizations
+  -F            Relax P25 Phase 2 MAC_SIGNAL CRC Checksum Pass/Fail
+                 Use this feature to allow MAC_SIGNAL even if CRC errors.
+  -F            Relax DMR RAS/CRC CSBK/DATA Pass/Fail
+                 Enabling on some systems could lead to bad channel assignments/site data decoding if bad or marginal signal
+
+  -b <dec>      Manually Enter Basic Privacy Key (Decimal Value of Key Number)
+                 (NOTE: This used to be the 'K' option!) 
+
+  -H <hex>      Manually Enter Hytera 10/32/64 Char Basic Privacy Hex Key (see example below)
+                 Encapulate in Single Quotation Marks; Space every 16 chars.
+                 -H 0B57935150 
+                 -H '736B9A9C5645288B 243AD5CB8701EF8A' 
+                 -H '20029736A5D91042 C923EB0697484433 005EFC58A1905195 E28E9C7836AA2DB8' 
+
+  -H <hex>      Manually Enter AES-128, AES-256, or Kirisun-256 Hex Key (see example below)
+                 Encapulate in Single Quotation Marks; Space every 16 chars.
+                 -H '736B9A9C5645288B 243AD5CB8701EF8A' 
+                 -H '20029736A5D91042 C923EB0697484433 005EFC58A1905195 E28E9C7836AA2DB8' 
+
+  -R <dec>      Manually Enter dPMR or NXDN EHR Scrambler Key Value (Decimal Value)
+                 
+  -1 <hex>      Manually Enter RC4 or DES Key Value (DMR, P25, NXDN) (Hex Value) 
+                 
+  -2 <hex>      Manually Enter and Enforce TYT 16-bit BP Key Value (DMR) (Hex Value) 
+                 
+  -! <hex>      Manually Enter and Enforce TYT Advanced Privacy (PC4) 128 or 256 bit AP Hex Key (see example below)
+                 Encapulate in Single Quotation Marks; Space every 16 chars.
+                 -! '736B9A9C5645288B 243AD5CB8701EF8A' 
+                 -! '1111111111111111 1111111111111111 1111111111111111 1111111111111111' 
+                 
+  -@ <hex>      Manually Enter and Enforce Retevis Advanced Privacy (RC2) 128 or 256 bit AP Hex Key (see example below)
+                 Encapulate in Single Quotation Marks; Space every 16 chars.
+                 -@ '736B9A9C5645288B 243AD5CB8701EF8A' 
+                 -@ '1122334455667788 99AABBCCDDEEFF11 1122334455667788 99AABBCCDDEEFF11' 
+                 
+  -5 <hex>      Manually Enter and Enforce TYT Enhanced Privacy (AES-128) EP Hex Key (see example below)
+                 Encapulate in Single Quotation Marks; Space every 16 chars.
+                 -5 '736B9A9C5645288B 243AD5CB8701EF8A' 
+                 
+  -+ <hex>      Manually Enter and Enforce Baofeng Advanced Privacy (PC5-128 or PC5-256) AP Hex Key (see example below)
+                 Encapulate in Single Quotation Marks; Space every 16 chars.
+                 -+ 'ABCDABCDABCDABCD ABDCDABCDABCDABC' 
+                 -+ 'ABCDABCDABCDABCD ABDCDABCDABCDABC EF01EF01EF01EF01 EF01EF01EF01EF01' 
+                 
+  -^ <hex>      Manually Enter and Enforce Connect Systems 72-bit (9-byte) Extended Encryption Hex Key (see example below)
+                 -^  3BBE782C0430008271
+                 
+  -9 <dec>      Manually Enter and Enforce Kenwood 15-bit Scrambler Key Value (DMR) (Dec Value) 
+                 
+  -A <hex>      Manually Enter and Enforce Anytone 16-bit BP Key Value (DMR) (Hex Value) 
+                 
+  -S <str>      Manually Enter and Enforce Generic Static Keystream -> Length and BYTE PACKED / ALIGNED String for AMBE (up to 882 bits)
+                  For Example, enter 16-bit Keystream 0909 as:
+                    -S 16:0909
+                  For Example, enter 49-bit Keystream as:
+                    -S 49:123456789ABC80
+                  For Example, enter 49-bit Keystream (MBP 70) as:
+                    -S 49:ED0AED4AED4AED4A
+                  For Example, Baofeng 49-bit Keystream for 56-bit Custom Encryption as:
+                    -S 49:11AA22BB33CC44
+                 
+  -k <file>     Import Key List from csv file (Decimal Format) -- Lower Case 'k'.
+                  Only supports NXDN, DMR Basic Privacy (decimal value). 
+                  (dPMR and Hytera 32/64 char not supported, DMR uses TG value as key id -- EXPERIMENTAL!!). 
+                 
+  -K <file>     Import Key List from csv file (Hexidecimal Format) -- Capital 'K'.
+                  Use for Hex Value Hytera 10-char BP keys, RC4 10-char, DES 16-char Hex Keys, and AES128/256 32/64-char keys. 
+                 
+  -4            Force Privacy Key over Encryption Identifiers (DMR MBP/HBP and NXDN Scrambler) 
+                 
+  -0            Force RC4 Key over Missing PI header/LE Encryption Identifiers (DMR) 
+                 
+  -M <hex>      Force Entered Alg ID Value over Missing PI header/LE Encryption Identifiers (DMR) 
+                 
+  -3            Disable DMR Late Entry Encryption Identifiers (VC6 Single Burst) 
+                  Note: Disable this if false positives on Voice ENC occur. 
+
+ Trunking Options:
+  -C <file>     Import Channel to Frequency Map (channum, freq) from csv file. (Capital C)                   
+                 (See channel_map.csv for example)
+  -G <file>     Import Group List Allow/Block and Label from csv file.
+                 (See group.csv for example)
+  -T            Enable Trunking Features (NXDN/P25/EDACS/DMR) with RIGCTL/TCP or RTL Input
+  -Y            Enable Scanning Mode with RIGCTL/TCP or RTL Input 
+                 Experimental -- Can only scan for sync with enabled decoders, don't mix NXDN and DMR/P25!
+                 This is not a Trunking Feature, just scans through conventional frequencies fast!
+  -W            Use Imported Group List as a Trunking Allow/White List -- Only Tune with Mode A
+  -p            Disable Tune to Private Calls (DMR TIII, P25, NXDN Type-C and Type-D)
+  -E            Disable Tune to Group Calls (DMR TIII, Con+, Cap+, P25, NXDN Type-C, and Type-D)
+  -e            Enable Tune to Data Calls (DMR TIII, Cap+, NXDN Type-C)
+                 (NOTE: No Clear Distinction between Cap+ Private Voice Calls and Data Calls -- Both enabled with Data Calls 
+  -I <dec>      Specify TG to Hold During Trunking (DMR, P25, NXDN Type-C Trunking)
+  -U <port>     Enable RIGCTL/TCP; Set TCP Port for RIGCTL. (4532 on SDR++)
+  -B <Hertz>    Set RIGCTL Setmod Bandwidth in Hertz (0 - default - OFF)
+                 P25 - 12000; NXDN48 - 7000; NXDN96: 12000; DMR - 7000-12000; EDACS/PV - 12000-24000;
+                 May vary based on system stregnth, etc.
+  -t <secs>     Set Trunking or Scan Speed VC/sync loss hangtime in seconds. (default = 1 second)
+
+ Trunking Example TCP: dsd-fme -fs -i tcp -U 4532 -T -C dmr_t3_chan.csv -G group.csv -N 2> log.txt
+ Trunking Example RTL: dsd-fme -fs -i rtl:0:450M:26:-2:8 -T -C connect_plus_chan.csv -G group.csv -N 2> log.txt
+

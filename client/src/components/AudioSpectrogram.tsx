@@ -18,8 +18,8 @@ const AudioSpectrogram: React.FC<Props> = ({ analyser, height = 150 }) => {
         if (!ctx) return;
 
         // Configuration
-        const fftSize = 1024; // Resolution of frequency bars
-        analyser.fftSize = fftSize;
+        // const fftSize = 1024; // Resolution of frequency bars
+        // analyser.fftSize = fftSize; // Removed to avoid prop mutation
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
 

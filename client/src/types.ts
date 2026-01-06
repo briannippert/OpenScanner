@@ -37,6 +37,7 @@ export interface ScannerState {
     sourceID?: number;
     targetID?: number;
     currentTone?: string;
+    lastDetectedTone?: string;
 }
 
 export interface CallLog {
@@ -52,11 +53,21 @@ export interface CallLog {
     transcription?: string;
     sourceID?: number;
     targetID?: number;
+    detectedTone?: string;
+}
+
+export interface FireToneSet {
+    id?: number;
+    name: string;
+    frequencyA: number;
+    frequencyB: number;
+    description?: string;
 }
 
 declare global {
     interface Window {
         audioCtx?: AudioContext;
+        webkitAudioContext?: typeof AudioContext;
         nextStartTime?: number;
     }
 }

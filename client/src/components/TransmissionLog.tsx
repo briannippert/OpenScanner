@@ -27,13 +27,16 @@ import {
     Radio,
     History as HistoryIcon
 } from '@mui/icons-material';
-import type { CallLog } from '../types';
+import type { CallLog, Channel } from '../types';
 
-interface Props {
-    liveLogs: CallLog[];
+interface LogNodeProps {
     playingId: string | null;
     onPlay: (id: string, path: string, duration?: number) => void;
     onDelete: (id: string) => void;
+}
+
+interface Props extends LogNodeProps {
+    liveLogs: CallLog[];
 }
 
 const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelete }) => {
@@ -53,12 +56,12 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
 
     // Search handler
     useEffect(() => {
-        if (!searchQuery.trim()) {
-            setSearchResults(null);
-            return;
-        }
-
         const timer = setTimeout(() => {
+            if (!searchQuery.trim()) {
+                setSearchResults(null);
+                return;
+            }
+
             setLoading(true);
             fetch(`/api/history/search?q=${encodeURIComponent(searchQuery)}`)
                 .then(res => res.json())
@@ -152,7 +155,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     );
 };
 
-const YearNode = ({ year, playingId, onPlay, onDelete }: any) => {
+const YearNode = ({ year, playingId, onPlay, onDelete }: { year: string } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
     const [months, setMonths] = useState<string[]>([]);
     const [loaded, setLoaded] = useState(false);
@@ -187,7 +190,7 @@ const YearNode = ({ year, playingId, onPlay, onDelete }: any) => {
     );
 };
 
-const MonthNode = ({ year, month, playingId, onPlay, onDelete }: any) => {
+const MonthNode = ({ year, month, playingId, onPlay, onDelete }: { year: string; month: string } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
     const [days, setDays] = useState<string[]>([]);
     const [loaded, setLoaded] = useState(false);
@@ -225,9 +228,9 @@ const MonthNode = ({ year, month, playingId, onPlay, onDelete }: any) => {
     );
 };
 
-const DayNode = ({ year, month, day, playingId, onPlay, onDelete }: any) => {
+const DayNode = ({ year, month, day, playingId, onPlay, onDelete }: { year: string; month: string; day: string } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
-    const [channels, setChannels] = useState<any[]>([]);
+    const [channels, setChannels] = useState<Channel[]>([]);
     const [loaded, setLoaded] = useState(false);
 
     const handleToggle = () => {
@@ -265,7 +268,7 @@ const DayNode = ({ year, month, day, playingId, onPlay, onDelete }: any) => {
     );
 };
 
-const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete }: any) => {
+const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete }: { year: string; month: string; day: string; channel: Channel } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
     const [logs, setLogs] = useState<CallLog[]>([]);
     const [loaded, setLoaded] = useState(false);
@@ -305,7 +308,7 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete }:
     );
 };
 
-const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog, playingId: string | null, onPlay: any, onDelete: any }) => {
+const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog } & LogNodeProps) => {
     return (
         <React.Fragment>
             <ListItem 
@@ -344,6 +347,11 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog, playingId
                             <Typography variant="caption" sx={{ color: '#fff', fontWeight: 'bold', fontSize: '0.8rem' }}>
                                 {log.alphaTag}
                             </Typography>
+                            {log.detectedTone && (
+                                <Typography variant="caption" sx={{ color: '#ff0000', fontWeight: 'bold', fontSize: '9px', border: '1px solid #ff0000', px: 0.5, borderRadius: 0.5 }}>
+                                    {log.detectedTone}
+                                </Typography>
+                            )}
                             {log.duration && (
                                 <Typography variant="caption" sx={{ color: '#555', fontSize: '9px' }}>
                                     {log.duration.toFixed(1)}s

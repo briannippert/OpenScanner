@@ -10,8 +10,17 @@ CREATE TABLE IF NOT EXISTS transmissions (
     audio_path TEXT,
     duration REAL,
     transcription TEXT,
+    detectedTone TEXT,
     sourceID INTEGER,
     targetID INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS fire_tones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    frequencyA REAL,
+    frequencyB REAL,
+    description TEXT
 );
 
 CREATE TABLE IF NOT EXISTS channels (

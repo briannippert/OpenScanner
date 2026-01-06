@@ -119,6 +119,35 @@ public class OpenScannerController : ControllerBase
         return Ok();
     }
 
+    [HttpGet("firetones")]
+    public async Task<IEnumerable<FireToneSet>> GetFireTones()
+    {
+        return await _db.GetAllFireTonesAsync();
+    }
+
+    [HttpPost("firetones")]
+    public async Task<IActionResult> AddFireTone(FireToneSet tone)
+    {
+        var id = await _db.AddFireToneAsync(tone);
+        tone.Id = id;
+        return CreatedAtAction(nameof(GetFireTones), new { id }, tone);
+    }
+
+    [HttpPut("firetones/{id}")]
+    public async Task<IActionResult> UpdateFireTone(int id, FireToneSet tone)
+    {
+        tone.Id = id;
+        await _db.UpdateFireToneAsync(tone);
+        return Ok();
+    }
+
+    [HttpDelete("firetones/{id}")]
+    public async Task<IActionResult> DeleteFireTone(int id)
+    {
+        await _db.DeleteFireToneAsync(id);
+        return Ok();
+    }
+
     [HttpPost("control")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public IActionResult ControlScanner([FromBody] JsonElement body)

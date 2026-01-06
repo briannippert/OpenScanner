@@ -51,10 +51,11 @@ public class CallLog
     public double? Duration { get; set; }
     
     public string? Transcription { get; set; }
+    public string? DetectedTone { get; set; }
 
     public CallLog() { }
 
-    public CallLog(string id, string timestamp, double frequency, string alphaTag, string description, double? lat, double? lon, string? audioPath, double? duration, string? transcription = null, int? sourceID = null, int? targetID = null)
+    public CallLog(string id, string timestamp, double frequency, string alphaTag, string description, double? lat, double? lon, string? audioPath, double? duration, string? transcription = null, int? sourceID = null, int? targetID = null, string? detectedTone = null)
     {
         Id = id;
         Timestamp = timestamp;
@@ -68,7 +69,17 @@ public class CallLog
         Transcription = transcription;
         SourceID = sourceID;
         TargetID = targetID;
+        DetectedTone = detectedTone;
     }
+}
+
+public class FireToneSet
+{
+    public int? Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public double FrequencyA { get; set; }
+    public double FrequencyB { get; set; }
+    public string? Description { get; set; }
 }
 
 public record GpsData(
@@ -102,6 +113,7 @@ public record ScannerState(
             string? LastTranscription = null,
             int? SourceID = null,
             int? TargetID = null,
-            string? CurrentTone = null
+            string? CurrentTone = null,
+            string? LastDetectedTone = null
         );
         
