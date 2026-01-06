@@ -380,6 +380,7 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog } & LogNod
                             </Box>
                         </Box>
                     }
+                    secondaryTypographyProps={{ component: 'div' }}
                 />
             </ListItem>
             <Divider component="li" sx={{ borderColor: '#111' }} />
