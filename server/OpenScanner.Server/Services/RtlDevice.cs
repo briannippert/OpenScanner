@@ -275,8 +275,8 @@ public class RtlDevice : BackgroundService
                 var bytesRead = await baseStream.ReadAsync(buffer, 0, buffer.Length, token);
                 if (bytesRead == 0) break;
 
-                // Rate limit FFT updates (approx 15Hz)
-                if ((DateTime.UtcNow - lastUpdate).TotalMilliseconds < 60) continue;
+                // Rate limit FFT updates (approx 50Hz)
+                if ((DateTime.UtcNow - lastUpdate).TotalMilliseconds < 20) continue;
                 lastUpdate = DateTime.UtcNow;
 
                 // Warm-up: Skip first 500ms of data to let hardware settle
@@ -392,7 +392,11 @@ public class RtlDevice : BackgroundService
                 if (snr > 15 && db > threshold)
                 {
                     _channelHits[channel.Frequency] = _channelHits.GetValueOrDefault(channel.Frequency, 0) + 1;
-                    if (_channelHits[channel.Frequency] >= 3 && (bestChannel == null || db > maxDetectedDb))
+                    
+                    // Instant lock for strong signals (>20dB SNR), otherwise require 3 hits
+                    int hitsNeeded = snr > 20 ? 1 : 3;
+                    
+                    if (_channelHits[channel.Frequency] >= hitsNeeded && (bestChannel == null || db > maxDetectedDb))
                     {
                         bestChannel = channel;
                     }
