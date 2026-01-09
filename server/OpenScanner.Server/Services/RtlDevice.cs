@@ -612,10 +612,10 @@ public class RtlDevice : BackgroundService
 
                         // 3. Check if we should send
                         // Immediate send for first packet to minimize start delay
-                        // Then buffer 2048 bytes (~21ms) to balance overhead/smoothness
+                        // Then buffer 4096 bytes (~42ms) to reduce overhead and popping
                         bool shouldSend = (sendBuffer.Count > 0 && !hadData) || 
-                                          sendBuffer.Count >= 2048 || 
-                                          (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 25);
+                                          sendBuffer.Count >= 4096 || 
+                                          (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 40);
 
                         if (shouldSend)
                         {

@@ -559,8 +559,8 @@ function App() {
                     const MAX_DRIFT = 0.5; // Reset if > 500ms ahead
 
                     if (nextStartTime.current < currentTime) {
-                        // Underrun: We fell behind. Play immediately + small buffer
-                        nextStartTime.current = currentTime + 0.01;
+                        // Underrun: We fell behind. Resume immediately.
+                        nextStartTime.current = currentTime;
                     } else if (nextStartTime.current > currentTime + MAX_DRIFT) {
                         // Drift: We are too far ahead. Reset to tight buffer.
                         nextStartTime.current = currentTime + JITTER_BUFFER;
