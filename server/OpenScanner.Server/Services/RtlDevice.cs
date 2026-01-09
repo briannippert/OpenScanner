@@ -606,14 +606,19 @@ public class RtlDevice : BackgroundService
                         // 2. Add to accumulator
                         for (int i = 0; i < read; i++) sendBuffer.Add(readBuffer[i]);
 
-                        // 3. Check if we should send (threshold: 4096 bytes or 40ms delay)
-                        // 4096 bytes @ 48kHz 16-bit mono = ~42ms of audio
-                        // This prevents sending tiny packets (high overhead) but keeps latency low (~40ms)
-                        if (sendBuffer.Count >= 4096 || (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 40))
+                        // 3. Check if we should send
+                        // Immediate send for first packet to minimize start delay
+                        // Then buffer 2048 bytes (~21ms) to balance overhead/smoothness
+                        bool shouldSend = (sendBuffer.Count > 0 && !hadData) || 
+                                          sendBuffer.Count >= 2048 || 
+                                          (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 25);
+
+                        if (shouldSend)
                         {
                             var chunk = sendBuffer.ToArray();
                             sendBuffer.Clear();
                             lastSend = DateTime.UtcNow;
+                            hadData = true; // Mark that we have sent data
                             
                             // Analyze for Fire Tone Outs
                             _toneDetector.ProcessAudio(chunk);
