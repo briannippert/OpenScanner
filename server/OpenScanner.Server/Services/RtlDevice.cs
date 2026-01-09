@@ -587,50 +587,63 @@ public class RtlDevice : BackgroundService
             var token = _decodeCts.Token;
             Task.Run(async () => 
             {
-                var readBuffer = new byte[4096];
+                var readBuffer = new byte[4096]; // Read chunk size
+                var sendBuffer = new List<byte>(8192); // Accumulator
                 var stream = _decoderProcess.StandardOutput.BaseStream;
+                var lastSend = DateTime.UtcNow;
                 bool hadData = false;
 
                 try
                 {
                     while (!token.IsCancellationRequested)
                     {
+                        // 1. Read available data (or wait briefly)
                         int read = await stream.ReadAsync(readBuffer, 0, readBuffer.Length, token);
                         if (read == 0) break;
                         
                         if (!hadData) { _logger.LogInformation("Decoder: Received first audio bytes"); hadData = true; }
                         
-                        var chunk = new byte[read];
-                        Array.Copy(readBuffer, 0, chunk, 0, read);
-                        
-                        // Analyze for Fire Tone Outs
-                        _toneDetector.ProcessAudio(chunk);
+                        // 2. Add to accumulator
+                        for (int i = 0; i < read; i++) sendBuffer.Add(readBuffer[i]);
 
-                        lock (_audioLock)
+                        // 3. Check if we should send (threshold: 4096 bytes or 40ms delay)
+                        // 4096 bytes @ 48kHz 16-bit mono = ~42ms of audio
+                        // This prevents sending tiny packets (high overhead) but keeps latency low (~40ms)
+                        if (sendBuffer.Count >= 4096 || (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 40))
                         {
-                            // Strict attribution check: If we switched channels, drop this audio packet
-                            if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - channel.Frequency) > 0.001) continue;
+                            var chunk = sendBuffer.ToArray();
+                            sendBuffer.Clear();
+                            lastSend = DateTime.UtcNow;
+                            
+                            // Analyze for Fire Tone Outs
+                            _toneDetector.ProcessAudio(chunk);
 
-                            OnAudio?.Invoke(chunk);
-
-                            // Update pre-roll
-                            _preRollBuffer.AddLast(chunk);
-                            _preRollSize += chunk.Length;
-                            while (_preRollSize > MaxPreRollBytes)
+                            lock (_audioLock)
                             {
-                                var first = _preRollBuffer.First;
-                                if (first != null)
+                                // Strict attribution check: If we switched channels, drop this audio packet
+                                if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - channel.Frequency) > 0.001) continue;
+
+                                OnAudio?.Invoke(chunk);
+
+                                // Update pre-roll
+                                _preRollBuffer.AddLast(chunk);
+                                _preRollSize += chunk.Length;
+                                while (_preRollSize > MaxPreRollBytes)
                                 {
-                                    _preRollSize -= first.Value.Length;
-                                    _preRollBuffer.RemoveFirst();
+                                    var first = _preRollBuffer.First;
+                                    if (first != null)
+                                    {
+                                        _preRollSize -= first.Value.Length;
+                                        _preRollBuffer.RemoveFirst();
+                                    }
                                 }
-                            }
 
-                            if (_recordingStream != null)
-                            {
-                                _recordingStream.Write(chunk, 0, chunk.Length);
-                                _recordingStream.Flush();
-                                ResetActivityTimeout(); // Keep recording alive while audio flows
+                                if (_recordingStream != null)
+                                {
+                                    _recordingStream.Write(chunk, 0, chunk.Length);
+                                    _recordingStream.Flush();
+                                    ResetActivityTimeout(); // Keep recording alive while audio flows
+                                }
                             }
                         }
                     }
