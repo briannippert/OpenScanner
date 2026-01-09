@@ -434,7 +434,7 @@ public class RtlDevice : BackgroundService
         // Safety timeout
         if (!_manualOverride)
         {
-            RestartSessionTimeout(5000); // 5s to hear something (sync up)
+            RestartSessionTimeout(10000); // 10s to hear something (sync up)
         }
     }
 
@@ -535,7 +535,7 @@ public class RtlDevice : BackgroundService
             // We match FFmpeg input rate (-ar) to the expected DSD-FME output.
             // Output rate is always 48000 to match WFM and Client expectation.
             // Re-added -s {outputRate} because DSD-FME needs it for raw input
-            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -i - {ffmpegFilter} -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay - -loglevel quiet";
+            cmd = $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | stdbuf -i0 -o0 /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -i - {ffmpegFilter} -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay - -loglevel quiet";
         }
 
         var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
@@ -548,7 +548,7 @@ public class RtlDevice : BackgroundService
         _logger.LogInformation($"Decoder starting ({mode}): {cmd}");
 
         // Delay slightly
-        Task.Delay(300).ContinueWith(_ => 
+        Task.Delay(50).ContinueWith(_ => 
         {
             if (_state.Status == "IDLE") return; // Aborted
 
