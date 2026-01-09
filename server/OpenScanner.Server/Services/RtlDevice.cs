@@ -384,17 +384,17 @@ public class RtlDevice : BackgroundService
                 double db = fftDb[binIndex];
                 if (db > maxDetectedDb) maxDetectedDb = db;
 
-                // SNR Requirement: Signal must be at least 8dB above average noise
+                // SNR Requirement: Signal must be at least 15dB above average noise
                 // AND above absolute threshold
                 double snr = db - avgNoise;
                 double threshold = _state.Squelch ?? -55;
 
-                if (snr > 8 && db > threshold)
+                if (snr > 15 && db > threshold)
                 {
                     _channelHits[channel.Frequency] = _channelHits.GetValueOrDefault(channel.Frequency, 0) + 1;
                     
-                    // Instant lock for strong signals (>12dB SNR), otherwise require 2 hits
-                    int hitsNeeded = snr > 12 ? 1 : 2;
+                    // Instant lock for strong signals (>20dB SNR), otherwise require 3 hits
+                    int hitsNeeded = snr > 20 ? 1 : 3;
                     
                     if (_channelHits[channel.Frequency] >= hitsNeeded && (bestChannel == null || db > maxDetectedDb))
                     {
