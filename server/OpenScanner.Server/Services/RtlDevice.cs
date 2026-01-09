@@ -527,7 +527,7 @@ public class RtlDevice : BackgroundService
         {
             // WFM: Bypass dsd-fme (it doesn't handle WFM well) and output raw audio from rtl_fm
             // Output is already 48k (outputRate)
-            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
+            cmd = $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
         }
         else
         {
@@ -535,7 +535,7 @@ public class RtlDevice : BackgroundService
             // We match FFmpeg input rate (-ar) to the expected DSD-FME output.
             // Output rate is always 48000 to match WFM and Client expectation.
             // Re-added -s {outputRate} because DSD-FME needs it for raw input
-            cmd = $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | stdbuf -i0 -o0 /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -i - {ffmpegFilter} -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay - -loglevel quiet";
+            cmd = $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | stdbuf -i0 -o0 /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | stdbuf -o0 /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -probesize 32 -analyzeduration 0 -i - {ffmpegFilter} -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
         }
 
         var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
@@ -587,67 +587,50 @@ public class RtlDevice : BackgroundService
             var token = _decodeCts.Token;
             Task.Run(async () => 
             {
-                var readBuffer = new byte[2048];
-                var sendBuffer = new List<byte>(4096);
+                var readBuffer = new byte[4096];
                 var stream = _decoderProcess.StandardOutput.BaseStream;
-                var lastSend = DateTime.UtcNow;
                 bool hadData = false;
 
                 try
                 {
                     while (!token.IsCancellationRequested)
                     {
-                        // Use a timeout to flush small buffers
-                        var readTask = stream.ReadAsync(readBuffer, 0, readBuffer.Length, token);
-                        var delayTask = Task.Delay(200, token); // 200ms flush timeout
+                        int read = await stream.ReadAsync(readBuffer, 0, readBuffer.Length, token);
+                        if (read == 0) break;
                         
-                        var completedTask = await Task.WhenAny(readTask, delayTask);
+                        if (!hadData) { _logger.LogInformation("Decoder: Received first audio bytes"); hadData = true; }
                         
-                        if (completedTask == readTask)
-                        {
-                            int read = await readTask;
-                            if (read == 0) break;
-                            if (!hadData) { _logger.LogInformation("Decoder: Received first audio bytes"); hadData = true; }
-                            for (int i = 0; i < read; i++) sendBuffer.Add(readBuffer[i]);
-                        }
+                        var chunk = new byte[read];
+                        Array.Copy(readBuffer, 0, chunk, 0, read);
+                        
+                        // Analyze for Fire Tone Outs
+                        _toneDetector.ProcessAudio(chunk);
 
-                        // Send if we have enough or if it's been too long
-                        // Increased threshold to 16384 bytes (~170ms) to reduce WebSocket overhead and crackling
-                        if (sendBuffer.Count >= 16384 || (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 200))
+                        lock (_audioLock)
                         {
-                            var chunk = sendBuffer.ToArray();
-                            sendBuffer.Clear();
-                            
-                            // Analyze for Fire Tone Outs
-                            _toneDetector.ProcessAudio(chunk);
+                            // Strict attribution check: If we switched channels, drop this audio packet
+                            if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - channel.Frequency) > 0.001) continue;
 
-                            lock (_audioLock)
+                            OnAudio?.Invoke(chunk);
+
+                            // Update pre-roll
+                            _preRollBuffer.AddLast(chunk);
+                            _preRollSize += chunk.Length;
+                            while (_preRollSize > MaxPreRollBytes)
                             {
-                                // Strict attribution check: If we switched channels, drop this audio packet
-                                if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - channel.Frequency) > 0.001) continue;
-
-                                OnAudio?.Invoke(chunk);
-                                lastSend = DateTime.UtcNow;
-
-                                // Update pre-roll
-                                _preRollBuffer.AddLast(chunk);
-                                _preRollSize += chunk.Length;
-                                while (_preRollSize > MaxPreRollBytes)
+                                var first = _preRollBuffer.First;
+                                if (first != null)
                                 {
-                                    var first = _preRollBuffer.First;
-                                    if (first != null)
-                                    {
-                                        _preRollSize -= first.Value.Length;
-                                        _preRollBuffer.RemoveFirst();
-                                    }
+                                    _preRollSize -= first.Value.Length;
+                                    _preRollBuffer.RemoveFirst();
                                 }
+                            }
 
-                                if (_recordingStream != null)
-                                {
-                                    _recordingStream.Write(chunk, 0, chunk.Length);
-                                    _recordingStream.Flush();
-                                    ResetActivityTimeout(); // Keep recording alive while audio flows
-                                }
+                            if (_recordingStream != null)
+                            {
+                                _recordingStream.Write(chunk, 0, chunk.Length);
+                                _recordingStream.Flush();
+                                ResetActivityTimeout(); // Keep recording alive while audio flows
                             }
                         }
                     }
