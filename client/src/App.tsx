@@ -552,10 +552,17 @@ function App() {
                 if (analyser) {
                     source.connect(analyser);
                     
-                                    // Scheduler to prevent crackling/overlaps
-                                    const currentTime = ctx.currentTime;
-                                    const JITTER_BUFFER = 0.25; // 250ms buffer for stability
+                    // Scheduler to prevent crackling/overlaps
+                    const currentTime = ctx.currentTime;
+                    // Reduced jitter buffer for lower latency (50ms)
+                    const JITTER_BUFFER = 0.05; 
+                    const MAX_DRIFT = 0.5; // Reset if > 500ms ahead
+
                     if (nextStartTime.current < currentTime) {
+                        // Underrun: We fell behind. Resume immediately.
+                        nextStartTime.current = currentTime;
+                    } else if (nextStartTime.current > currentTime + MAX_DRIFT) {
+                        // Drift: We are too far ahead. Reset to tight buffer.
                         nextStartTime.current = currentTime + JITTER_BUFFER;
                     }
                     

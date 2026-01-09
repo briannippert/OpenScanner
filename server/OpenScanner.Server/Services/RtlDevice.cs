@@ -275,8 +275,8 @@ public class RtlDevice : BackgroundService
                 var bytesRead = await baseStream.ReadAsync(buffer, 0, buffer.Length, token);
                 if (bytesRead == 0) break;
 
-                // Rate limit FFT updates (approx 15Hz)
-                if ((DateTime.UtcNow - lastUpdate).TotalMilliseconds < 60) continue;
+                // Rate limit FFT updates (approx 50Hz)
+                if ((DateTime.UtcNow - lastUpdate).TotalMilliseconds < 20) continue;
                 lastUpdate = DateTime.UtcNow;
 
                 // Warm-up: Skip first 500ms of data to let hardware settle
@@ -392,7 +392,11 @@ public class RtlDevice : BackgroundService
                 if (snr > 15 && db > threshold)
                 {
                     _channelHits[channel.Frequency] = _channelHits.GetValueOrDefault(channel.Frequency, 0) + 1;
-                    if (_channelHits[channel.Frequency] >= 3 && (bestChannel == null || db > maxDetectedDb))
+                    
+                    // Instant lock for strong signals (>20dB SNR), otherwise require 3 hits
+                    int hitsNeeded = snr > 20 ? 1 : 3;
+                    
+                    if (_channelHits[channel.Frequency] >= hitsNeeded && (bestChannel == null || db > maxDetectedDb))
                     {
                         bestChannel = channel;
                     }
@@ -434,7 +438,7 @@ public class RtlDevice : BackgroundService
         // Safety timeout
         if (!_manualOverride)
         {
-            RestartSessionTimeout(5000); // 5s to hear something (sync up)
+            RestartSessionTimeout(10000); // 10s to hear something (sync up)
         }
     }
 
@@ -527,7 +531,7 @@ public class RtlDevice : BackgroundService
         {
             // WFM: Bypass dsd-fme (it doesn't handle WFM well) and output raw audio from rtl_fm
             // Output is already 48k (outputRate)
-            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
+            cmd = $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
         }
         else
         {
@@ -535,7 +539,7 @@ public class RtlDevice : BackgroundService
             // We match FFmpeg input rate (-ar) to the expected DSD-FME output.
             // Output rate is always 48000 to match WFM and Client expectation.
             // Re-added -s {outputRate} because DSD-FME needs it for raw input
-            cmd = $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -i - {ffmpegFilter} -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay - -loglevel quiet";
+            cmd = $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | stdbuf -i0 -o0 /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | stdbuf -o0 /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -probesize 32 -analyzeduration 0 -i - {ffmpegFilter} -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
         }
 
         var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
@@ -548,7 +552,7 @@ public class RtlDevice : BackgroundService
         _logger.LogInformation($"Decoder starting ({mode}): {cmd}");
 
         // Delay slightly
-        Task.Delay(300).ContinueWith(_ => 
+        Task.Delay(50).ContinueWith(_ => 
         {
             if (_state.Status == "IDLE") return; // Aborted
 
@@ -587,8 +591,8 @@ public class RtlDevice : BackgroundService
             var token = _decodeCts.Token;
             Task.Run(async () => 
             {
-                var readBuffer = new byte[2048];
-                var sendBuffer = new List<byte>(4096);
+                var readBuffer = new byte[4096]; // Read chunk size
+                var sendBuffer = new List<byte>(8192); // Accumulator
                 var stream = _decoderProcess.StandardOutput.BaseStream;
                 var lastSend = DateTime.UtcNow;
                 bool hadData = false;
@@ -597,26 +601,28 @@ public class RtlDevice : BackgroundService
                 {
                     while (!token.IsCancellationRequested)
                     {
-                        // Use a timeout to flush small buffers
-                        var readTask = stream.ReadAsync(readBuffer, 0, readBuffer.Length, token);
-                        var delayTask = Task.Delay(200, token); // 200ms flush timeout
+                        // 1. Read available data (or wait briefly)
+                        int read = await stream.ReadAsync(readBuffer, 0, readBuffer.Length, token);
+                        if (read == 0) break;
                         
-                        var completedTask = await Task.WhenAny(readTask, delayTask);
+                        if (!hadData) { _logger.LogInformation("Decoder: Received first audio bytes"); hadData = true; }
                         
-                        if (completedTask == readTask)
-                        {
-                            int read = await readTask;
-                            if (read == 0) break;
-                            if (!hadData) { _logger.LogInformation("Decoder: Received first audio bytes"); hadData = true; }
-                            for (int i = 0; i < read; i++) sendBuffer.Add(readBuffer[i]);
-                        }
+                        // 2. Add to accumulator
+                        for (int i = 0; i < read; i++) sendBuffer.Add(readBuffer[i]);
 
-                        // Send if we have enough or if it's been too long
-                        // Increased threshold to 16384 bytes (~170ms) to reduce WebSocket overhead and crackling
-                        if (sendBuffer.Count >= 16384 || (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 200))
+                        // 3. Check if we should send
+                        // Immediate send for first packet to minimize start delay
+                        // Then buffer 4096 bytes (~42ms) to reduce overhead and popping
+                        bool shouldSend = (sendBuffer.Count > 0 && !hadData) || 
+                                          sendBuffer.Count >= 4096 || 
+                                          (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 40);
+
+                        if (shouldSend)
                         {
                             var chunk = sendBuffer.ToArray();
                             sendBuffer.Clear();
+                            lastSend = DateTime.UtcNow;
+                            hadData = true; // Mark that we have sent data
                             
                             // Analyze for Fire Tone Outs
                             _toneDetector.ProcessAudio(chunk);
@@ -627,7 +633,6 @@ public class RtlDevice : BackgroundService
                                 if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - channel.Frequency) > 0.001) continue;
 
                                 OnAudio?.Invoke(chunk);
-                                lastSend = DateTime.UtcNow;
 
                                 // Update pre-roll
                                 _preRollBuffer.AddLast(chunk);
