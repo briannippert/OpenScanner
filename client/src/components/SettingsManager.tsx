@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { 
     Dialog, DialogTitle, DialogContent, DialogActions, 
     Button, List, ListItem, ListItemText, ListItemSecondaryAction, Switch,
-    Box, CircularProgress
+    Box, CircularProgress, Alert, AlertTitle, Link
 } from '@mui/material';
+import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
 
 interface Props {
     open: boolean;
@@ -13,12 +14,14 @@ interface Props {
 const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
     const [settings, setSettings] = useState<Record<string, string>>({});
     const [systemInfo, setSystemInfo] = useState<Record<string, string>>({});
+    const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string, url: string, body?: string } | null>(null);
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
         if (open) {
             fetchSettings();
             fetchSystemInfo();
+            fetchLatestVersion();
         }
     }, [open]);
 
@@ -61,6 +64,37 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
         }
     };
 
+    const fetchLatestVersion = async () => {
+        try {
+            const res = await fetch('https://api.github.com/repos/briannippert/OpenScanner/releases/latest');
+            if (res.ok) {
+                const data = await res.json();
+                setUpdateInfo({
+                    latestVersion: data.tag_name,
+                    url: data.html_url,
+                    body: data.body
+                });
+            }
+        } catch (error) {
+            console.error("Failed to fetch latest version from GitHub", error);
+        }
+    };
+
+    const isNewer = (current: string, latest: string) => {
+        if (!current || !latest) return false;
+        const c = current.split('+')[0].replace(/^v/, '').split('.').map(Number);
+        const l = latest.replace(/^v/, '').split('.').map(Number);
+        for (let i = 0; i < Math.max(c.length, l.length); i++) {
+            const cv = c[i] || 0;
+            const lv = l[i] || 0;
+            if (lv > cv) return true;
+            if (cv > lv) return false;
+        }
+        return false;
+    };
+
+    const updateAvailable = updateInfo && isNewer(systemInfo.Version, updateInfo.latestVersion);
+
     const handleToggle = async (key: string, currentValue: string) => {
         const newValue = currentValue === 'true' ? 'false' : 'true';
         
@@ -99,6 +133,28 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
         <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
             <DialogTitle>System Settings</DialogTitle>
             <DialogContent dividers>
+                {updateAvailable && (
+                    <Alert 
+                        severity="success" 
+                        icon={<SystemUpdateIcon />}
+                        sx={{ mb: 2, border: '1px solid #4caf50' }}
+                        action={
+                            <Button 
+                                color="inherit" 
+                                size="small" 
+                                component={Link} 
+                                href={updateInfo?.url} 
+                                target="_blank"
+                                rel="noopener"
+                            >
+                                VIEW
+                            </Button>
+                        }
+                    >
+                        <AlertTitle>Update Available: {updateInfo?.latestVersion}</AlertTitle>
+                        A newer version of OpenScanner is available on GitHub.
+                    </Alert>
+                )}
                 {loading ? (
                     <Box display="flex" justifyContent="center" p={4}>
                         <CircularProgress />
