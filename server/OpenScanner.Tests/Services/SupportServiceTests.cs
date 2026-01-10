@@ -29,6 +29,22 @@ public class SupportServiceTests
     }
 
     [Fact]
+    public void GetVersionInfo_ReturnsDictionary()
+    {
+        // Arrange
+        var memLogger = new MemoryLoggerProvider();
+        var service = new SupportService(_configMock.Object, memLogger, _dbMock.Object, _radioMock.Object, _gpsMock.Object);
+
+        // Act
+        var info = service.GetVersionInfo();
+
+        // Assert
+        Assert.NotNull(info);
+        // It should at least contain Commit (either hash or Unknown)
+        Assert.True(info.ContainsKey("Commit"));
+    }
+
+    [Fact]
     public async Task CreateSupportPackage_ContainsExpectedFiles()
     {
         // Arrange

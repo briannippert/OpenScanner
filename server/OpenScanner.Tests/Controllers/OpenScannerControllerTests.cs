@@ -12,13 +12,30 @@ public class OpenScannerControllerTests
 {
     private readonly Mock<IDatabase> _dbMock;
     private readonly Mock<IRadioSource> _radioMock;
+    private readonly Mock<ISupportService> _supportMock;
     private readonly OpenScannerController _controller;
 
     public OpenScannerControllerTests()
     {
         _dbMock = new Mock<IDatabase>();
         _radioMock = new Mock<IRadioSource>();
-        _controller = new OpenScannerController(_dbMock.Object, _radioMock.Object);
+        _supportMock = new Mock<ISupportService>();
+        _controller = new OpenScannerController(_dbMock.Object, _radioMock.Object, _supportMock.Object);
+    }
+
+    [Fact]
+    public void GetSystemInfo_ReturnsVersionInfo()
+    {
+        // Arrange
+        var info = new Dictionary<string, string> { { "Commit", "abc" } };
+        _supportMock.Setup(s => s.GetVersionInfo()).Returns(info);
+
+        // Act
+        var result = _controller.GetSystemInfo() as OkObjectResult;
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(info, result.Value);
     }
 
     [Fact]

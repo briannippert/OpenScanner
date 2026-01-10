@@ -32,7 +32,7 @@ else
     builder.Services.AddHostedService(sp => (RtlDevice)sp.GetRequiredService<IRadioSource>());
 }
 
-builder.Services.AddSingleton<SupportService>();
+builder.Services.AddSingleton<ISupportService, SupportService>();
 builder.Services.AddSingleton<WebSocketBroadcaster>();
 builder.Services.AddCors();
 builder.Services.AddEndpointsApiExplorer();
