@@ -1,5 +1,6 @@
 using OpenScanner.Server;
 using OpenScanner.Server.Models;
+using OpenScanner.Server.Interfaces;
 using Xunit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;

@@ -124,7 +124,9 @@ function App() {
         console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
       });
     } else {
-      document.exitFullscreen();
+      document.exitFullscreen().catch(err => {
+        console.error(`Error attempting to exit full-screen mode: ${err.message} (${err.name})`);
+      });
     }
   };
 
@@ -181,7 +183,11 @@ function App() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (wakeLock.current) wakeLock.current.release();
+      if (wakeLock.current) {
+        wakeLock.current.release().catch(err => {
+          console.warn('Failed to release wake lock:', err);
+        });
+      }
     };
   }, [scannerState.status]);
 
@@ -483,8 +489,8 @@ function App() {
                 } else if (message.type === 'ERROR') {
                   setErrorMsg(message.payload);
                 }
-            } catch {
-                console.warn('Unknown control message:', event.data);
+            } catch (err) {
+                console.warn('Unknown control message or parse error:', event.data, err);
             }
         };
     };

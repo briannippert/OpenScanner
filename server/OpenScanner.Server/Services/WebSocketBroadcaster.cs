@@ -4,12 +4,16 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using OpenScanner.Server.Models;
+using OpenScanner.Server.Interfaces;
 
 namespace OpenScanner.Server.Services;
 
+/// <summary>
+/// Service that manages WebSocket connections and broadcasts real-time updates to clients.
+/// </summary>
 public class WebSocketBroadcaster
 {
-    private readonly RtlDevice _radio;
+    private readonly IRadioSource _radio;
     private readonly ILogger<WebSocketBroadcaster> _logger;
     private readonly ConcurrentDictionary<string, SocketSession> _controlSessions = new();
     private readonly ConcurrentDictionary<string, SocketSession> _audioSessions = new();
@@ -26,7 +30,12 @@ public class WebSocketBroadcaster
         }
     }
 
-    public WebSocketBroadcaster(RtlDevice radio, ILogger<WebSocketBroadcaster> logger)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="WebSocketBroadcaster"/> class.
+    /// </summary>
+    /// <param name="radio">The radio source interface.</param>
+    /// <param name="logger">The logger instance.</param>
+    public WebSocketBroadcaster(IRadioSource radio, ILogger<WebSocketBroadcaster> logger)
     {
         _radio = radio;
         _logger = logger;
@@ -35,6 +44,10 @@ public class WebSocketBroadcaster
         _radio.OnAudio += BroadcastAudio;
     }
 
+    /// <summary>
+    /// Handles a new WebSocket connection for control messages (state updates, logs).
+    /// </summary>
+    /// <param name="socket">The WebSocket connection.</param>
     public async Task HandleControlConnection(WebSocket socket)
     {
         var id = Guid.NewGuid().ToString();
@@ -49,6 +62,10 @@ public class WebSocketBroadcaster
         await HandleSessionLoop(socket, id, _controlSessions);
     }
 
+    /// <summary>
+    /// Handles a new WebSocket connection for streaming audio data.
+    /// </summary>
+    /// <param name="socket">The WebSocket connection.</param>
     public async Task HandleAudioConnection(WebSocket socket)
     {
         var id = Guid.NewGuid().ToString();
@@ -73,9 +90,9 @@ public class WebSocketBroadcaster
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignored
+            _logger.LogDebug(ex, "WebSocket session loop error for {Id}", id);
         }
         finally
         {
@@ -139,7 +156,10 @@ public class WebSocketBroadcaster
                     await session.Socket.SendAsync(segment, WebSocketMessageType.Text, true, CancellationToken.None);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to send JSON to a WebSocket session");
+            }
             finally
             {
                 session.Lock.Release();
@@ -162,7 +182,10 @@ public class WebSocketBroadcaster
                     await session.Socket.SendAsync(segment, WebSocketMessageType.Binary, true, CancellationToken.None);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to send binary to a WebSocket session");
+            }
             finally
             {
                 session.Lock.Release();

@@ -1,8 +1,12 @@
 using System.Numerics;
 using OpenScanner.Server.Models;
+using OpenScanner.Server.Interfaces;
 
 namespace OpenScanner.Server.Services;
 
+/// <summary>
+/// Service for detecting Fire Tone Out (FTO) 2-tone paging sequences in audio streams.
+/// </summary>
 public class ToneDetector
 {
     private readonly IDatabase _db;
@@ -15,8 +19,16 @@ public class ToneDetector
     private DateTime _toneADetectedTime = DateTime.MinValue;
     private double _lastToneAFreq;
 
+    /// <summary>
+    /// Event triggered when a complete 2-tone sequence is detected.
+    /// </summary>
     public event Action<FireToneSet>? OnToneDetected;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ToneDetector"/> class.
+    /// </summary>
+    /// <param name="db">Database interface.</param>
+    /// <param name="logger">Logger instance.</param>
     public ToneDetector(IDatabase db, ILogger<ToneDetector> logger)
     {
         _db = db;
@@ -24,6 +36,9 @@ public class ToneDetector
         ReloadTones();
     }
 
+    /// <summary>
+    /// Reloads the list of monitored tone sets from the database.
+    /// </summary>
     public void ReloadTones()
     {
         Task.Run(async () => {
@@ -32,6 +47,10 @@ public class ToneDetector
         });
     }
 
+    /// <summary>
+    /// Processes a chunk of PCM audio data to check for tone sequences.
+    /// </summary>
+    /// <param name="pcmData">16-bit PCM audio data.</param>
     public void ProcessAudio(byte[] pcmData)
     {
         if (_activeToneSets.Count == 0) return;
@@ -106,7 +125,13 @@ public class ToneDetector
 
         double magnitude = Math.Sqrt(q1 * q1 + q2 * q2 - q1 * q2 * coeff);
         
-        // Threshold check (empirical)
-        return magnitude > 1.5; 
+        // Threshold check (relative to signal strength/length)
+        // Magnitude is roughly proportional to N * Amplitude / 2
+        // We want a robust threshold.
+        double threshold = samples.Length * 0.1; // Require avg amplitude > 0.2 approx?
+        
+        // _logger.LogInformation($"Freq {targetFreq}: Mag {magnitude:F1} (Thresh {threshold:F1})");
+
+        return magnitude > threshold; 
     }
 }

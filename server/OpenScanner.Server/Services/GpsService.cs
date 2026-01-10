@@ -5,19 +5,33 @@ using OpenScanner.Server.Models;
 
 namespace OpenScanner.Server.Services;
 
+/// <summary>
+/// Background service that connects to gpsd to provide real-time GPS location data.
+/// </summary>
 public class GpsService : BackgroundService
 {
     private readonly ILogger<GpsService> _logger;
     private GpsData? _lastGps;
     private DateTime _lastUpdate = DateTime.MinValue;
 
+    /// <summary>
+    /// Event triggered when a new GPS location update is received.
+    /// </summary>
     public event Action<GpsData>? OnGpsUpdate;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="GpsService"/> class.
+    /// </summary>
+    /// <param name="logger">The logger instance.</param>
     public GpsService(ILogger<GpsService> logger)
     {
         _logger = logger;
     }
 
+    /// <summary>
+    /// Retrieves the last known GPS location.
+    /// </summary>
+    /// <returns>The last valid GPS data, or null if stale (>10s) or unavailable.</returns>
     public GpsData? GetLastLocation() 
     {
         // If data is older than 10 seconds, consider it stale
@@ -25,6 +39,10 @@ public class GpsService : BackgroundService
         return _lastGps;
     }
 
+    /// <summary>
+    /// Executes the long-running task to monitor gpsd.
+    /// </summary>
+    /// <param name="stoppingToken">Cancellation token.</param>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -67,15 +85,22 @@ public class GpsService : BackgroundService
                             }
                         }
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
-                        // Ignore parse errors
+                        _logger.LogDebug(ex, "GPSD JSON parse error");
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("GPSD Connection failed (retrying in 5s): " + ex.Message);
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    _logger.LogDebug("GPSD connection task cancelled");
+                }
+                else
+                {
+                    _logger.LogWarning("GPSD Connection failed (retrying in 5s): " + ex.Message);
+                }
                 await Task.Delay(5000, stoppingToken);
             }
         }

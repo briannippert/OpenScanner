@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using OpenScanner.Server.Models;
 using OpenScanner.Server.Services;
+using OpenScanner.Server.Interfaces;
 using System.Text.Json;
 
 namespace OpenScanner.Server.Controllers;
@@ -14,9 +15,14 @@ namespace OpenScanner.Server.Controllers;
 public class OpenScannerController : ControllerBase
 {
     private readonly IDatabase _db;
-    private readonly RtlDevice _radio;
+    private readonly IRadioSource _radio;
 
-    public OpenScannerController(IDatabase db, RtlDevice radio)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="OpenScannerController"/> class.
+    /// </summary>
+    /// <param name="db">The database interface.</param>
+    /// <param name="radio">The radio source interface.</param>
+    public OpenScannerController(IDatabase db, IRadioSource radio)
     {
         _db = db;
         _radio = radio;
@@ -293,6 +299,15 @@ public class OpenScannerController : ControllerBase
                     _radio.SetSquelch(v.GetDouble());
                  else if (body.TryGetProperty("value", out var vs) && double.TryParse(vs.GetString(), out var vd))
                     _radio.SetSquelch(vd);
+                break;
+            case "start_dump":
+                if (body.TryGetProperty("label", out var labelProp))
+                    _radio.StartDumping(labelProp.GetString() ?? "sample");
+                else
+                    _radio.StartDumping("sample");
+                break;
+            case "stop_dump":
+                _radio.StopDumping();
                 break;
             default:
                 return BadRequest($"Unknown action: {action}");
