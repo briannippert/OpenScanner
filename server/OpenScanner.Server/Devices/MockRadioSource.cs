@@ -58,16 +58,31 @@ public class MockRadioSource : BackgroundService, IRadioSource
     {
         try
         {
-            var path = Path.Combine(Directory.GetCurrentDirectory(), "scenario.json");
-            if (File.Exists(path))
+            var searchPaths = new[]
+            {
+                // 1. Current directory (Direct/Deployment)
+                Path.Combine(Directory.GetCurrentDirectory(), "scenario.json"),
+                // 2. TestData folder (Test environment)
+                Path.Combine(Directory.GetCurrentDirectory(), "TestData", "scenario.json"),
+                // 3. Relative to Test Project (Development)
+                Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "../OpenScanner.Tests/TestData", "scenario.json"))
+            };
+
+            string? path = searchPaths.FirstOrDefault(File.Exists);
+
+            if (path != null)
             {
                 var json = File.ReadAllText(path);
                 var scenario = JsonSerializer.Deserialize<ScenarioConfig>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 if (scenario?.Events != null)
                 {
                     _scenarioEvents = scenario.Events.OrderBy(e => e.Time).ToList();
-                    _logger.LogInformation($"[Mock] Loaded {_scenarioEvents.Count} events from scenario.json");
+                    _logger.LogInformation($"[Mock] Loaded {_scenarioEvents.Count} events from {path}");
                 }
+            }
+            else
+            {
+                _logger.LogWarning("[Mock] No scenario.json found in searched paths.");
             }
         }
         catch (Exception ex)
