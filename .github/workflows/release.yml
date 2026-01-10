@@ -32,55 +32,11 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: client/package-lock.json
-
-      - name: Build Frontend
-        working-directory: ./client
-        run: |
-          npm ci
-          npm run build
-
-      - name: Publish Backend (Generic)
-        run: |
-          dotnet publish server/OpenScanner.Server/OpenScanner.Server.csproj -c Release -o ./publish/generic
-
-      - name: Publish Backend (Raspberry Pi ARM64)
-        run: |
-          dotnet publish server/OpenScanner.Server/OpenScanner.Server.csproj -c Release -r linux-arm64 --self-contained false -o ./publish/linux-arm64
-
-      - name: Package Release
-        run: |
-          mkdir -p dist
-          
-          # Create Generic Package
-          mkdir -p temp_generic/server
-          mkdir -p temp_generic/client
-          cp -r publish/generic/* temp_generic/server/
-          cp -r client/dist/* temp_generic/client/
-          cp install_service.sh uninstall_service.sh temp_generic/
-          cd temp_generic && tar -czvf ../openscanner-generic.tar.gz . && cd ..
-          
-          # Create Pi ARM64 Package
-          mkdir -p temp_arm64/server
-          mkdir -p temp_arm64/client
-          cp -r publish/linux-arm64/* temp_arm64/server/
-          cp -r client/dist/* temp_arm64/client/
-          cp install_service.sh uninstall_service.sh temp_arm64/
-          cd temp_arm64 && tar -czvf ../openscanner-linux-arm64.tar.gz . && cd ..
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.nbgv.outputs.TAG }}
           name: Release ${{ steps.nbgv.outputs.VERSION }}
-          files: |
-            openscanner-generic.tar.gz
-            openscanner-linux-arm64.tar.gz
           generate_release_notes: true
           draft: false
           prerelease: false
