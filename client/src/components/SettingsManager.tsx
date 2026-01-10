@@ -12,11 +12,13 @@ interface Props {
 
 const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
     const [settings, setSettings] = useState<Record<string, string>>({});
+    const [systemInfo, setSystemInfo] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
         if (open) {
             fetchSettings();
+            fetchSystemInfo();
         }
     }, [open]);
 
@@ -38,6 +40,24 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
             console.error("Failed to fetch settings", error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchSystemInfo = async () => {
+        try {
+            const isDev = window.location.port === '5173';
+            const port = isDev ? '5212' : window.location.port || '80';
+            const protocol = window.location.protocol;
+            const backendHost = window.location.hostname;
+            const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
+            
+            const res = await fetch(`${protocol}//${backendHost}${portSuffix}/api/system/info`);
+            if (res.ok) {
+                const data = await res.json();
+                setSystemInfo(data);
+            }
+        } catch (error) {
+            console.error("Failed to fetch system info", error);
         }
     };
 
@@ -100,6 +120,23 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
                                 </ListItemSecondaryAction>
                             </ListItem>
                         ))}
+                        {systemInfo.Commit && (
+                            <ListItem>
+                                <ListItemText 
+                                    primary="Git Commit"
+                                    secondary={systemInfo.Commit}
+                                    secondaryTypographyProps={{ style: { fontFamily: 'monospace', fontSize: '0.75rem' } }}
+                                />
+                            </ListItem>
+                        )}
+                        {systemInfo.Version && (
+                            <ListItem>
+                                <ListItemText 
+                                    primary="Software Version"
+                                    secondary={systemInfo.Version}
+                                />
+                            </ListItem>
+                        )}
                     </List>
                 )}
             </DialogContent>

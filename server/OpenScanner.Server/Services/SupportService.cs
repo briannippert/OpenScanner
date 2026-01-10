@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.IO.Compression;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -64,7 +65,7 @@ public class MemoryLoggerProvider : ILoggerProvider
 /// <summary>
 /// Service responsible for gathering system diagnostics and creating support packages.
 /// </summary>
-public class SupportService
+public class SupportService : ISupportService
 {
     private readonly IConfiguration _configuration;
     private readonly MemoryLoggerProvider _loggerProvider;
@@ -82,6 +83,64 @@ public class SupportService
         _db = db;
         _radio = radio;
         _gps = gps;
+    }
+
+    /// <inheritdoc />
+    public Dictionary<string, string> GetVersionInfo()
+    {
+        var info = new Dictionary<string, string>();
+        
+        try
+        {
+            var assembly = Assembly.GetExecutingAssembly();
+            var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            
+            if (!string.IsNullOrEmpty(version))
+            {
+                var plusIndex = version.IndexOf('+');
+                if (plusIndex >= 0)
+                {
+                    info["Commit"] = version.Substring(plusIndex + 1);
+                    info["Version"] = version.Substring(0, plusIndex);
+                }
+                else
+                {
+                    info["Version"] = version;
+                    info["Commit"] = "Unknown";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _loggerProvider.CreateLogger(nameof(SupportService)).LogDebug(ex, "Failed to get version info");
+        }
+
+        if (!info.ContainsKey("Commit") || info["Commit"] == "Unknown")
+        {
+            // Try to read from git directly if we are in a dev environment
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo("git", "rev-parse HEAD")
+                {
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using var process = System.Diagnostics.Process.Start(psi);
+                if (process != null)
+                {
+                    var output = process.StandardOutput.ReadToEnd().Trim();
+                    process.WaitForExit();
+                    if (process.ExitCode == 0 && !string.IsNullOrEmpty(output))
+                    {
+                        info["Commit"] = output;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        return info;
     }
 
     /// <summary>

@@ -16,16 +16,30 @@ public class OpenScannerController : ControllerBase
 {
     private readonly IDatabase _db;
     private readonly IRadioSource _radio;
+    private readonly ISupportService _support;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OpenScannerController"/> class.
     /// </summary>
     /// <param name="db">The database interface.</param>
     /// <param name="radio">The radio source interface.</param>
-    public OpenScannerController(IDatabase db, IRadioSource radio)
+    /// <param name="support">The support service.</param>
+    public OpenScannerController(IDatabase db, IRadioSource radio, ISupportService support)
     {
         _db = db;
         _radio = radio;
+        _support = support;
+    }
+
+    /// <summary>
+    /// Retrieves system information including version and git commit.
+    /// </summary>
+    /// <returns>System information dictionary.</returns>
+    [HttpGet("system/info")]
+    [ProducesResponseType(typeof(Dictionary<string, string>), StatusCodes.Status200OK)]
+    public IActionResult GetSystemInfo()
+    {
+        return Ok(_support.GetVersionInfo());
     }
 
     /// <summary>

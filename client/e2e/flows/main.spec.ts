@@ -72,6 +72,10 @@ test.beforeEach(async ({ page }) => {
     await route.fulfill({ json: ["2024"] });
   });
 
+  await page.route('**/api/system/info', async route => {
+    await route.fulfill({ json: { Commit: "test-commit-hash", Version: "1.0.0" } });
+  });
+
   await page.route('**/api/control', async route => {
      await route.fulfill({ status: 200, body: 'OK' });
   });
@@ -185,5 +189,18 @@ test.describe('Transmission Log', () => {
     const searchResultList = page.locator('.MuiBox-root .MuiList-root').filter({ hasText: 'Fire Dispatch' });
     await expect(searchResultList.getByText('Police Dispatch')).not.toBeVisible();
     await expect(searchResultList.getByText('Fire Dispatch')).toBeVisible();
+  });
+});
+
+test.describe('Settings', () => {
+  test('displays git commit hash', async ({ page }) => {
+    await page.goto('/');
+    
+    // Open Settings
+    await page.getByRole('button', { name: 'Settings' }).click();
+    
+    // Verify Git Commit is visible
+    await expect(page.getByText('Git Commit')).toBeVisible();
+    await expect(page.getByText('test-commit-hash')).toBeVisible();
   });
 });

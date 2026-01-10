@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using OpenScanner.Server.Services;
+using OpenScanner.Server.Interfaces;
 
 namespace OpenScanner.Server.Controllers;
 
@@ -10,7 +11,7 @@ namespace OpenScanner.Server.Controllers;
 [Route("api/support")]
 public class SupportController : ControllerBase
 {
-    private readonly SupportService _supportService;
+    private readonly ISupportService _supportService;
     private readonly ILogger<SupportController> _logger;
 
     /// <summary>
@@ -18,7 +19,7 @@ public class SupportController : ControllerBase
     /// </summary>
     /// <param name="supportService">The support service.</param>
     /// <param name="logger">The logger instance.</param>
-    public SupportController(SupportService supportService, ILogger<SupportController> logger)
+    public SupportController(ISupportService supportService, ILogger<SupportController> logger)
     {
         _supportService = supportService;
         _logger = logger;
