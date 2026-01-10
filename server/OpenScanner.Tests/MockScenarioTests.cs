@@ -113,4 +113,49 @@ public class MockScenarioTests
         cts.Cancel();
         try { await task; } catch (OperationCanceledException) {}
     }
+
+    [Fact]
+    public async Task Scenario_PlaysGoldenSample_Correctly()
+    {
+        // Arrange
+        var events = new List<ScenarioEvent>
+        {
+            new ScenarioEvent
+            {
+                Time = 0.5,
+                Frequency = 155.000,
+                AudioFile = "police_48k.wav",
+                Duration = 4.8,
+                SourceId = 999,
+                TargetId = 888
+            }
+        };
+        _source.SetScenario(events);
+
+        var audioChunks = 0;
+        _source.OnAudio += (data) => audioChunks++;
+
+        // Act
+        var cts = new CancellationTokenSource();
+        var task = _source.StartAsync(cts.Token);
+        
+        await Task.Delay(100); // Allow start
+        _source.HoldFrequency(155.000); // Lock on immediately
+
+        // Wait for playback (File is ~4.8s)
+        // We wait 6s to be safe
+        await Task.Delay(6000);
+
+        // Assert
+        Assert.True(audioChunks > 50, $"Should have received audio chunks (Got {audioChunks})");
+        
+        var state = _source.GetState();
+        // Since we are holding, it should return to MONITORING after playback finishes
+        // However, MockRadioSource logic says:
+        // "Signal lost (Hold) ... UpdateState(_state with { Status = "MONITORING" });"
+        Assert.Equal("MONITORING", state.Status);
+
+        cts.Cancel();
+        try { await task; } catch (OperationCanceledException) {}
+    }
 }
