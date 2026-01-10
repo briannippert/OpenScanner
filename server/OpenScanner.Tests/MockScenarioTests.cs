@@ -142,17 +142,13 @@ public class MockScenarioTests
         await Task.Delay(100); // Allow start
         _source.HoldFrequency(155.000); // Lock on immediately
 
-        // Wait for playback (File is ~4.8s)
-        // We wait 6s to be safe
+        // Wait for event start time (0.5s) + playback (File is ~4.8s) + buffer
         await Task.Delay(6000);
 
         // Assert
         Assert.True(audioChunks > 50, $"Should have received audio chunks (Got {audioChunks})");
         
         var state = _source.GetState();
-        // Since we are holding, it should return to MONITORING after playback finishes
-        // However, MockRadioSource logic says:
-        // "Signal lost (Hold) ... UpdateState(_state with { Status = "MONITORING" });"
         Assert.Equal("MONITORING", state.Status);
 
         cts.Cancel();

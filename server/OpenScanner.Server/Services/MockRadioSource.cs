@@ -216,9 +216,9 @@ public class MockRadioSource : BackgroundService, IRadioSource
         var searchPaths = new[]
         {
             // 1. Relative to Test Project (Development/Server run)
-            Path.Combine(Directory.GetCurrentDirectory(), "../OpenScanner.Tests/TestData", audioFile),
+            Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "../OpenScanner.Tests/TestData", audioFile)),
             // 2. Relative to Execution Directory (Test Runner / Copied Output)
-            Path.Combine(Directory.GetCurrentDirectory(), "TestData", audioFile),
+            Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "TestData", audioFile)),
             // 3. Absolute/Direct path
             audioFile
         };
@@ -238,6 +238,8 @@ public class MockRadioSource : BackgroundService, IRadioSource
             _logger.LogWarning($"[Mock] Audio file not found: {audioFile}. Checked: {string.Join(", ", searchPaths)}");
             return;
         }
+
+        _logger.LogInformation($"[Mock] Playing audio from: {path}");
 
         try
         {
