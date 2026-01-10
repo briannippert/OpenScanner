@@ -63,6 +63,12 @@ public class MockRadioSource : BackgroundService, IRadioSource
         }
     }
 
+    public void SetScenario(List<ScenarioEvent> events)
+    {
+        _scenarioEvents = events.OrderBy(e => e.Time).ToList();
+        _logger.LogInformation($"[Mock] Scenario updated manually with {_scenarioEvents.Count} events.");
+    }
+
     public ScannerState GetState() => _state;
 
     public void ReloadChannels()
@@ -207,10 +213,29 @@ public class MockRadioSource : BackgroundService, IRadioSource
     {
         if (string.IsNullOrEmpty(audioFile)) return;
 
-        var path = Path.Combine(Directory.GetCurrentDirectory(), "../OpenScanner.Tests/TestData", audioFile);
-        if (!File.Exists(path))
+        var searchPaths = new[]
         {
-            _logger.LogWarning($"[Mock] Audio file not found: {path}");
+            // 1. Relative to Test Project (Development/Server run)
+            Path.Combine(Directory.GetCurrentDirectory(), "../OpenScanner.Tests/TestData", audioFile),
+            // 2. Relative to Execution Directory (Test Runner / Copied Output)
+            Path.Combine(Directory.GetCurrentDirectory(), "TestData", audioFile),
+            // 3. Absolute/Direct path
+            audioFile
+        };
+
+        string? path = null;
+        foreach (var p in searchPaths)
+        {
+            if (File.Exists(p))
+            {
+                path = p;
+                break;
+            }
+        }
+
+        if (path == null)
+        {
+            _logger.LogWarning($"[Mock] Audio file not found: {audioFile}. Checked: {string.Join(", ", searchPaths)}");
             return;
         }
 
