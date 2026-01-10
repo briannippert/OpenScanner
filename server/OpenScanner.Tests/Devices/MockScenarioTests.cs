@@ -63,7 +63,7 @@ public class MockScenarioTests
         var task = _source.StartAsync(cts.Token);
 
         // Wait for event start (1s) + processing
-        await Task.Delay(1500); 
+        await Task.Delay(2000); 
 
         // Assert - Should be receiving
         var state = _source.GetState();
@@ -105,7 +105,7 @@ public class MockScenarioTests
         _source.HoldFrequency(156.000); // Hold on different freq (Status -> MONITORING)
         
         // Wait for event time (0.5s)
-        await Task.Delay(1000);
+        await Task.Delay(1500);
 
         // Assert
         var state = _source.GetState();

@@ -175,7 +175,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
                 CheckForActiveEvents();
             }
 
-            await Task.Delay(500, stoppingToken);
+            await Task.Delay(100, stoppingToken);
         }
     }
 
