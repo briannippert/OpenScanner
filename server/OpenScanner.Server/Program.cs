@@ -1,9 +1,6 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.FileProviders;
 using OpenScanner.Server;
-using OpenScanner.Server.Models;
 using OpenScanner.Server.Services;
-using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,8 +16,19 @@ builder.Services.AddSingleton<IDatabase, Database>();
 builder.Services.AddSingleton<GpsService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GpsService>());
 builder.Services.AddSingleton<ToneDetector>();
-builder.Services.AddSingleton<RtlDevice>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<RtlDevice>());
+
+var radioProvider = builder.Configuration["Radio:Provider"] ?? "RTL-SDR";
+if (radioProvider == "Mock")
+{
+    builder.Services.AddSingleton<IRadioSource, MockRadioSource>();
+    builder.Services.AddHostedService(sp => (MockRadioSource)sp.GetRequiredService<IRadioSource>());
+}
+else
+{
+    builder.Services.AddSingleton<IRadioSource, RtlDevice>();
+    builder.Services.AddHostedService(sp => (RtlDevice)sp.GetRequiredService<IRadioSource>());
+}
+
 builder.Services.AddSingleton<SupportService>();
 builder.Services.AddSingleton<WebSocketBroadcaster>();
 builder.Services.AddCors();

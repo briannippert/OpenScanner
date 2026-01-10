@@ -9,7 +9,7 @@ namespace OpenScanner.Server.Services;
 
 public class WebSocketBroadcaster
 {
-    private readonly RtlDevice _radio;
+    private readonly IRadioSource _radio;
     private readonly ILogger<WebSocketBroadcaster> _logger;
     private readonly ConcurrentDictionary<string, SocketSession> _controlSessions = new();
     private readonly ConcurrentDictionary<string, SocketSession> _audioSessions = new();
@@ -26,7 +26,7 @@ public class WebSocketBroadcaster
         }
     }
 
-    public WebSocketBroadcaster(RtlDevice radio, ILogger<WebSocketBroadcaster> logger)
+    public WebSocketBroadcaster(IRadioSource radio, ILogger<WebSocketBroadcaster> logger)
     {
         _radio = radio;
         _logger = logger;

@@ -56,10 +56,10 @@ public class SupportService
     private readonly IConfiguration _configuration;
     private readonly MemoryLoggerProvider _loggerProvider;
     private readonly IDatabase _db;
-    private readonly RtlDevice _radio;
+    private readonly IRadioSource _radio;
     private readonly GpsService _gps;
 
-    public SupportService(IConfiguration configuration, ILoggerProvider loggerProvider, IDatabase db, RtlDevice radio, GpsService gps)
+    public SupportService(IConfiguration configuration, ILoggerProvider loggerProvider, IDatabase db, IRadioSource radio, GpsService gps)
     {
         _configuration = configuration;
         _loggerProvider = (MemoryLoggerProvider)loggerProvider;

@@ -1,12 +1,10 @@
 using System.Diagnostics;
 using System.Numerics;
-using System.Text;
-using FftSharp;
 using OpenScanner.Server.Models;
 
 namespace OpenScanner.Server.Services;
 
-public class RtlDevice : BackgroundService
+public class RtlDevice : BackgroundService, IRadioSource
 {
     private readonly IDatabase _db;
     private readonly ILogger<RtlDevice> _logger;
@@ -39,6 +37,9 @@ public class RtlDevice : BackgroundService
     private int? _currentSourceID;
     private int? _currentTargetID;
     private DateTime _lastActivityReset = DateTime.MinValue;
+
+    private FileStream? _iqDumpStream;
+    private string? _iqDumpPath;
 
     // Pre-roll buffer to capture start of transmissions
     private readonly LinkedList<byte[]> _preRollBuffer = new();
@@ -174,6 +175,27 @@ public class RtlDevice : BackgroundService
         Task.Delay(500).ContinueWith(_ => StartScanning());
     }
 
+    public void StartDumping(string label)
+    {
+        var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../data/samples");
+        if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
+        
+        _iqDumpPath = Path.Combine(dataDir, $"{label}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.iq");
+        _iqDumpStream = new FileStream(_iqDumpPath, FileMode.Create);
+        _logger.LogInformation($"Started IQ dumping to {_iqDumpPath}");
+    }
+
+    public void StopDumping()
+    {
+        if (_iqDumpStream != null)
+        {
+            _iqDumpStream.Close();
+            _iqDumpStream = null;
+            _logger.LogInformation($"Stopped IQ dumping to {_iqDumpPath}");
+            _iqDumpPath = null;
+        }
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await Task.Delay(1000, stoppingToken);
@@ -281,6 +303,11 @@ public class RtlDevice : BackgroundService
 
                 // Warm-up: Skip first 500ms of data to let hardware settle
                 if ((DateTime.UtcNow - _scanStartTime).TotalMilliseconds < 500) continue;
+
+                if (_iqDumpStream != null)
+                {
+                    await _iqDumpStream.WriteAsync(buffer, 0, bytesRead, token);
+                }
 
                 ProcessSamples(buffer, bytesRead, centerFreqMhz, sampleRate);
             }
