@@ -68,8 +68,24 @@ fi
 log_step "Checking Environment..."
 
 # --- Check .NET SDK ---
+INSTALL_DOTNET=false
 if ! command -v dotnet &> /dev/null; then
-    log_info ".NET SDK not found. Attempting to install..."
+    log_info ".NET SDK not found."
+    INSTALL_DOTNET=true
+else
+    DOTNET_VER=$(dotnet --version)
+    # Check if major version is less than 10
+    MAJOR_VER=$(echo "$DOTNET_VER" | cut -d. -f1)
+    if [ "$MAJOR_VER" -lt 10 ]; then
+        log_info "Found .NET SDK $DOTNET_VER, but .NET 10 is required."
+        INSTALL_DOTNET=true
+    else
+        log_success "Found .NET SDK: $DOTNET_VER"
+    fi
+fi
+
+if [ "$INSTALL_DOTNET" = true ]; then
+    log_info "Attempting to install .NET 10 SDK..."
     
     # Simple check for apt/debian based systems
     if command -v apt-get &> /dev/null; then
@@ -78,15 +94,12 @@ if ! command -v dotnet &> /dev/null; then
         dpkg -i packages-microsoft-prod.deb
         rm packages-microsoft-prod.deb
         
-        apt-get update -qq
-        apt-get install -y -qq dotnet-sdk-8.0
-        log_success ".NET SDK installed."
+        apt-get update -qq || log_warn "apt-get update encountered errors. Attempting to continue..."
+        apt-get install -y -qq dotnet-sdk-10.0
+        log_success ".NET 10 SDK installed."
     else
-         log_warn "Could not install .NET SDK automatically. Please install .NET 8.0 SDK manually."
+         log_warn "Could not install .NET SDK automatically. Please install .NET 10 SDK manually."
     fi
-else
-    DOTNET_VER=$(dotnet --version)
-    log_success "Found .NET SDK: $DOTNET_VER"
 fi
 
 # --- Check Node.js (For Client Build) ---
@@ -122,7 +135,7 @@ fi
 # ----------------------------------------------------------------
 log_step "Installing System Libraries..."
 
-apt-get update -qq
+apt-get update -qq || log_warn "apt-get update encountered errors. Attempting to continue..."
 apt-get install -y -qq git cmake build-essential \
     libitpp-dev libsndfile1-dev libusb-1.0-0-dev libncurses-dev \
     rtl-sdr librtlsdr-dev libcodec2-dev libpulse-dev libasound2-dev \
