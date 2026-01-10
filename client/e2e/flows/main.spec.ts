@@ -22,10 +22,10 @@ test.beforeEach(async ({ page }) => {
       url: string;
       readyState: number = 1; // OPEN
       static readonly OPEN = 1;
-      onopen: ((ev: Event) => any) | null = null;
-      onmessage: ((ev: MessageEvent) => any) | null = null;
-      onclose: ((ev: CloseEvent) => any) | null = null;
-      onerror: ((ev: Event) => any) | null = null;
+      onopen: ((ev: Event) => void) | null = null;
+      onmessage: ((ev: MessageEvent) => void) | null = null;
+      onclose: ((ev: CloseEvent) => void) | null = null;
+      onerror: ((ev: Event) => void) | null = null;
 
       constructor(url: string) {
         super();
@@ -51,6 +51,7 @@ test.beforeEach(async ({ page }) => {
       send(data: string) { console.log('WS Send:', data); }
       close() { this.readyState = 3; }
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).WebSocket = MockWebSocket;
   });
 
