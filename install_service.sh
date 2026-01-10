@@ -78,7 +78,7 @@ if ! command -v dotnet &> /dev/null; then
         dpkg -i packages-microsoft-prod.deb
         rm packages-microsoft-prod.deb
         
-        apt-get update -qq
+        apt-get update -qq || log_warn "apt-get update encountered errors. Attempting to continue..."
         apt-get install -y -qq dotnet-sdk-8.0
         log_success ".NET SDK installed."
     else
@@ -122,7 +122,7 @@ fi
 # ----------------------------------------------------------------
 log_step "Installing System Libraries..."
 
-apt-get update -qq
+apt-get update -qq || log_warn "apt-get update encountered errors. Attempting to continue..."
 apt-get install -y -qq git cmake build-essential \
     libitpp-dev libsndfile1-dev libusb-1.0-0-dev libncurses-dev \
     rtl-sdr librtlsdr-dev libcodec2-dev libpulse-dev libasound2-dev \
