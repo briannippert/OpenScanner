@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip } from '@mui/material';
+import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
 import ChannelManager from './components/ChannelManager';
 import FireToneManager from './components/FireToneManager';
@@ -20,6 +20,7 @@ import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import SettingsIcon from '@mui/icons-material/Settings';
+import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import type { ScannerState, Channel, CallLog, FireToneSet } from './types';
 
 const darkTheme = createTheme({
@@ -78,13 +79,26 @@ function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [volume, setVolume] = useState<number>(() => {
+    const saved = localStorage.getItem('scannerVolume');
+    return saved !== null ? parseFloat(saved) : 1.0;
+  });
   const wsControl = useRef<WebSocket | null>(null);
   const wsAudio = useRef<WebSocket | null>(null);
   const audioAnalyserRef = useRef<AnalyserNode | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
   const wakeLock = useRef<WakeLockSentinel | null>(null);
   const activeSource = useRef<AudioBufferSourceNode | null>(null);
 
   const manualHold = scannerState.manualHoldFrequency;
+
+  // Update volume when state changes
+  useEffect(() => {
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.setTargetAtTime(volume, window.audioCtx?.currentTime || 0, 0.05);
+    }
+    localStorage.setItem('scannerVolume', volume.toString());
+  }, [volume]);
 
   // Initialize Audio Context on Interaction
   const initAudio = async () => {
@@ -94,6 +108,14 @@ function App() {
               window.audioCtx = new AudioContextClass({ sampleRate: 48000 });
           }
       }
+
+      if (window.audioCtx && !gainNodeRef.current) {
+          const gainNode = window.audioCtx.createGain();
+          gainNode.gain.value = volume;
+          gainNode.connect(window.audioCtx.destination);
+          gainNodeRef.current = gainNode;
+      }
+
       if (window.audioCtx && window.audioCtx.state === 'suspended') {
           await window.audioCtx.resume();
       }
@@ -297,7 +319,14 @@ function App() {
 
         const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.connect(ctx.destination);
+        
+        if (!gainNodeRef.current) {
+            const gainNode = ctx.createGain();
+            gainNode.gain.value = volume;
+            gainNode.connect(ctx.destination);
+            gainNodeRef.current = gainNode;
+        }
+        source.connect(gainNodeRef.current);
         
         activeSource.current = source;
         setPlayingId(id);
@@ -542,7 +571,14 @@ function App() {
                     // console.log("Initializing AnalyserNode");
                     analyser = ctx.createAnalyser();
                     analyser.fftSize = 1024;
-                    analyser.connect(ctx.destination);
+                    
+                    if (!gainNodeRef.current) {
+                        const gainNode = ctx.createGain();
+                        gainNode.gain.value = volume;
+                        gainNode.connect(ctx.destination);
+                        gainNodeRef.current = gainNode;
+                    }
+                    analyser.connect(gainNodeRef.current);
                     
                     audioAnalyserRef.current = analyser;
                     setAudioAnalyser(analyser);
@@ -722,6 +758,32 @@ function App() {
                         />
                     </Box>
                 )}
+
+                <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 2, width: { xs: '80px', sm: '120px', md: '150px' } }}>
+                    <VolumeUpIcon sx={{ color: 'text.secondary', fontSize: 20 }} />
+                    <Slider
+                        size="small"
+                        value={volume}
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        onChange={(_, value) => setVolume(value as number)}
+                        aria-label="Volume"
+                        sx={{
+                            color: 'primary.main',
+                            '& .MuiSlider-thumb': {
+                                width: 12,
+                                height: 12,
+                                '&:before': {
+                                    boxShadow: '0 2px 12px 0 rgba(0,0,0,0.4)',
+                                },
+                            },
+                            '& .MuiSlider-rail': {
+                                opacity: 0.3,
+                            },
+                        }}
+                    />
+                </Box>
 
                 <Tooltip title="Fire Tone Outs">
                     <IconButton color="inherit" onClick={() => setIsToneManagerOpen(true)} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>
