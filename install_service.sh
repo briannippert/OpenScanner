@@ -102,6 +102,13 @@ if [ "$INSTALL_DOTNET" = true ]; then
     fi
 fi
 
+# --- Check NBGV Tool ---
+if ! command -v nbgv &> /dev/null; then
+    log_info "Installing nbgv versioning tool..."
+    dotnet tool install -g nbgv
+    export PATH="$PATH:$REAL_HOME/.dotnet/tools"
+fi
+
 # --- Check Node.js (For Client Build) ---
 NODE_PATH=$(which node || true)
 if [ -z "$NODE_PATH" ]; then
@@ -235,6 +242,13 @@ log_step "Building Application..."
 log_info "Building Client..."
 cd "$PROJECT_ROOT/client"
 if [ -f "package-lock.json" ] && [ -n "$NODE_PATH" ]; then
+    # Sync version if nbgv is available
+    if command -v nbgv &> /dev/null; then
+        NPM_VER=$(nbgv get-version -v NpmPackageVersion)
+        npm version "$NPM_VER" --no-git-tag-version --silent
+        log_info "Synced package.json to version $NPM_VER"
+    fi
+
     npm ci --silent
     if [ $? -ne 0 ]; then npm install --silent; fi
     

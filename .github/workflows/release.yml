@@ -29,8 +29,17 @@ jobs:
         id: nbgv
         run: |
           VERSION=$(nbgv get-version -v SemVer2)
+          NPM_VERSION=$(nbgv get-version -v NpmPackageVersion)
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
+          echo "NPM_VERSION=$NPM_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Sync package.json version
+        working-directory: ./client
+        run: |
+          npm version ${{ steps.nbgv.outputs.NPM_VERSION }} --no-git-tag-version
+
+      - name: Setup Node.js
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
