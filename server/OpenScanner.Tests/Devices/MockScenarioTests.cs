@@ -4,6 +4,8 @@ using Moq;
 using OpenScanner.Server;
 using OpenScanner.Server.Models;
 using OpenScanner.Server.Services;
+using OpenScanner.Server.Interfaces;
+using OpenScanner.Server.Devices;
 using Xunit;
 
 namespace OpenScanner.Tests;
@@ -80,7 +82,7 @@ public class MockScenarioTests
         Assert.Equal("SCANNING", state.Status); // Should go back to scanning
 
         cts.Cancel();
-        try { await task; } catch (OperationCanceledException) {}
+        try { await task; } catch (OperationCanceledException) { Console.WriteLine("Task cancelled as expected"); }
     }
 
     [Fact]
@@ -111,7 +113,7 @@ public class MockScenarioTests
         Assert.Equal(156.000, state.CurrentFrequency); // Should still be on hold freq
         
         cts.Cancel();
-        try { await task; } catch (OperationCanceledException) {}
+        try { await task; } catch (OperationCanceledException) { Console.WriteLine("Task cancelled as expected"); }
     }
 
     [Fact]
@@ -152,6 +154,6 @@ public class MockScenarioTests
         Assert.Equal("MONITORING", state.Status);
 
         cts.Cancel();
-        try { await task; } catch (OperationCanceledException) {}
+        try { await task; } catch (OperationCanceledException) { Console.WriteLine("Task cancelled as expected"); }
     }
 }

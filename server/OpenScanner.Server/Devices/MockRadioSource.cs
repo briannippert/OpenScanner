@@ -1,8 +1,13 @@
 using System.Text.Json;
 using OpenScanner.Server.Models;
+using OpenScanner.Server.Interfaces;
+using OpenScanner.Server.Services;
 
-namespace OpenScanner.Server.Services;
+namespace OpenScanner.Server.Devices;
 
+/// <summary>
+/// A simulated radio source that generates events based on a JSON scenario file.
+/// </summary>
 public class MockRadioSource : BackgroundService, IRadioSource
 {
     private readonly ILogger<MockRadioSource> _logger;
@@ -10,8 +15,13 @@ public class MockRadioSource : BackgroundService, IRadioSource
     private readonly GpsService _gps;
     private readonly ToneDetector _toneDetector;
 
+    /// <inheritdoc />
     public event Action<ScannerState>? OnStateChanged;
+    
+    /// <inheritdoc />
     public event Action<CallLog>? OnNewLog;
+    
+    /// <inheritdoc />
     public event Action<byte[]>? OnAudio;
 
     private ScannerState _state;
@@ -24,6 +34,9 @@ public class MockRadioSource : BackgroundService, IRadioSource
     private List<ScenarioEvent> _scenarioEvents = new();
     private DateTime _scenarioStartTime;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MockRadioSource"/> class.
+    /// </summary>
     public MockRadioSource(ILogger<MockRadioSource> logger, IDatabase db, GpsService gps, ToneDetector toneDetector)
     {
         _logger = logger;
@@ -63,14 +76,20 @@ public class MockRadioSource : BackgroundService, IRadioSource
         }
     }
 
+    /// <summary>
+    /// Manually sets the scenario events (used for testing).
+    /// </summary>
+    /// <param name="events">List of scenario events.</param>
     public void SetScenario(List<ScenarioEvent> events)
     {
         _scenarioEvents = events.OrderBy(e => e.Time).ToList();
         _logger.LogInformation($"[Mock] Scenario updated manually with {_scenarioEvents.Count} events.");
     }
 
+    /// <inheritdoc />
     public ScannerState GetState() => _state;
 
+    /// <inheritdoc />
     public void ReloadChannels()
     {
         Task.Run(async () => {
@@ -79,12 +98,14 @@ public class MockRadioSource : BackgroundService, IRadioSource
         });
     }
 
+    /// <inheritdoc />
     public void SetSquelch(double db)
     {
         UpdateState(_state with { Squelch = db });
         _logger.LogInformation($"[Mock] Squelch set to {db}dB");
     }
 
+    /// <inheritdoc />
     public void Start()
     {
         _logger.LogInformation("[Mock] Starting Scanner...");
@@ -93,6 +114,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
         UpdateState(_state with { Status = "SCANNING", IsHardwareConnected = true });
     }
 
+    /// <inheritdoc />
     public void Stop()
     {
         _logger.LogInformation("[Mock] Stopping Scanner...");
@@ -102,6 +124,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
         UpdateState(_state with { Status = "IDLE", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0 });
     }
 
+    /// <inheritdoc />
     public void HoldFrequency(double freq)
     {
         _logger.LogInformation($"[Mock] Holding on {freq} MHz");
@@ -114,6 +137,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
         CheckForActiveEvents();
     }
 
+    /// <inheritdoc />
     public void ResumeScan()
     {
         _logger.LogInformation("[Mock] Resuming scan");
@@ -122,16 +146,21 @@ public class MockRadioSource : BackgroundService, IRadioSource
         UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, ManualHoldFrequency = null });
     }
 
+    /// <inheritdoc />
     public void StartDumping(string label)
     {
         _logger.LogInformation($"[Mock] Start dumping requested for {label} (Ignored)");
     }
 
+    /// <inheritdoc />
     public void StopDumping()
     {
         _logger.LogInformation("[Mock] Stop dumping requested (Ignored)");
     }
 
+    /// <summary>
+    /// Executes the background task simulating radio activity.
+    /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("[Mock] Background service started.");
@@ -290,7 +319,10 @@ public class MockRadioSource : BackgroundService, IRadioSource
                 }
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) 
+        {
+            _logger.LogDebug("[Mock] Audio playback cancelled");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[Mock] Audio playback error");
@@ -304,17 +336,49 @@ public class MockRadioSource : BackgroundService, IRadioSource
     }
 }
 
+/// <summary>
+/// Configuration object for a mock scenario.
+/// </summary>
 public class ScenarioConfig
 {
+    /// <summary>
+    /// List of events in the scenario.
+    /// </summary>
     public List<ScenarioEvent> Events { get; set; } = new();
 }
 
+/// <summary>
+/// Defines a single event in a mock scenario.
+/// </summary>
 public class ScenarioEvent
 {
+    /// <summary>
+    /// Time offset in seconds from the start of the scenario.
+    /// </summary>
     public double Time { get; set; }
+    
+    /// <summary>
+    /// Frequency of the event in MHz.
+    /// </summary>
     public double Frequency { get; set; }
+    
+    /// <summary>
+    /// Path to the audio file to play.
+    /// </summary>
     public string? AudioFile { get; set; }
+    
+    /// <summary>
+    /// Expected duration of the event.
+    /// </summary>
     public double Duration { get; set; }
+    
+    /// <summary>
+    /// Simulated P25 Source ID.
+    /// </summary>
     public int? SourceId { get; set; }
+    
+    /// <summary>
+    /// Simulated P25 Target ID.
+    /// </summary>
     public int? TargetId { get; set; }
 }

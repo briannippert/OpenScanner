@@ -1,6 +1,9 @@
 using Microsoft.Extensions.FileProviders;
 using OpenScanner.Server;
 using OpenScanner.Server.Services;
+using OpenScanner.Server.Interfaces;
+using OpenScanner.Server.Devices;
+using OpenScanner.Server.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 

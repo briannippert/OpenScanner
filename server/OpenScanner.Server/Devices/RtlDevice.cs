@@ -1,9 +1,14 @@
 using System.Diagnostics;
 using System.Numerics;
 using OpenScanner.Server.Models;
+using OpenScanner.Server.Interfaces;
+using OpenScanner.Server.Services;
 
-namespace OpenScanner.Server.Services;
+namespace OpenScanner.Server.Devices;
 
+/// <summary>
+/// Service that interfaces with RTL-SDR hardware to scan, receive, and process radio signals.
+/// </summary>
 public class RtlDevice : BackgroundService, IRadioSource
 {
     private readonly IDatabase _db;
@@ -11,8 +16,13 @@ public class RtlDevice : BackgroundService, IRadioSource
     private readonly GpsService _gps;
     private readonly ToneDetector _toneDetector;
 
+    /// <inheritdoc />
     public event Action<ScannerState>? OnStateChanged;
+    
+    /// <inheritdoc />
     public event Action<CallLog>? OnNewLog;
+    
+    /// <inheritdoc />
     public event Action<byte[]>? OnAudio;
 
     private string? _currentRecordingPath;
@@ -47,6 +57,9 @@ public class RtlDevice : BackgroundService, IRadioSource
     private const int MaxPreRollBytes = 48000 * 2 * 2; // 2 seconds (48k, 16bit)
     private readonly object _audioLock = new();
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RtlDevice"/> class.
+    /// </summary>
     public RtlDevice(IDatabase db, ILogger<RtlDevice> logger, GpsService gps, ToneDetector toneDetector)
     {
         _db = db;
@@ -109,8 +122,10 @@ public class RtlDevice : BackgroundService, IRadioSource
         return 6376500.0 * (2.0 * Math.Atan2(Math.Sqrt(d3), Math.Sqrt(1.0 - d3))) * 0.000621371;
     }
 
+    /// <inheritdoc />
     public ScannerState GetState() => _state;
 
+    /// <inheritdoc />
     public void ReloadChannels()
     {
         Task.Run(async () => {
@@ -119,12 +134,14 @@ public class RtlDevice : BackgroundService, IRadioSource
         });
     }
 
+    /// <inheritdoc />
     public void SetSquelch(double db)
     {
         UpdateState(_state with { Squelch = db });
         _logger.LogInformation($"Squelch set to {db}dB");
     }
 
+    /// <inheritdoc />
     public void Start()
     {
         if (_state.Status != "IDLE") return;
@@ -133,6 +150,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         StartScanning();
     }
 
+    /// <inheritdoc />
     public void Stop()
     {
         StopScanning();
@@ -146,6 +164,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         });
     }
 
+    /// <inheritdoc />
     public void HoldFrequency(double freq)
     {
         var channel = _channels.FirstOrDefault(c => Math.Abs(c.Frequency - freq) < 0.001);
@@ -162,6 +181,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         LockOn(channel);
     }
 
+    /// <inheritdoc />
     public void ResumeScan()
     {
         if (!_manualOverride) return;
@@ -175,6 +195,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         Task.Delay(500).ContinueWith(_ => StartScanning());
     }
 
+    /// <inheritdoc />
     public void StartDumping(string label)
     {
         var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../data/samples");
@@ -185,6 +206,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         _logger.LogInformation($"Started IQ dumping to {_iqDumpPath}");
     }
 
+    /// <inheritdoc />
     public void StopDumping()
     {
         if (_iqDumpStream != null)
@@ -196,6 +218,9 @@ public class RtlDevice : BackgroundService, IRadioSource
         }
     }
 
+    /// <summary>
+    /// Executes the background service.
+    /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await Task.Delay(1000, stoppingToken);
@@ -211,7 +236,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     private void StopScanning()
     {
         _scanCts?.Cancel();
-        try { _scannerProcess?.Kill(true); } catch { }
+        try { _scannerProcess?.Kill(true); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to kill scanner process"); }
         _scannerProcess = null;
     }
 
@@ -281,7 +306,12 @@ public class RtlDevice : BackgroundService, IRadioSource
                         _scanCts?.Cancel();
                     }
                 }
-            } catch {}
+            } 
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Error monitoring scanner stderr");
+            }
         }, token);
 
         // Read Stdout
@@ -324,11 +354,14 @@ public class RtlDevice : BackgroundService, IRadioSource
                 UpdateState(_state with { Status = "IDLE" });
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) 
+        {
+            _logger.LogDebug("Scanner loop cancelled");
+        }
         catch (Exception ex) { _logger.LogError(ex, "Error in scan loop"); }
         finally
         {
-            try { _scannerProcess?.Kill(true); } catch { }
+            try { _scannerProcess?.Kill(true); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to kill scanner process in finally"); }
         }
     }
 
@@ -501,7 +534,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                 // Try to kill the whole process group if possible, or just the process
                 _decoderProcess.Kill(true); 
             }
-        } catch { }
+        } catch (Exception ex) { _logger.LogDebug(ex, "Failed to kill decoder process"); }
         _decoderProcess = null;
     }
 
@@ -610,7 +643,12 @@ public class RtlDevice : BackgroundService, IRadioSource
 
                             await Task.Delay(2000, kaToken);
                         }
-                     } catch {}
+                     } 
+                     catch (OperationCanceledException) { }
+                     catch (Exception ex)
+                     {
+                         _logger.LogDebug(ex, "WFM Keep-Alive error");
+                     }
                 }, kaToken);
             }
 
@@ -778,7 +816,11 @@ public class RtlDevice : BackgroundService, IRadioSource
                         }
                     }
                 }
-                catch {}
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Error reading decoder metadata");
+                }
             }, token);
 
         });
@@ -897,7 +939,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                  var fileInfo = new FileInfo(recordingPath);
                  if (fileInfo.Length < 4096) 
                  {
-                     try { File.Delete(recordingPath); } catch {}
+                     try { File.Delete(recordingPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete small recording file"); }
                      return;
                  }
     
@@ -930,7 +972,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     
                          if (File.Exists(wavPath))
                          {
-                             try { File.Delete(recordingPath); } catch {}
+                             try { File.Delete(recordingPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete original RAW file after conversion"); }
                              recordingPath = wavPath;
                          }
                      }
@@ -981,7 +1023,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                              }
                              else if (recordingPath != null)
                              {
-                                 try { File.Delete(recordingPath); } catch { }
+                                 try { File.Delete(recordingPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete aborted recording file"); }
                              }
                              
                              _lastDetectedTone = null;

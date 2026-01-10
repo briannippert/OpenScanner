@@ -4,9 +4,13 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using OpenScanner.Server.Models;
+using OpenScanner.Server.Interfaces;
 
 namespace OpenScanner.Server.Services;
 
+/// <summary>
+/// Custom ILogger implementation that stores logs in memory for diagnostic purposes.
+/// </summary>
 public class MemoryLogger : ILogger
 {
     private readonly string _categoryName;
@@ -40,6 +44,9 @@ public class MemoryLogger : ILogger
     }
 }
 
+/// <summary>
+/// Logger provider that creates instances of <see cref="MemoryLogger"/>.
+/// </summary>
 public class MemoryLoggerProvider : ILoggerProvider
 {
     private readonly ConcurrentQueue<string> _logs = new();
@@ -48,9 +55,15 @@ public class MemoryLoggerProvider : ILoggerProvider
 
     public void Dispose() { }
 
+    /// <summary>
+    /// Retrieves all logs currently stored in memory.
+    /// </summary>
     public IEnumerable<string> GetLogs() => _logs.ToArray();
 }
 
+/// <summary>
+/// Service responsible for gathering system diagnostics and creating support packages.
+/// </summary>
 public class SupportService
 {
     private readonly IConfiguration _configuration;
@@ -59,6 +72,9 @@ public class SupportService
     private readonly IRadioSource _radio;
     private readonly GpsService _gps;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SupportService"/> class.
+    /// </summary>
     public SupportService(IConfiguration configuration, ILoggerProvider loggerProvider, IDatabase db, IRadioSource radio, GpsService gps)
     {
         _configuration = configuration;
@@ -68,6 +84,10 @@ public class SupportService
         _gps = gps;
     }
 
+    /// <summary>
+    /// Creates a ZIP archive containing diagnostic information.
+    /// </summary>
+    /// <returns>Byte array of the ZIP file.</returns>
     public async Task<byte[]> CreateSupportPackageAsync()
     {
         using var ms = new MemoryStream();
@@ -109,7 +129,14 @@ public class SupportService
                     archive.CreateEntryFromFile(dbPath, "openscanner_backup.db");
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // We can't log to the archive we are building easily, but we can log to the system log
+                // which might be captured in the next support package or if the user sees the console.
+                // However, ILogger is available.
+                var logger = _loggerProvider.CreateLogger(nameof(SupportService));
+                logger.LogWarning(ex, "Failed to include database snapshot in support package");
+            }
 
             // 4. Config (Masked)
             var configEntry = archive.CreateEntry("config_summary.json");
@@ -155,6 +182,11 @@ public class SupportService
                 FreeSpaceGB = drive.AvailableFreeSpace / 1024 / 1024 / 1024
             };
         }
-        catch { return "N/A"; }
+        catch (Exception ex)
+        {
+            var logger = _loggerProvider.CreateLogger(nameof(SupportService));
+            logger.LogDebug(ex, "Failed to get disk space info");
+            return "N/A";
+        }
     }
 }

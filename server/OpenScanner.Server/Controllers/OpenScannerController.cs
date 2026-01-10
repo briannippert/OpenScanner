@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using OpenScanner.Server.Models;
 using OpenScanner.Server.Services;
+using OpenScanner.Server.Interfaces;
 using System.Text.Json;
 
 namespace OpenScanner.Server.Controllers;
@@ -16,6 +17,11 @@ public class OpenScannerController : ControllerBase
     private readonly IDatabase _db;
     private readonly IRadioSource _radio;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="OpenScannerController"/> class.
+    /// </summary>
+    /// <param name="db">The database interface.</param>
+    /// <param name="radio">The radio source interface.</param>
     public OpenScannerController(IDatabase db, IRadioSource radio)
     {
         _db = db;

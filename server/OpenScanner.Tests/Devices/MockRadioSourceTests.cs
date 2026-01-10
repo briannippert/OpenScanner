@@ -3,6 +3,8 @@ using Moq;
 using OpenScanner.Server;
 using OpenScanner.Server.Models;
 using OpenScanner.Server.Services;
+using OpenScanner.Server.Interfaces;
+using OpenScanner.Server.Devices;
 using Xunit;
 
 namespace OpenScanner.Tests;

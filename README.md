@@ -1,5 +1,8 @@
 # OpenScanner
 
+[![.NET CI](https://github.com/briannippert/OpenScanner/actions/workflows/dotnet.yml/badge.svg)](https://github.com/briannippert/OpenScanner/actions/workflows/dotnet.yml)
+[![Frontend Build and Lint](https://github.com/briannippert/OpenScanner/actions/workflows/frontend.yml/badge.svg)](https://github.com/briannippert/OpenScanner/actions/workflows/frontend.yml)
+
 OpenScanner is a high-performance, web-based digital radio scanner designed for the Raspberry Pi (optimized for Pi 5). It combines a robust **.NET backend** with a modern **React frontend** to provide real-time P25 digital voice decoding, live spectrum analysis, and AI-powered transcriptions.
 
 ![OpenScanner UI](screenshot.png)

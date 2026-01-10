@@ -167,7 +167,8 @@ const YearNode = ({ year, playingId, onPlay, onDelete }: { year: string } & LogN
                 .then(data => {
                     setMonths(data);
                     setLoaded(true);
-                });
+                })
+                .catch(err => console.error(`Failed to fetch months for ${year}:`, err));
         }
         setOpen(!open);
     };
@@ -205,7 +206,8 @@ const MonthNode = ({ year, month, playingId, onPlay, onDelete }: { year: string;
                 .then(data => {
                     setDays(data);
                     setLoaded(true);
-                });
+                })
+                .catch(err => console.error(`Failed to fetch days for ${year}-${month}:`, err));
         }
         setOpen(!open);
     };
@@ -240,7 +242,8 @@ const DayNode = ({ year, month, day, playingId, onPlay, onDelete }: { year: stri
                 .then(data => {
                     setChannels(data);
                     setLoaded(true);
-                });
+                })
+                .catch(err => console.error(`Failed to fetch channels for ${year}-${month}-${day}:`, err));
         }
         setOpen(!open);
     };
@@ -280,7 +283,8 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete }:
                 .then(data => {
                     setLogs(data);
                     setLoaded(true);
-                });
+                })
+                .catch(err => console.error(`Failed to filter history for ${channel.alphaTag}:`, err));
         }
         setOpen(!open);
     };

@@ -2,15 +2,24 @@ using Dapper;
 using Microsoft.Data.Sqlite;
 using OpenScanner.Server.Models;
 using Microsoft.Extensions.Configuration;
+using OpenScanner.Server.Interfaces;
 
 namespace OpenScanner.Server;
 
+/// <summary>
+/// SQLite implementation of the database interface.
+/// </summary>
 public class Database : IDatabase
 {
     private readonly string _connectionString;
     private readonly string _dataDir;
     private readonly ILogger<Database> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="Database"/> class.
+    /// </summary>
+    /// <param name="configuration">Application configuration.</param>
+    /// <param name="logger">Logger instance.</param>
     public Database(IConfiguration configuration, ILogger<Database> logger)
     {
         _logger = logger;
@@ -56,13 +65,13 @@ public class Database : IDatabase
         var sql = SqlLoader.GetSql("Initialize.sql");
         conn.Execute(sql);
         
-        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN transcription TEXT;"); } catch {}
-        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN sourceID INTEGER;"); } catch {}
-        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN targetID INTEGER;"); } catch {}
-        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN detectedTone TEXT;"); } catch {}
-        try { conn.Execute("ALTER TABLE channels ADD COLUMN lat REAL;"); } catch {}
-        try { conn.Execute("ALTER TABLE channels ADD COLUMN lon REAL;"); } catch {}
-        try { conn.Execute("ALTER TABLE channels ADD COLUMN range REAL;"); } catch {}
+        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN transcription TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: transcription column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN sourceID INTEGER;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: sourceID column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN targetID INTEGER;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: targetID column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN detectedTone TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: detectedTone column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE channels ADD COLUMN lat REAL;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: lat column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE channels ADD COLUMN lon REAL;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: lon column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE channels ADD COLUMN range REAL;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: range column already exists or failed"); }
 
         conn.Execute(@"
             CREATE TABLE IF NOT EXISTS fire_tones (
@@ -100,14 +109,17 @@ public class Database : IDatabase
         }
     }
 
+    /// <inheritdoc />
     public SqliteConnection GetConnection() => new SqliteConnection(_connectionString);
 
+    /// <inheritdoc />
     public async Task<IEnumerable<Channel>> GetAllChannelsAsync()
     {
         using var conn = GetConnection();
         return await conn.QueryAsync<Channel>(SqlLoader.GetSql("Channels/GetAll.sql"));
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<Channel>> GetChannelsNearAsync(double lat, double lon)
     {
         using var conn = GetConnection();
@@ -131,24 +143,28 @@ public class Database : IDatabase
         return 6376500.0 * (2.0 * Math.Atan2(Math.Sqrt(d3), Math.Sqrt(1.0 - d3))) * 0.000621371;
     }
 
+    /// <inheritdoc />
     public async Task<int> AddChannelAsync(Channel channel)
     {
         using var conn = GetConnection();
         return await conn.ExecuteScalarAsync<int>(SqlLoader.GetSql("Channels/Insert.sql"), channel);
     }
 
+    /// <inheritdoc />
     public async Task UpdateChannelAsync(Channel channel)
     {
         using var conn = GetConnection();
         await conn.ExecuteAsync(SqlLoader.GetSql("Channels/Update.sql"), channel);
     }
 
+    /// <inheritdoc />
     public async Task DeleteChannelAsync(int id)
     {
         using var conn = GetConnection();
         await conn.ExecuteAsync(SqlLoader.GetSql("Channels/Delete.sql"), new { Id = id });
     }
 
+    /// <inheritdoc />
     public async Task SaveTransmissionAsync(CallLog log)
     {
         using var conn = GetConnection();
@@ -160,36 +176,42 @@ public class Database : IDatabase
         await conn.ExecuteAsync(SqlLoader.GetSql("Transmissions/Insert.sql"), log);
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<CallLog>> GetHistoryAsync(int limit = 100)
     {
         using var conn = GetConnection();
         return await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetHistory.sql"), new { Limit = limit });
     }
     
+    /// <inheritdoc />
     public async Task<IEnumerable<string>> GetTransmissionYearsAsync()
     {
         using var conn = GetConnection();
         return await conn.QueryAsync<string>(SqlLoader.GetSql("Transmissions/GetYears.sql"));
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<string>> GetTransmissionMonthsAsync(string year)
     {
         using var conn = GetConnection();
         return await conn.QueryAsync<string>(SqlLoader.GetSql("Transmissions/GetMonths.sql"), new { Year = year });
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<string>> GetTransmissionDaysAsync(string year, string month)
     {
         using var conn = GetConnection();
         return await conn.QueryAsync<string>(SqlLoader.GetSql("Transmissions/GetDays.sql"), new { Year = year, Month = month });
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<dynamic>> GetTransmissionChannelsAsync(string year, string month, string day)
     {
         using var conn = GetConnection();
         return await conn.QueryAsync(SqlLoader.GetSql("Transmissions/GetChannels.sql"), new { Year = year, Month = month, Day = day });
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<CallLog>> GetTransmissionsAsync(string year, string month, string day, string alphaTag, double frequency)
     {
         using var conn = GetConnection();
@@ -197,6 +219,7 @@ public class Database : IDatabase
             new { Year = year, Month = month, Day = day, AlphaTag = alphaTag, Frequency = frequency });
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<CallLog>> SearchTransmissionsAsync(string query)
     {
         using var conn = GetConnection();
@@ -204,6 +227,7 @@ public class Database : IDatabase
         return await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/Search.sql"), new { Query = searchTerm });
     }
 
+    /// <inheritdoc />
     public async Task DeleteTransmissionAsync(string id)
     {
         using var conn = GetConnection();
@@ -220,6 +244,7 @@ public class Database : IDatabase
         await conn.ExecuteAsync(SqlLoader.GetSql("Transmissions/Delete.sql"), new { Id = id });
     }
 
+    /// <inheritdoc />
     public async Task ClearHistoryAsync()
     {
         using var conn = GetConnection();
@@ -232,47 +257,54 @@ public class Database : IDatabase
             var files = Directory.GetFiles(recordingsDir);
             foreach (var file in files)
             {
-                try { File.Delete(file); } catch { }
+                try { File.Delete(file); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete audio file during history clear: {Path}", file); }
             }
         }
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<FireToneSet>> GetAllFireTonesAsync()
     {
         using var conn = GetConnection();
         return await conn.QueryAsync<FireToneSet>("SELECT * FROM fire_tones");
     }
 
+    /// <inheritdoc />
     public async Task<int> AddFireToneAsync(FireToneSet tone)
     {
         using var conn = GetConnection();
         return await conn.ExecuteScalarAsync<int>("INSERT INTO fire_tones (name, frequencyA, frequencyB, description) VALUES (@Name, @FrequencyA, @FrequencyB, @Description); SELECT last_insert_rowid();", tone);
     }
 
+    /// <inheritdoc />
     public async Task UpdateFireToneAsync(FireToneSet tone)
     {
         using var conn = GetConnection();
         await conn.ExecuteAsync("UPDATE fire_tones SET name=@Name, frequencyA=@FrequencyA, frequencyB=@FrequencyB, description=@Description WHERE id=@Id", tone);
     }
 
+    /// <inheritdoc />
     public async Task DeleteFireToneAsync(int id)
     {
         using var conn = GetConnection();
         await conn.ExecuteAsync("DELETE FROM fire_tones WHERE id=@Id", new { Id = id });
     }
 
+    /// <inheritdoc />
     public async Task<string?> GetSettingAsync(string key)
     {
         using var conn = GetConnection();
         return await conn.QueryFirstOrDefaultAsync<string>("SELECT value FROM settings WHERE key = @Key", new { Key = key });
     }
 
+    /// <inheritdoc />
     public async Task SetSettingAsync(string key, string value)
     {
         using var conn = GetConnection();
         await conn.ExecuteAsync("INSERT OR REPLACE INTO settings (key, value) VALUES (@Key, @Value)", new { Key = key, Value = value });
     }
 
+    /// <inheritdoc />
     public async Task<Dictionary<string, string>> GetAllSettingsAsync()
     {
         using var conn = GetConnection();
