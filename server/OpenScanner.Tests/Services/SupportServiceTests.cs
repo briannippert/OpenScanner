@@ -81,5 +81,15 @@ public class SupportServiceTests
         using var reader = new StreamReader(logEntry!.Open());
         var logContent = await reader.ReadToEndAsync();
         Assert.Contains("Test Log Entry", logContent);
+
+        // Verify system info content
+        var sysEntry = archive.GetEntry("system_info.json");
+        using var sysReader = new StreamReader(sysEntry!.Open());
+        var sysContent = await sysReader.ReadToEndAsync();
+        Assert.Contains("Uptime", sysContent);
+        Assert.Contains("CpuLoad", sysContent);
+        Assert.Contains("MemoryUsage", sysContent);
+        Assert.Contains("Network", sysContent);
+        Assert.Contains("RunningProcesses", sysContent);
     }
 }
