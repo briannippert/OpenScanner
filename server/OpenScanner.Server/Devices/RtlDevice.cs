@@ -557,7 +557,6 @@ public class RtlDevice : BackgroundService, IRadioSource
             {
                 // Analyze for Fire Tone Outs
                 _toneDetector.ProcessAudio(chunk);
-
                 lock (_audioLock)
                 {
                     // Strict attribution check

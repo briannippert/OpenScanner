@@ -8,6 +8,8 @@ public interface IDecoder
     event Action<int?, int?, string?> OnActivity; // src, tgt, tone
     event Action<string> OnMetadata;
 
+    string? InputSource { get; set; }
+
     Task StartAsync(Channel channel, CancellationToken token);
     void Stop();
 }

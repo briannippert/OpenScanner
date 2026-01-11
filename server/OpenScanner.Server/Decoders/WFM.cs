@@ -5,6 +5,7 @@ namespace OpenScanner.Server.Decoders;
 
 public class WFM : DSDBase
 {
+    // I'm not sure if any public safety actually uses WFM but it makes it easier for me to test with local radio stations
     public WFM(ILogger<WFM> logger) : base(logger)
     {
     }

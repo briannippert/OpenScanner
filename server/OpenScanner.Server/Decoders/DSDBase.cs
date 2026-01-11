@@ -18,6 +18,8 @@ public abstract class DSDBase : IDecoder
     public event Action<int?, int?, string?>? OnActivity;
     public event Action<string>? OnMetadata;
 
+    public string? InputSource { get; set; }
+
     protected DSDBase(ILogger logger)
     {
         _logger = logger;
