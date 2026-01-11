@@ -1,0 +1,124 @@
+using Microsoft.AspNetCore.Mvc;
+using OpenScanner.Server.Models;
+using OpenScanner.Server.Interfaces;
+using System.Text.Json;
+
+namespace OpenScanner.Server.Controllers;
+
+/// <summary>
+/// Controller for managing scanner channels and real-time control.
+/// </summary>
+[ApiController]
+[Route("api")]
+[Produces("application/json")]
+public class ScannerController : ControllerBase
+{
+    private readonly IDatabase _db;
+    private readonly IRadioSource _radio;
+
+    public ScannerController(IDatabase db, IRadioSource radio)
+    {
+        _db = db;
+        _radio = radio;
+    }
+
+    /// <summary>
+    /// Retrieves all configured radio channels.
+    /// </summary>
+    /// <returns>A list of channels.</returns>
+    [HttpGet("channels")]
+    [ProducesResponseType(typeof(IEnumerable<Channel>), StatusCodes.Status200OK)]
+    public async Task<IEnumerable<Channel>> GetAllChannels()
+    {
+        return await _db.GetAllChannelsAsync();
+    }
+
+    /// <summary>
+    /// Adds a new radio channel.
+    /// </summary>
+    /// <param name="channel">The channel details.</param>
+    /// <returns>The created channel with its ID.</returns>
+    [HttpPost("channels")]
+    [ProducesResponseType(typeof(Channel), StatusCodes.Status201Created)]
+    public async Task<IActionResult> AddChannel(Channel channel)
+    {
+        var id = await _db.AddChannelAsync(channel);
+        channel.Id = id;
+        _radio.ReloadChannels();
+        return CreatedAtAction(nameof(GetAllChannels), new { id }, channel);
+    }
+
+    /// <summary>
+    /// Updates an existing channel.
+    /// </summary>
+    /// <param name="id">The ID of the channel to update.</param>
+    /// <param name="channel">The updated channel details.</param>
+    [HttpPut("channels/{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateChannel(int id, Channel channel)
+    {
+        channel.Id = id;
+        await _db.UpdateChannelAsync(channel);
+        _radio.ReloadChannels();
+        return Ok();
+    }
+
+    /// <summary>
+    /// Deletes a channel.
+    /// </summary>
+    /// <param name="id">The ID of the channel to delete.</param>
+    [HttpDelete("channels/{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> DeleteChannel(int id)
+    {
+        await _db.DeleteChannelAsync(id);
+        _radio.ReloadChannels();
+        return Ok();
+    }
+
+    /// <summary>
+    /// Sends a direct control command to the scanner service.
+    /// </summary>
+    /// <param name="body">JSON payload with 'action' (start, stop, scan, hold, set_squelch) and optional parameters.</param>
+    [HttpPost("control")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public IActionResult ControlScanner([FromBody] JsonElement body)
+    {
+        if (!body.TryGetProperty("action", out var actionProp))
+            return BadRequest("Action is required");
+
+        var action = actionProp.GetString();
+        
+        switch (action)
+        {
+            case "start": _radio.Start(); break;
+            case "stop": _radio.Stop(); break;
+            case "scan": _radio.ResumeScan(); break;
+            case "hold": 
+                if (body.TryGetProperty("frequency", out var f) && f.ValueKind == JsonValueKind.Number)
+                    _radio.HoldFrequency(f.GetDouble());
+                else if (body.TryGetProperty("frequency", out var fs) && double.TryParse(fs.GetString(), out var fd))
+                     _radio.HoldFrequency(fd);
+                break;
+            case "set_squelch":
+                 if (body.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.Number)
+                    _radio.SetSquelch(v.GetDouble());
+                 else if (body.TryGetProperty("value", out var vs) && double.TryParse(vs.GetString(), out var vd))
+                    _radio.SetSquelch(vd);
+                break;
+            case "start_dump":
+                if (body.TryGetProperty("label", out var labelProp))
+                    _radio.StartDumping(labelProp.GetString() ?? "sample");
+                else
+                    _radio.StartDumping("sample");
+                break;
+            case "stop_dump":
+                _radio.StopDumping();
+                break;
+            default:
+                return BadRequest($"Unknown action: {action}");
+        }
+        return Ok();
+    }
+}

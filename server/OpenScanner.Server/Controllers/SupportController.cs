@@ -1,42 +1,48 @@
 using Microsoft.AspNetCore.Mvc;
-using OpenScanner.Server.Services;
 using OpenScanner.Server.Interfaces;
 
 namespace OpenScanner.Server.Controllers;
 
 /// <summary>
-/// Controller for support and diagnostic operations.
+/// Controller for support and system information.
 /// </summary>
 [ApiController]
-[Route("api/support")]
+[Route("api")]
+[Produces("application/json")]
 public class SupportController : ControllerBase
 {
-    private readonly ISupportService _supportService;
+    private readonly ISupportService _support;
     private readonly ILogger<SupportController> _logger;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="SupportController"/> class.
-    /// </summary>
-    /// <param name="supportService">The support service.</param>
-    /// <param name="logger">The logger instance.</param>
-    public SupportController(ISupportService supportService, ILogger<SupportController> logger)
+    public SupportController(ISupportService support, ILogger<SupportController> logger)
     {
-        _supportService = supportService;
+        _support = support;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Retrieves system information including version and git commit.
+    /// </summary>
+    /// <returns>System information dictionary.</returns>
+    [HttpGet("system/info")]
+    [ProducesResponseType(typeof(Dictionary<string, string>), StatusCodes.Status200OK)]
+    public IActionResult GetSystemInfo()
+    {
+        return Ok(_support.GetVersionInfo());
     }
 
     /// <summary>
     /// Generates and downloads a support package containing logs, configuration, and system info.
     /// </summary>
     /// <returns>A ZIP file containing diagnostic information.</returns>
-    [HttpGet("package")]
+    [HttpGet("support/package")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetSupportPackage()
     {
         _logger.LogInformation("Generating support package...");
         try
         {
-            var data = await _supportService.CreateSupportPackageAsync();
+            var data = await _support.CreateSupportPackageAsync();
             var filename = $"openscanner_support_{DateTime.UtcNow:yyyyMMdd_HHmm}.zip";
             return File(data, "application/zip", filename);
         }
