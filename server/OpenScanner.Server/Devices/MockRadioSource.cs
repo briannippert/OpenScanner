@@ -248,6 +248,124 @@ public class MockRadioSource : BackgroundService, IRadioSource
         }
     }
 
+    private FileStream? _recordingStream;
+    private string? _currentRecordingPath;
+    private long _recordingStartTime;
+    private readonly object _audioLock = new();
+
+    private void StartRecording(Channel channel, ScenarioEvent ev)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var filename = $"mock_{now}_{channel.Frequency}.raw";
+        var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../data/recordings");
+        if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
+
+        var newPath = Path.Combine(dataDir, filename);
+        
+        lock (_audioLock)
+        {
+            if (_recordingStream != null) return;
+
+            _currentRecordingPath = newPath;
+            _recordingStartTime = now;
+
+            try 
+            {
+                _recordingStream = new FileStream(_currentRecordingPath, FileMode.Create);
+                _logger.LogInformation($"[Mock] Starting recording: {filename}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Mock] Failed to create recording file");
+            }
+        }
+    }
+
+    private void StopRecording(Channel channel, ScenarioEvent ev)
+    {
+        string? recordingPath;
+        long startTime;
+
+        lock (_audioLock)
+        {
+            if (_recordingStream == null) return;
+            _recordingStream.Close();
+            _recordingStream = null;
+            recordingPath = _currentRecordingPath;
+            startTime = _recordingStartTime;
+        }
+
+        var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
+        
+        if (recordingPath != null && File.Exists(recordingPath))
+        {
+             // Convert RAW to WAV
+             var wavPath = Path.ChangeExtension(recordingPath, ".wav");
+             try 
+             {
+                 // Mock assumes 48k mono s16le output
+                 var convertStart = new System.Diagnostics.ProcessStartInfo("/usr/bin/ffmpeg")
+                 {
+                     RedirectStandardOutput = true,
+                     RedirectStandardError = true,
+                     UseShellExecute = false,
+                     CreateNoWindow = true
+                 };
+                 convertStart.ArgumentList.Add("-f"); convertStart.ArgumentList.Add("s16le");
+                 convertStart.ArgumentList.Add("-ar"); convertStart.ArgumentList.Add("48000");
+                 convertStart.ArgumentList.Add("-ac"); convertStart.ArgumentList.Add("1");
+                 convertStart.ArgumentList.Add("-i"); convertStart.ArgumentList.Add(recordingPath);
+                 convertStart.ArgumentList.Add(wavPath);
+                 convertStart.ArgumentList.Add("-y");
+
+                 using (var proc = System.Diagnostics.Process.Start(convertStart))
+                 {
+                     proc?.WaitForExit();
+                 }
+
+                 if (File.Exists(wavPath))
+                 {
+                     File.Delete(recordingPath);
+                     recordingPath = wavPath;
+                 }
+             }
+             catch (Exception ex)
+             {
+                 _logger.LogError(ex, "[Mock] WAV conversion failed");
+             }
+
+             var log = new CallLog(
+                $"mock_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
+                DateTime.UtcNow.ToString("o"),
+                channel.Frequency,
+                channel.AlphaTag,
+                channel.Description,
+                _state.Gps?.Lat,
+                _state.Gps?.Lon,
+                Path.GetFileName(recordingPath),
+                duration,
+                "Mock Transcription",
+                ev.SourceId,
+                ev.TargetId,
+                null
+            );
+            
+            _db.SaveTransmissionAsync(log).ContinueWith(t => {
+                if (t.IsFaulted) _logger.LogError(t.Exception, "[Mock] Failed to save transmission");
+            });
+
+            OnNewLog?.Invoke(log);
+        }
+        
+        lock (_audioLock)
+        {
+            if (_recordingStream == null && _currentRecordingPath == recordingPath)
+            {
+                _currentRecordingPath = null;
+            }
+        }
+    }
+
     private void LockOn(Channel channel, ScenarioEvent ev)
     {
         UpdateState(_state with { 
@@ -263,17 +381,36 @@ public class MockRadioSource : BackgroundService, IRadioSource
         _playbackCts?.Cancel();
         _currentDecoder?.Stop();
         _currentDecoder = null;
+        
+        // Close any previous recording properly before starting new one
+        if (_recordingStream != null)
+        {
+             // Note: In a real scenario, we might want to pass the *previous* event context, 
+             // but here we are just cleaning up.
+             lock(_audioLock) {
+                 _recordingStream?.Close();
+                 _recordingStream = null;
+             }
+        }
+
+        StartRecording(channel, ev);
 
         _playbackCts = new CancellationTokenSource();
         var token = _playbackCts.Token;
 
         if (!string.IsNullOrEmpty(ev.DecoderType))
         {
-            Task.Run(async () => await PlayWithDecoder(channel, ev, token), token);
+            Task.Run(async () => {
+                await PlayWithDecoder(channel, ev, token);
+                StopRecording(channel, ev);
+            }, token);
         }
         else
         {
-            Task.Run(async () => await PlayAudio(ev.AudioFile, token), token);
+            Task.Run(async () => {
+                await PlayAudio(ev.AudioFile, token);
+                StopRecording(channel, ev);
+            }, token);
         }
     }
 
@@ -308,12 +445,19 @@ public class MockRadioSource : BackgroundService, IRadioSource
         try 
         {
             _currentDecoder = _decoderFactory.GetDecoder(ev.DecoderType);
-            _currentDecoder.InputSource = $"ffmpeg -i \"{path}\" -f s16le -ar 48000 -ac 1 -";
+            _currentDecoder.InputSource = $"/usr/bin/ffmpeg -re -i \"{path}\" -f s16le -ar 48000 -ac 1 -";
             
             _currentDecoder.OnAudio += (chunk) => 
             {
                 _toneDetector.ProcessAudio(chunk);
                 OnAudio?.Invoke(chunk);
+                lock (_audioLock)
+                {
+                    if (_recordingStream != null)
+                    {
+                        _recordingStream.Write(chunk, 0, chunk.Length);
+                    }
+                }
             };
 
             _currentDecoder.OnActivity += (src, tgt, tone) => 
@@ -361,33 +505,16 @@ public class MockRadioSource : BackgroundService, IRadioSource
 
                 _toneDetector.ProcessAudio(chunk);
                 OnAudio?.Invoke(chunk);
+                lock (_audioLock)
+                {
+                    if (_recordingStream != null)
+                    {
+                        _recordingStream.Write(chunk, 0, chunk.Length);
+                    }
+                }
 
                 // Simulate real-time (48000 samples/sec * 2 bytes/sample = 96000 bytes/sec)
                 await Task.Delay(42, token);
-            }
-
-            if (!token.IsCancellationRequested)
-            {
-                var channel = _state.CurrentChannel;
-                if (channel != null)
-                {
-                    var log = new CallLog(
-                        $"mock_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
-                        DateTime.UtcNow.ToString("o"),
-                        channel.Frequency,
-                        channel.AlphaTag,
-                        channel.Description,
-                        _state.Gps?.Lat,
-                        _state.Gps?.Lon,
-                        audioFile,
-                        (audioData.Length - offset) / 96000.0,
-                        "Mock Transcription",
-                        _state.SourceID,
-                        _state.TargetID,
-                        null
-                    );
-                    OnNewLog?.Invoke(log);
-                }
             }
         }
         catch (OperationCanceledException) 
