@@ -15,6 +15,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
     private readonly IDatabase _db;
     private readonly GpsService _gps;
     private readonly ToneDetector _toneDetector;
+    private readonly IDecoderFactory _decoderFactory;
 
     /// <inheritdoc />
     public event Action<ScannerState>? OnStateChanged;
@@ -31,6 +32,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
     private bool _manualHold = false;
     private double? _holdFrequency;
     private CancellationTokenSource? _playbackCts;
+    private IDecoder? _currentDecoder;
     
     private List<ScenarioEvent> _scenarioEvents = new();
     private DateTime _scenarioStartTime;
@@ -38,12 +40,13 @@ public class MockRadioSource : BackgroundService, IRadioSource
     /// <summary>
     /// Initializes a new instance of the <see cref="MockRadioSource"/> class.
     /// </summary>
-    public MockRadioSource(ILogger<MockRadioSource> logger, IDatabase db, GpsService gps, ToneDetector toneDetector)
+    public MockRadioSource(ILogger<MockRadioSource> logger, IDatabase db, GpsService gps, ToneDetector toneDetector, IDecoderFactory decoderFactory)
     {
         _logger = logger;
         _db = db;
         _gps = gps;
         _toneDetector = toneDetector;
+        _decoderFactory = decoderFactory;
         _state = new ScannerState("IDLE", 0);
 
         _gps.OnGpsUpdate += (data) =>
@@ -137,6 +140,8 @@ public class MockRadioSource : BackgroundService, IRadioSource
         _isScanning = false;
         _manualHold = false;
         _playbackCts?.Cancel();
+        _currentDecoder?.Stop();
+        _currentDecoder = null;
         UpdateState(_state with { Status = "IDLE", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0 });
     }
 
@@ -159,6 +164,8 @@ public class MockRadioSource : BackgroundService, IRadioSource
         _logger.LogInformation("[Mock] Resuming scan");
         _manualHold = false;
         _holdFrequency = null;
+        _currentDecoder?.Stop();
+        _currentDecoder = null;
         UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, ManualHoldFrequency = null });
     }
 
@@ -226,6 +233,8 @@ public class MockRadioSource : BackgroundService, IRadioSource
             // Event ended, resume scanning
             _logger.LogInformation("[Mock] Signal lost, resuming scan...");
             _playbackCts?.Cancel();
+            _currentDecoder?.Stop();
+            _currentDecoder = null;
             UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null });
         }
         else if (_state.Status == "RECEIVING" && _manualHold)
@@ -233,6 +242,8 @@ public class MockRadioSource : BackgroundService, IRadioSource
              // Event ended but we are holding
              _logger.LogInformation("[Mock] Signal lost (Hold)");
              _playbackCts?.Cancel();
+             _currentDecoder?.Stop();
+             _currentDecoder = null;
              UpdateState(_state with { Status = "MONITORING" });
         }
     }
@@ -250,13 +261,25 @@ public class MockRadioSource : BackgroundService, IRadioSource
         });
 
         _playbackCts?.Cancel();
+        _currentDecoder?.Stop();
+        _currentDecoder = null;
+
         _playbackCts = new CancellationTokenSource();
-        Task.Run(() => PlayAudio(ev.AudioFile, _playbackCts.Token));
+        var token = _playbackCts.Token;
+
+        if (!string.IsNullOrEmpty(ev.DecoderType))
+        {
+            Task.Run(async () => await PlayWithDecoder(channel, ev, token), token);
+        }
+        else
+        {
+            Task.Run(async () => await PlayAudio(ev.AudioFile, token), token);
+        }
     }
 
-    private async Task PlayAudio(string? audioFile, CancellationToken token)
+    private string? FindTestDataFile(string? audioFile)
     {
-        if (string.IsNullOrEmpty(audioFile)) return;
+        if (string.IsNullOrEmpty(audioFile)) return null;
 
         var searchPaths = new[]
         {
@@ -268,19 +291,54 @@ public class MockRadioSource : BackgroundService, IRadioSource
             audioFile
         };
 
-        string? path = null;
-        foreach (var p in searchPaths)
-        {
-            if (File.Exists(p))
-            {
-                path = p;
-                break;
-            }
-        }
+        return searchPaths.FirstOrDefault(File.Exists);
+    }
 
+    private async Task PlayWithDecoder(Channel channel, ScenarioEvent ev, CancellationToken token)
+    {
+        var path = FindTestDataFile(ev.AudioFile);
         if (path == null)
         {
-            _logger.LogWarning($"[Mock] Audio file not found: {audioFile}. Checked: {string.Join(", ", searchPaths)}");
+            _logger.LogWarning($"[Mock] Audio file not found for decoder: {ev.AudioFile}");
+            return;
+        }
+
+        _logger.LogInformation($"[Mock] Decoding {ev.DecoderType} signal from: {path}");
+        
+        try 
+        {
+            _currentDecoder = _decoderFactory.GetDecoder(ev.DecoderType);
+            _currentDecoder.InputSource = $"ffmpeg -i \"{path}\" -f s16le -ar 48000 -ac 1 -";
+            
+            _currentDecoder.OnAudio += (chunk) => 
+            {
+                _toneDetector.ProcessAudio(chunk);
+                OnAudio?.Invoke(chunk);
+            };
+
+            _currentDecoder.OnActivity += (src, tgt, tone) => 
+            {
+                UpdateState(_state with { 
+                    SourceID = src ?? _state.SourceID, 
+                    TargetID = tgt ?? _state.TargetID,
+                    CurrentTone = tone ?? _state.CurrentTone
+                });
+            };
+
+            await _currentDecoder.StartAsync(channel, token);
+        }
+        catch (Exception ex) when (!(ex is OperationCanceledException))
+        {
+            _logger.LogError(ex, $"[Mock] {ev.DecoderType} Decoder error");
+        }
+    }
+
+    private async Task PlayAudio(string? audioFile, CancellationToken token)
+    {
+        var path = FindTestDataFile(audioFile);
+        if (path == null)
+        {
+            _logger.LogWarning($"[Mock] Audio file not found: {audioFile}");
             return;
         }
 
@@ -289,8 +347,6 @@ public class MockRadioSource : BackgroundService, IRadioSource
         try
         {
             // We expect 48k 16-bit Mono PCM for simplicity in mocking (common for the app)
-            // But if it's a WAV, we might need to skip header or use a proper reader.
-            // For now, let's assume raw or simple WAV.
             byte[] audioData = await File.ReadAllBytesAsync(path, token);
             int offset = audioData.Length > 44 ? 44 : 0; // Skip WAV header if likely present
 
@@ -307,7 +363,6 @@ public class MockRadioSource : BackgroundService, IRadioSource
                 OnAudio?.Invoke(chunk);
 
                 // Simulate real-time (48000 samples/sec * 2 bytes/sample = 96000 bytes/sec)
-                // 4096 bytes / 96000 bytes/sec = 0.0426 sec = 42.6 ms
                 await Task.Delay(42, token);
             }
 
@@ -400,4 +455,10 @@ public class ScenarioEvent
     /// </summary>
     [JsonPropertyName("target_id")]
     public int? TargetId { get; set; }
+
+    /// <summary>
+    /// The type of decoder to use (e.g. "P25", "AM"). If null, plays raw audio.
+    /// </summary>
+    [JsonPropertyName("decoder_type")]
+    public string? DecoderType { get; set; }
 }
