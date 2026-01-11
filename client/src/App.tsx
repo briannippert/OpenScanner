@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip } from '@mui/material';
+import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
 import ChannelManager from './components/ChannelManager';
 import FireToneManager from './components/FireToneManager';
@@ -20,6 +20,7 @@ import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import SettingsIcon from '@mui/icons-material/Settings';
+import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import type { ScannerState, Channel, CallLog, FireToneSet } from './types';
 
 const darkTheme = createTheme({
@@ -78,13 +79,26 @@ function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [volume, setVolume] = useState<number>(() => {
+    const saved = localStorage.getItem('scannerVolume');
+    return saved !== null ? parseFloat(saved) : 1.0;
+  });
   const wsControl = useRef<WebSocket | null>(null);
   const wsAudio = useRef<WebSocket | null>(null);
   const audioAnalyserRef = useRef<AnalyserNode | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
   const wakeLock = useRef<WakeLockSentinel | null>(null);
   const activeSource = useRef<AudioBufferSourceNode | null>(null);
 
   const manualHold = scannerState.manualHoldFrequency;
+
+  // Update volume when state changes
+  useEffect(() => {
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.setTargetAtTime(volume, window.audioCtx?.currentTime || 0, 0.05);
+    }
+    localStorage.setItem('scannerVolume', volume.toString());
+  }, [volume]);
 
   // Initialize Audio Context on Interaction
   const initAudio = async () => {
@@ -94,6 +108,14 @@ function App() {
               window.audioCtx = new AudioContextClass({ sampleRate: 48000 });
           }
       }
+
+      if (window.audioCtx && !gainNodeRef.current) {
+          const gainNode = window.audioCtx.createGain();
+          gainNode.gain.value = volume;
+          gainNode.connect(window.audioCtx.destination);
+          gainNodeRef.current = gainNode;
+      }
+
       if (window.audioCtx && window.audioCtx.state === 'suspended') {
           await window.audioCtx.resume();
       }
@@ -131,12 +153,7 @@ function App() {
   };
 
   const downloadSupportPackage = () => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    const url = `${protocol}//${backendHost}${portSuffix}/api/support/package`;
+    const url = `/api/support/package`;
     
     // Create a temporary link to trigger download with a better UX than window.location.href
     const link = document.createElement('a');
@@ -199,14 +216,7 @@ function App() {
 
   // Helper to send commands
   const sendCommand = (action: string, frequency?: number, value?: number) => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    const httpUrl = `${protocol}//${backendHost}${portSuffix}/api/control`;
-    
-    fetch(httpUrl, {
+    fetch('/api/control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, frequency, value })
@@ -297,7 +307,14 @@ function App() {
 
         const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.connect(ctx.destination);
+        
+        if (!gainNodeRef.current) {
+            const gainNode = ctx.createGain();
+            gainNode.gain.value = volume;
+            gainNode.connect(ctx.destination);
+            gainNodeRef.current = gainNode;
+        }
+        source.connect(gainNodeRef.current);
         
         activeSource.current = source;
         setPlayingId(id);
@@ -317,15 +334,8 @@ function App() {
   };
 
   const deleteEntry = async (id: string) => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    const deleteUrl = `${protocol}//${backendHost}${portSuffix}/api/history/${id}`;
-
     try {
-        await fetch(deleteUrl, { method: 'DELETE' });
+        await fetch(`/api/history/${id}`, { method: 'DELETE' });
         setCallLog(prev => prev.filter(log => log.id !== id));
     } catch (e) {
         console.error("Delete failed:", e);
@@ -333,36 +343,21 @@ function App() {
   };
 
   const refreshChannels = () => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    fetch(`${protocol}//${backendHost}${portSuffix}/api/channels`)
+    fetch(`/api/channels`)
       .then(res => res.json())
       .then(data => setChannels(data))
       .catch(err => console.error("Failed to fetch channels:", err));
   };
 
   const refreshFireTones = () => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    fetch(`${protocol}//${backendHost}${portSuffix}/api/firetones`)
+    fetch(`/api/firetones`)
       .then(res => res.json())
       .then(data => setFireTones(data))
       .catch(err => console.error("Failed to fetch fire tones:", err));
   };
 
   const handleSaveChannel = async (channel: Channel) => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    const baseUrl = `${protocol}//${backendHost}${portSuffix}/api/channels`;
+    const baseUrl = `/api/channels`;
 
     const method = channel.id ? 'PUT' : 'POST';
     const url = channel.id ? `${baseUrl}/${channel.id}` : baseUrl;
@@ -380,14 +375,8 @@ function App() {
   };
 
   const handleDeleteChannel = async (id: number) => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    
     try {
-        await fetch(`${protocol}//${backendHost}${portSuffix}/api/channels/${id}`, { method: 'DELETE' });
+        await fetch(`/api/channels/${id}`, { method: 'DELETE' });
         refreshChannels();
     } catch (e) {
         console.error("Delete channel failed:", e);
@@ -395,12 +384,7 @@ function App() {
   };
 
   const handleSaveFireTone = async (tone: FireToneSet) => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    const baseUrl = `${protocol}//${backendHost}${portSuffix}/api/firetones`;
+    const baseUrl = `/api/firetones`;
 
     const method = tone.id ? 'PUT' : 'POST';
     const url = tone.id ? `${baseUrl}/${tone.id}` : baseUrl;
@@ -418,14 +402,8 @@ function App() {
   };
 
   const handleDeleteFireTone = async (id: number) => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    
     try {
-        await fetch(`${protocol}//${backendHost}${portSuffix}/api/firetones/${id}`, { method: 'DELETE' });
+        await fetch(`/api/firetones/${id}`, { method: 'DELETE' });
         refreshFireTones();
     } catch (e) {
         console.error("Delete fire tone failed:", e);
@@ -433,19 +411,13 @@ function App() {
   };
 
   useEffect(() => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
-    const backendHost = window.location.hostname;
+    const channelsUrl = `/api/channels`;
+    const firetonesUrl = `/api/firetones`;
+    const historyUrl = `/api/history`;
     
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-
-    const channelsUrl = `${protocol}//${backendHost}${portSuffix}/api/channels`;
-    const firetonesUrl = `${protocol}//${backendHost}${portSuffix}/api/firetones`;
-    const historyUrl = `${protocol}//${backendHost}${portSuffix}/api/history`;
-    const wsControlUrl = `${wsProtocol}//${backendHost}${portSuffix}/ws/control`;
-    const wsAudioUrl = `${wsProtocol}//${backendHost}${portSuffix}/ws/audio`;
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsControlUrl = `${wsProtocol}//${window.location.host}/ws/control`;
+    const wsAudioUrl = `${wsProtocol}//${window.location.host}/ws/audio`;
 
     fetch(channelsUrl)
       .then(res => res.json())
@@ -542,7 +514,14 @@ function App() {
                     // console.log("Initializing AnalyserNode");
                     analyser = ctx.createAnalyser();
                     analyser.fftSize = 1024;
-                    analyser.connect(ctx.destination);
+                    
+                    if (!gainNodeRef.current) {
+                        const gainNode = ctx.createGain();
+                        gainNode.gain.value = volume;
+                        gainNode.connect(ctx.destination);
+                        gainNodeRef.current = gainNode;
+                    }
+                    analyser.connect(gainNodeRef.current);
                     
                     audioAnalyserRef.current = analyser;
                     setAudioAnalyser(analyser);
@@ -722,6 +701,32 @@ function App() {
                         />
                     </Box>
                 )}
+
+                <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 2, width: { xs: '80px', sm: '120px', md: '150px' } }}>
+                    <VolumeUpIcon sx={{ color: 'text.secondary', fontSize: 20 }} />
+                    <Slider
+                        size="small"
+                        value={volume}
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        onChange={(_, value) => setVolume(value as number)}
+                        aria-label="Volume"
+                        sx={{
+                            color: 'primary.main',
+                            '& .MuiSlider-thumb': {
+                                width: 12,
+                                height: 12,
+                                '&:before': {
+                                    boxShadow: '0 2px 12px 0 rgba(0,0,0,0.4)',
+                                },
+                            },
+                            '& .MuiSlider-rail': {
+                                opacity: 0.3,
+                            },
+                        }}
+                    />
+                </Box>
 
                 <Tooltip title="Fire Tone Outs">
                     <IconButton color="inherit" onClick={() => setIsToneManagerOpen(true)} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>

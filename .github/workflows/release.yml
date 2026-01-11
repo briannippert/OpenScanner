@@ -34,6 +34,13 @@ jobs:
           echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
           echo "NPM_VERSION=$NPM_VERSION" >> $GITHUB_OUTPUT
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+
       - name: Sync package.json version
         working-directory: ./client
         run: |
