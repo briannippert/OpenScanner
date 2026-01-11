@@ -20,6 +20,12 @@ builder.Services.AddSingleton<GpsService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GpsService>());
 builder.Services.AddSingleton<ToneDetector>();
 
+builder.Services.AddTransient<OpenScanner.Server.Decoders.P25>();
+builder.Services.AddTransient<OpenScanner.Server.Decoders.NFM>();
+builder.Services.AddTransient<OpenScanner.Server.Decoders.AM>();
+builder.Services.AddTransient<OpenScanner.Server.Decoders.WFM>();
+builder.Services.AddSingleton<IDecoderFactory, OpenScanner.Server.Decoders.DecoderFactory>();
+
 var radioProvider = builder.Configuration["Radio:Provider"] ?? "RTL-SDR";
 if (radioProvider == "Mock")
 {
