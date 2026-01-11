@@ -10,6 +10,10 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        navigateFallbackDenylist: [/^\/api/, /^\/swagger/, /^\/audio/, /^\/ws/]
+      },
       manifest: {
         name: 'OpenScanner',
         short_name: 'OpenScanner',
@@ -39,7 +43,29 @@ export default defineConfig({
     })
   ],
   server: {
-    allowedHosts: true
+    allowedHosts: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5212',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/audio': {
+        target: 'http://localhost:5212',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/swagger': {
+        target: 'http://localhost:5212',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/ws': {
+        target: 'ws://localhost:5212',
+        ws: true,
+        changeOrigin: true,
+      }
+    }
   },
   test: {
     globals: true,
