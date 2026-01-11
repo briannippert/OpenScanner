@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using OpenScanner.Server.Models;
 using OpenScanner.Server.Interfaces;
 using OpenScanner.Server.Services;
@@ -380,6 +381,7 @@ public class ScenarioEvent
     /// <summary>
     /// Path to the audio file to play.
     /// </summary>
+    [JsonPropertyName("audio_file")]
     public string? AudioFile { get; set; }
     
     /// <summary>
@@ -390,10 +392,12 @@ public class ScenarioEvent
     /// <summary>
     /// Simulated P25 Source ID.
     /// </summary>
+    [JsonPropertyName("source_id")]
     public int? SourceId { get; set; }
     
     /// <summary>
     /// Simulated P25 Target ID.
     /// </summary>
+    [JsonPropertyName("target_id")]
     public int? TargetId { get; set; }
 }
