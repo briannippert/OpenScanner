@@ -17,6 +17,7 @@ public class OpenScannerController : ControllerBase
     private readonly IDatabase _db;
     private readonly IRadioSource _radio;
     private readonly ISupportService _support;
+    private readonly ILogger<OpenScannerController> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="OpenScannerController"/> class.
@@ -24,11 +25,13 @@ public class OpenScannerController : ControllerBase
     /// <param name="db">The database interface.</param>
     /// <param name="radio">The radio source interface.</param>
     /// <param name="support">The support service.</param>
-    public OpenScannerController(IDatabase db, IRadioSource radio, ISupportService support)
+    /// <param name="logger">The logger instance.</param>
+    public OpenScannerController(IDatabase db, IRadioSource radio, ISupportService support, ILogger<OpenScannerController> logger)
     {
         _db = db;
         _radio = radio;
         _support = support;
+        _logger = logger;
     }
 
     /// <summary>
@@ -40,6 +43,29 @@ public class OpenScannerController : ControllerBase
     public IActionResult GetSystemInfo()
     {
         return Ok(_support.GetVersionInfo());
+    }
+
+    /// <summary>
+    /// Generates and downloads a support package containing logs, configuration, and system info.
+    /// </summary>
+    /// <returns>A ZIP file containing diagnostic information.</returns>
+    [HttpGet("support/package")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [Produces("application/zip")]
+    public async Task<IActionResult> GetSupportPackage()
+    {
+        _logger.LogInformation("Generating support package...");
+        try
+        {
+            var data = await _support.CreateSupportPackageAsync();
+            var filename = $"openscanner_support_{DateTime.UtcNow:yyyyMMdd_HHmm}.zip";
+            return File(data, "application/zip", filename);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to generate support package");
+            return StatusCode(500, "Internal server error while generating support package");
+        }
     }
 
     /// <summary>

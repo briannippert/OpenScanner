@@ -1,5 +1,8 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO.Compression;
+using System.Linq;
+using System.Net.NetworkInformation;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -172,9 +175,14 @@ public class SupportService : ISupportService
                     OS = RuntimeInformation.OSDescription,
                     Architecture = RuntimeInformation.OSArchitecture.ToString(),
                     Framework = RuntimeInformation.FrameworkDescription,
+                    Uptime = GetUptime(),
+                    CpuLoad = GetCpuLoad(),
+                    MemoryUsage = GetMemoryUsage(),
+                    Network = GetNetworkInfo(),
                     ScannerState = _radio.GetState(),
                     GpsStatus = _gps.GetLastLocation(),
-                    DiskSpace = GetDiskSpaceInfo()
+                    DiskSpace = GetDiskSpaceInfo(),
+                    RunningProcesses = GetRunningProcesses()
                 };
                 await writer.WriteAsync(JsonSerializer.Serialize(info, new JsonSerializerOptions { WriteIndented = true }));
             }
@@ -246,6 +254,133 @@ public class SupportService : ISupportService
             var logger = _loggerProvider.CreateLogger(nameof(SupportService));
             logger.LogDebug(ex, "Failed to get disk space info");
             return "N/A";
+        }
+    }
+
+    private string GetUptime()
+    {
+        try
+        {
+            var uptime = TimeSpan.FromMilliseconds(Environment.TickCount64);
+            return uptime.ToString(@"dd\.hh\:mm\:ss");
+        }
+        catch (Exception ex)
+        {
+            _loggerProvider.CreateLogger(nameof(SupportService)).LogError(ex, "Failed to get uptime");
+            return "Unknown";
+        }
+    }
+
+    private object GetCpuLoad()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            try
+            {
+                if (File.Exists("/proc/loadavg"))
+                {
+                    return File.ReadAllText("/proc/loadavg").Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                _loggerProvider.CreateLogger(nameof(SupportService)).LogError(ex, "Failed to get CPU load");
+            }
+        }
+        return "N/A";
+    }
+
+    private object GetMemoryUsage()
+    {
+        var result = new Dictionary<string, object>();
+        var logger = _loggerProvider.CreateLogger(nameof(SupportService));
+        
+        // Process memory
+        try
+        {
+            using var proc = Process.GetCurrentProcess();
+            result["ProcessWorkingSetMB"] = proc.WorkingSet64 / 1024 / 1024;
+            result["ProcessPrivateMemoryMB"] = proc.PrivateMemorySize64 / 1024 / 1024;
+            result["GCTotalMemoryMB"] = GC.GetTotalMemory(false) / 1024 / 1024;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to get process memory usage");
+        }
+
+        // System memory (Linux)
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            try
+            {
+                if (File.Exists("/proc/meminfo"))
+                {
+                    var lines = File.ReadAllLines("/proc/meminfo").Take(5); // MemTotal, MemFree, MemAvailable, Buffers, Cached
+                    foreach (var line in lines)
+                    {
+                        var parts = line.Split(':', StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length == 2)
+                        {
+                            result[parts[0].Trim()] = parts[1].Trim();
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to get system memory usage (Linux)");
+            }
+        }
+
+        return result;
+    }
+
+    private object GetNetworkInfo()
+    {
+        var interfaces = new List<object>();
+        try
+        {
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+                
+                interfaces.Add(new
+                {
+                    Name = nic.Name,
+                    Description = nic.Description,
+                    Status = nic.OperationalStatus.ToString(),
+                    Speed = nic.Speed > 0 ? (nic.Speed / 1000000) + " Mbps" : "Unknown",
+                    Addresses = nic.GetIPProperties().UnicastAddresses.Select(ua => ua.Address.ToString()).ToList()
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _loggerProvider.CreateLogger(nameof(SupportService)).LogError(ex, "Failed to get network info");
+        }
+        return interfaces;
+    }
+
+    private object GetRunningProcesses()
+    {
+        try
+        {
+            // Limit to top 50 by memory to avoid huge payloads
+            var processes = Process.GetProcesses()
+                .Select(p => {
+                    try { return new { p.Id, p.ProcessName, MemoryMB = p.WorkingSet64 / 1024 / 1024 }; }
+                    catch { return new { Id = p.Id, ProcessName = p.ProcessName, MemoryMB = 0L }; }
+                })
+                .OrderByDescending(p => p.MemoryMB)
+                .Take(50)
+                .ToList();
+            
+            return processes;
+        }
+        catch (Exception ex)
+        {
+            _loggerProvider.CreateLogger(nameof(SupportService)).LogError(ex, "Failed to list running processes");
+            return $"Error listing processes: {ex.Message}";
         }
     }
 }

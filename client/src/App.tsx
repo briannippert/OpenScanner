@@ -153,12 +153,7 @@ function App() {
   };
 
   const downloadSupportPackage = () => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    const url = `${protocol}//${backendHost}${portSuffix}/api/support/package`;
+    const url = `/api/support/package`;
     
     // Create a temporary link to trigger download with a better UX than window.location.href
     const link = document.createElement('a');
@@ -221,14 +216,7 @@ function App() {
 
   // Helper to send commands
   const sendCommand = (action: string, frequency?: number, value?: number) => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    const httpUrl = `${protocol}//${backendHost}${portSuffix}/api/control`;
-    
-    fetch(httpUrl, {
+    fetch('/api/control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, frequency, value })
@@ -346,15 +334,8 @@ function App() {
   };
 
   const deleteEntry = async (id: string) => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    const deleteUrl = `${protocol}//${backendHost}${portSuffix}/api/history/${id}`;
-
     try {
-        await fetch(deleteUrl, { method: 'DELETE' });
+        await fetch(`/api/history/${id}`, { method: 'DELETE' });
         setCallLog(prev => prev.filter(log => log.id !== id));
     } catch (e) {
         console.error("Delete failed:", e);
@@ -362,36 +343,21 @@ function App() {
   };
 
   const refreshChannels = () => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    fetch(`${protocol}//${backendHost}${portSuffix}/api/channels`)
+    fetch(`/api/channels`)
       .then(res => res.json())
       .then(data => setChannels(data))
       .catch(err => console.error("Failed to fetch channels:", err));
   };
 
   const refreshFireTones = () => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    fetch(`${protocol}//${backendHost}${portSuffix}/api/firetones`)
+    fetch(`/api/firetones`)
       .then(res => res.json())
       .then(data => setFireTones(data))
       .catch(err => console.error("Failed to fetch fire tones:", err));
   };
 
   const handleSaveChannel = async (channel: Channel) => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    const baseUrl = `${protocol}//${backendHost}${portSuffix}/api/channels`;
+    const baseUrl = `/api/channels`;
 
     const method = channel.id ? 'PUT' : 'POST';
     const url = channel.id ? `${baseUrl}/${channel.id}` : baseUrl;
@@ -409,14 +375,8 @@ function App() {
   };
 
   const handleDeleteChannel = async (id: number) => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    
     try {
-        await fetch(`${protocol}//${backendHost}${portSuffix}/api/channels/${id}`, { method: 'DELETE' });
+        await fetch(`/api/channels/${id}`, { method: 'DELETE' });
         refreshChannels();
     } catch (e) {
         console.error("Delete channel failed:", e);
@@ -424,12 +384,7 @@ function App() {
   };
 
   const handleSaveFireTone = async (tone: FireToneSet) => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    const baseUrl = `${protocol}//${backendHost}${portSuffix}/api/firetones`;
+    const baseUrl = `/api/firetones`;
 
     const method = tone.id ? 'PUT' : 'POST';
     const url = tone.id ? `${baseUrl}/${tone.id}` : baseUrl;
@@ -447,14 +402,8 @@ function App() {
   };
 
   const handleDeleteFireTone = async (id: number) => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const backendHost = window.location.hostname;
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-    
     try {
-        await fetch(`${protocol}//${backendHost}${portSuffix}/api/firetones/${id}`, { method: 'DELETE' });
+        await fetch(`/api/firetones/${id}`, { method: 'DELETE' });
         refreshFireTones();
     } catch (e) {
         console.error("Delete fire tone failed:", e);
@@ -462,19 +411,13 @@ function App() {
   };
 
   useEffect(() => {
-    const isDev = window.location.port === '5173';
-    const port = isDev ? '5212' : window.location.port || '80';
-    const protocol = window.location.protocol;
-    const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
-    const backendHost = window.location.hostname;
+    const channelsUrl = `/api/channels`;
+    const firetonesUrl = `/api/firetones`;
+    const historyUrl = `/api/history`;
     
-    const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-
-    const channelsUrl = `${protocol}//${backendHost}${portSuffix}/api/channels`;
-    const firetonesUrl = `${protocol}//${backendHost}${portSuffix}/api/firetones`;
-    const historyUrl = `${protocol}//${backendHost}${portSuffix}/api/history`;
-    const wsControlUrl = `${wsProtocol}//${backendHost}${portSuffix}/ws/control`;
-    const wsAudioUrl = `${wsProtocol}//${backendHost}${portSuffix}/ws/audio`;
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsControlUrl = `${wsProtocol}//${window.location.host}/ws/control`;
+    const wsAudioUrl = `${wsProtocol}//${window.location.host}/ws/audio`;
 
     fetch(channelsUrl)
       .then(res => res.json())

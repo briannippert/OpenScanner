@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Moq;
 using OpenScanner.Server.Controllers;
 using OpenScanner.Server.Interfaces;
@@ -13,6 +14,7 @@ public class OpenScannerControllerTests
     private readonly Mock<IDatabase> _dbMock;
     private readonly Mock<IRadioSource> _radioMock;
     private readonly Mock<ISupportService> _supportMock;
+    private readonly Mock<ILogger<OpenScannerController>> _loggerMock;
     private readonly OpenScannerController _controller;
 
     public OpenScannerControllerTests()
@@ -20,7 +22,8 @@ public class OpenScannerControllerTests
         _dbMock = new Mock<IDatabase>();
         _radioMock = new Mock<IRadioSource>();
         _supportMock = new Mock<ISupportService>();
-        _controller = new OpenScannerController(_dbMock.Object, _radioMock.Object, _supportMock.Object);
+        _loggerMock = new Mock<ILogger<OpenScannerController>>();
+        _controller = new OpenScannerController(_dbMock.Object, _radioMock.Object, _supportMock.Object, _loggerMock.Object);
     }
 
     [Fact]
@@ -36,6 +39,23 @@ public class OpenScannerControllerTests
         // Assert
         Assert.NotNull(result);
         Assert.Equal(info, result.Value);
+    }
+
+    [Fact]
+    public async Task GetSupportPackage_ReturnsFile()
+    {
+        // Arrange
+        var fileContent = new byte[] { 1, 2, 3 };
+        _supportMock.Setup(s => s.CreateSupportPackageAsync()).ReturnsAsync(fileContent);
+
+        // Act
+        var result = await _controller.GetSupportPackage() as FileContentResult;
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("application/zip", result.ContentType);
+        Assert.Equal(fileContent, result.FileContents);
+        Assert.StartsWith("openscanner_support_", result.FileDownloadName);
     }
 
     [Fact]

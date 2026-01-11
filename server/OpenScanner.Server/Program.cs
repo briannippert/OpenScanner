@@ -42,6 +42,12 @@ builder.Services.AddOpenApiDocument(config =>
     config.Title = "OpenScanner API";
     config.Version = "v1.0.0";
     config.Description = "API for controlling the OpenScanner radio system, managing channels, and accessing recording history.";
+    
+    // Ensure the generated document uses relative paths for servers, allowing access from any host/IP
+    config.PostProcess = document =>
+    {
+        document.Servers.Clear();
+    };
 });
 
 var app = builder.Build();
