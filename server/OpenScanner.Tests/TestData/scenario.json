@@ -3,11 +3,10 @@
     {
       "time": 5,
       "frequency": 155.0325,
-      "audio_file": "raw_p25_signal.wav",
+      "audio_file": "police_48k.wav",
       "duration": 4.8,
       "source_id": 1001,
-      "target_id": 1,
-      "decoder_type": "P25"
+      "target_id": 1
     },
     {
       "time": 20,
@@ -18,7 +17,7 @@
       "target_id": 2
     },
     {
-      "time": 40,
+      "time": 35,
       "frequency": 155.8875,
       "audio_file": "test_8k.wav",
       "duration": 9,
