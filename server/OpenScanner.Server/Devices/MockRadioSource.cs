@@ -445,7 +445,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
         try 
         {
             _currentDecoder = _decoderFactory.GetDecoder(ev.DecoderType);
-            _currentDecoder.InputSource = $"/usr/bin/ffmpeg -re -i \"{path}\" -f s16le -ar 48000 -ac 1 -";
+            _currentDecoder.InputSource = $"/usr/bin/ffmpeg -re -i '{path}' -af 'pan=1c|c0=c0' -f s16le -ar 48000 -ac 1 -";
             
             _currentDecoder.OnAudio += (chunk) => 
             {
@@ -468,6 +468,8 @@ public class MockRadioSource : BackgroundService, IRadioSource
                     CurrentTone = tone ?? _state.CurrentTone
                 });
             };
+
+            _currentDecoder.OnMetadata += (line) => _logger.LogDebug($"[Mock Decoder] {line}");
 
             await _currentDecoder.StartAsync(channel, token);
         }
