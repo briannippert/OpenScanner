@@ -1,12 +1,13 @@
 {
   "events": [
     {
-      "time": 5,
+      "time": 10,
       "frequency": 155.0325,
-      "audio_file": "police_48k.wav",
-      "duration": 4.8,
+      "audio_file": "p25_raw.wav",
+      "duration": 9.17,
       "source_id": 1001,
-      "target_id": 1
+      "target_id": 1,
+      "decoder_type": "P25"
     },
     {
       "time": 20,
