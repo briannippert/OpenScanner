@@ -15,6 +15,7 @@ public class MockRadioSourceTests
     private readonly Mock<IDatabase> _dbMock = new();
     private readonly Mock<GpsService> _gpsServiceMock;
     private readonly Mock<ToneDetector> _toneDetectorMock;
+    private readonly Mock<IDecoderFactory> _decoderFactoryMock = new();
 
     public MockRadioSourceTests()
     {
@@ -25,7 +26,7 @@ public class MockRadioSourceTests
     [Fact]
     public void MockRadioSource_InitializesInScanningMode()
     {
-        var source = new MockRadioSource(_loggerMock.Object, _dbMock.Object, _gpsServiceMock.Object, _toneDetectorMock.Object);
+        var source = new MockRadioSource(_loggerMock.Object, _dbMock.Object, _gpsServiceMock.Object, _toneDetectorMock.Object, _decoderFactoryMock.Object);
         source.Start();
         
         var state = source.GetState();
@@ -36,7 +37,7 @@ public class MockRadioSourceTests
     [Fact]
     public void MockRadioSource_HoldFrequency_UpdatesState()
     {
-        var source = new MockRadioSource(_loggerMock.Object, _dbMock.Object, _gpsServiceMock.Object, _toneDetectorMock.Object);
+        var source = new MockRadioSource(_loggerMock.Object, _dbMock.Object, _gpsServiceMock.Object, _toneDetectorMock.Object, _decoderFactoryMock.Object);
         source.HoldFrequency(155.0325);
         
         var state = source.GetState();
@@ -48,7 +49,7 @@ public class MockRadioSourceTests
     [Fact]
     public void MockRadioSource_Stop_ResetsState()
     {
-        var source = new MockRadioSource(_loggerMock.Object, _dbMock.Object, _gpsServiceMock.Object, _toneDetectorMock.Object);
+        var source = new MockRadioSource(_loggerMock.Object, _dbMock.Object, _gpsServiceMock.Object, _toneDetectorMock.Object, _decoderFactoryMock.Object);
         source.Start();
         source.Stop();
         
@@ -61,7 +62,7 @@ public class MockRadioSourceTests
     public void MockRadioSource_LoadsScenarioFile_OnInit()
     {
         // This relies on TestData/scenario.json being present in the output directory
-        var source = new MockRadioSource(_loggerMock.Object, _dbMock.Object, _gpsServiceMock.Object, _toneDetectorMock.Object);
+        var source = new MockRadioSource(_loggerMock.Object, _dbMock.Object, _gpsServiceMock.Object, _toneDetectorMock.Object, _decoderFactoryMock.Object);
         
         // We can't directly check private _scenarioEvents, but we can verify it doesn't log an error 
         // and we can check if it picks up an event if we wait (though that's more of a scenario test).
