@@ -196,7 +196,8 @@ if ! command -v dsd-fme &> /dev/null || ! ldconfig -p | grep -q libmbe; then
     cd build_deps
 
     # mbelib
-    if ! ldconfig -p | grep -q libmbe; then
+    # Check for library in cache AND header file presence to ensure valid dev environment
+    if ! ldconfig -p | grep -q libmbe || { [ ! -f "/usr/local/include/mbelib.h" ] && [ ! -f "/usr/include/mbelib.h" ]; }; then
         log_info "Building mbelib..."
         if [ ! -d "mbelib" ]; then
             git clone https://github.com/szechyjs/mbelib.git
@@ -218,7 +219,7 @@ if ! command -v dsd-fme &> /dev/null || ! ldconfig -p | grep -q libmbe; then
             git clone https://github.com/lwvmobile/dsd-fme.git
         fi
         cd dsd-fme
-        git pull origin master || true
+        git pull origin $(git branch --show-current) || true
         rm -rf build
         mkdir -p build && cd build
         cmake ..
