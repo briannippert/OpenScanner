@@ -38,8 +38,8 @@ OpenScanner is a high-performance, web-based digital radio scanner designed for 
 The unified installer handles everything: it installs required radio drivers (DSD-FME, mbelib), builds the .NET backend and React frontend, and sets up Whisper AI.
 
 ```bash
-chmod +x install_service.sh
-sudo ./install_service.sh
+chmod +x scripts/install_service.sh
+sudo ./scripts/install_service.sh
 ```
 
 ### 2. Access the UI
