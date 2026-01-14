@@ -111,28 +111,41 @@ fi
 
 # --- Check Node.js (For Client Build) ---
 NODE_PATH=$(which node || true)
-if [ -z "$NODE_PATH" ]; then
-    log_info "Node not in root PATH. Checking user's NVM..."
-    NVM_NODE=$(find "$REAL_HOME/.nvm/versions/node" -maxdepth 3 -name node -type f 2>/dev/null | grep "/bin/node" | sort -V | tail -n 1)
-    if [ -n "$NVM_NODE" ]; then
-        NODE_PATH="$NVM_NODE"
-        export PATH="$(dirname "$NODE_PATH"):$PATH"
-        log_success "Found Node via NVM: $NODE_PATH"
-    fi
-fi
 
 if [ -z "$NODE_PATH" ]; then
-    # Fallback checks
-    for path in /usr/bin/node /usr/local/bin/node; do
-        if [ -f "$path" ]; then
-            NODE_PATH="$path"
-            break
+    log_warn "Node.js not found! Attempting to install via NVM..."
+
+    # Ensure curl is present
+    if ! command -v curl &> /dev/null; then
+        if command -v apt-get &> /dev/null; then
+             log_info "Installing curl..."
+             apt-get update -qq && apt-get install -y -qq curl
+        else
+             log_error "curl is required but not found. Please install curl."
+             exit 1
         fi
-    done
-fi
+    fi
 
-if [ -z "$NODE_PATH" ]; then
-    log_warn "Node.js not found! Client build might fail."
+    # Download and install nvm
+    log_info "Installing nvm..."
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+
+    # Load nvm
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+    # Install Node.js 24
+    log_info "Installing Node.js 24..."
+    nvm install 24
+
+    NODE_PATH=$(which node || true)
+    if [ -n "$NODE_PATH" ]; then
+        log_success "Node.js installed successfully: $NODE_PATH"
+        log_info "Node version: $(node -v)"
+        log_info "NPM version: $(npm -v)"
+    else
+        log_error "Failed to install Node.js via NVM."
+    fi
 else
     log_success "Found Node: $NODE_PATH"
 fi
