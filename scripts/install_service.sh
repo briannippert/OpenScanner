@@ -28,7 +28,7 @@ fi
 # Detect Real User
 REAL_USER=${SUDO_USER:-$USER}
 REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
-PROJECT_ROOT=$(pwd)
+PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 log_step "Initializing Setup"
 log_info "Project Root: $PROJECT_ROOT"
@@ -316,7 +316,7 @@ log_step "Finalizing Permissions..."
 # Crucial: Give files back to the user so they can edit them later
 chown -R "$REAL_USER":"$REAL_USER" "$PROJECT_ROOT"
 # Restore executable bits for scripts
-chmod +x "$PROJECT_ROOT"/*.sh
+chmod +x "$PROJECT_ROOT"/scripts/*.sh
 
 IP_ADDR=$(hostname -I | awk '{print $1}')
 
