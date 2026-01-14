@@ -132,7 +132,30 @@ if [ -z "$NODE_PATH" ]; then
 fi
 
 if [ -z "$NODE_PATH" ]; then
-    log_warn "Node.js not found! Client build might fail."
+    log_warn "Node.js not found! Attempting to install Node.js 24 LTS..."
+
+    if command -v apt-get &> /dev/null; then
+        # Ensure curl is present
+        if ! command -v curl &> /dev/null; then
+             log_info "Installing curl..."
+             apt-get update -qq && apt-get install -y -qq curl
+        fi
+
+        # Install NodeSource repo and Node.js
+        log_info "Adding NodeSource repository..."
+        curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+        log_info "Installing Node.js..."
+        apt-get install -y -qq nodejs
+
+        NODE_PATH=$(which node || true)
+        if [ -n "$NODE_PATH" ]; then
+            log_success "Node.js installed successfully: $NODE_PATH"
+        else
+            log_error "Failed to install Node.js automatically."
+        fi
+    else
+        log_warn "Automatic installation not supported on this OS (apt-get not found). Please install Node.js manually."
+    fi
 else
     log_success "Found Node: $NODE_PATH"
 fi
