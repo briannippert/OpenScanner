@@ -199,8 +199,9 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         _manualOverride = false;
         
-        StopDecoding();
-        
+        StopDecoding(); // Stops the decoder
+        StopScanning(); // Stops the rtl_sdr process and the scanner loop
+
         // Lock out this channel for 10 seconds to avoid re-locking
         if (_state.CurrentChannel != null)
         {
@@ -212,10 +213,9 @@ public class RtlDevice : BackgroundService, IRadioSource
         {
             _logger.LogWarning("ResumeScan executed, but CurrentChannel was null. No lockout applied.");
         }
-        _recordingLockoutUntil = DateTime.UtcNow.AddSeconds(3); // Keep recording lockout as is
+        _recordingLockoutUntil = DateTime.UtcNow.AddSeconds(3);
         
-        // Immediately update state to scanning to allow StartScanning to proceed
-        UpdateState(_state with { Status = "SCANNING", ManualHoldFrequency = null });
+        // State is updated within StartScanning
         
         // Small delay to let hardware settle before restarting the scan
         Task.Delay(250).ContinueWith(_ => StartScanning());
