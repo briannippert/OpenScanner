@@ -214,7 +214,8 @@ public class RtlDevice : BackgroundService, IRadioSource
         }
         _recordingLockoutUntil = DateTime.UtcNow.AddSeconds(3); // Keep recording lockout as is
         
-        UpdateState(_state with { ManualHoldFrequency = null });
+        // Immediately update state to scanning to allow StartScanning to proceed
+        UpdateState(_state with { Status = "SCANNING", ManualHoldFrequency = null });
         
         // Small delay to let hardware settle before restarting the scan
         Task.Delay(250).ContinueWith(_ => StartScanning());
