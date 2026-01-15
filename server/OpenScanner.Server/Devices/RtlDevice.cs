@@ -190,7 +190,11 @@ public class RtlDevice : BackgroundService, IRadioSource
         _logger.LogInformation("Resume/Skip requested.");
 
         // Allow skipping if either on manual hold or receiving a transmission
-        if (!_manualOverride && _state.Status != "RECEIVING") return;
+        if (!_manualOverride && _state.Status != "RECEIVING")
+        {
+            _logger.LogWarning("ResumeScan called but not in a valid state to skip (not manual override and not receiving).");
+            return;
+        }
 
         _manualOverride = false;
         
@@ -199,8 +203,13 @@ public class RtlDevice : BackgroundService, IRadioSource
         // Lock out this channel for 10 seconds to avoid re-locking
         if (_state.CurrentChannel != null)
         {
-            _channelLockouts[_state.CurrentChannel.Frequency] = DateTime.UtcNow.AddSeconds(10); 
-            _logger.LogInformation($"Applying 10s lockout for channel: {_state.CurrentChannel.AlphaTag}");
+            var lockoutFrequency = _state.CurrentChannel.Frequency;
+            _channelLockouts[lockoutFrequency] = DateTime.UtcNow.AddSeconds(10); 
+            _logger.LogInformation($"Applying 10s lockout for channel: {_state.CurrentChannel.AlphaTag} ({lockoutFrequency} MHz)");
+        }
+        else
+        {
+            _logger.LogWarning("ResumeScan executed, but CurrentChannel was null. No lockout applied.");
         }
         _recordingLockoutUntil = DateTime.UtcNow.AddSeconds(3); // Keep recording lockout as is
         
@@ -445,13 +454,24 @@ public class RtlDevice : BackgroundService, IRadioSource
         for (int i = 0; i < fftSize; i++) sum += fftDb[i];
         double avgNoise = sum / fftSize;
 
+        // Clean up old lockouts to prevent memory leak
+        var expiredLockouts = _channelLockouts.Where(kvp => DateTime.UtcNow >= kvp.Value).Select(kvp => kvp.Key).ToList();
+        if (expiredLockouts.Any())
+        {
+            foreach (var key in expiredLockouts)
+            {
+                _channelLockouts.Remove(key);
+                _logger.LogDebug($"Removed expired lockout for frequency {key}");
+            }
+        }
+
         foreach (var channel in _channels)
         {
             // Check for channel lockout
             if (_channelLockouts.TryGetValue(channel.Frequency, out var lockoutUntil) && DateTime.UtcNow < lockoutUntil)
             {
-                _logger.LogDebug($"Channel {channel.AlphaTag} ({channel.Frequency} MHz) is locked out until {lockoutUntil:HH:mm:ss}");
-                continue; // Skip this channel if it's locked out
+                _logger.LogInformation($"--> Channel {channel.AlphaTag} ({channel.Frequency} MHz) is currently locked out until {lockoutUntil:HH:mm:ss}. Skipping.");
+                continue;
             }
 
             double freqDiff = (channel.Frequency - centerFreq) * 1000000;
