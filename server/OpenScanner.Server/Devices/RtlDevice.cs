@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
 using OpenScanner.Server.Models;
@@ -57,7 +58,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     private int _preRollSize = 0;
     private const int MaxPreRollBytes = 48000 * 2 * 2; // 2 seconds (48k, 16bit)
     private readonly object _audioLock = new();
-    private readonly Dictionary<double, DateTime> _channelLockouts = new();
+    private readonly ConcurrentDictionary<double, DateTime> _channelLockouts = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RtlDevice"/> class.
@@ -455,13 +456,18 @@ public class RtlDevice : BackgroundService, IRadioSource
         double avgNoise = sum / fftSize;
 
         // Clean up old lockouts to prevent memory leak
-        var expiredLockouts = _channelLockouts.Where(kvp => DateTime.UtcNow >= kvp.Value).Select(kvp => kvp.Key).ToList();
-        if (expiredLockouts.Any())
+        if (!_channelLockouts.IsEmpty)
         {
-            foreach (var key in expiredLockouts)
+            var expiredLockouts = _channelLockouts.Where(kvp => DateTime.UtcNow >= kvp.Value).Select(kvp => kvp.Key).ToList();
+            if (expiredLockouts.Any())
             {
-                _channelLockouts.Remove(key);
-                _logger.LogDebug($"Removed expired lockout for frequency {key}");
+                foreach (var key in expiredLockouts)
+                {
+                    if (_channelLockouts.TryRemove(key, out _))
+                    {
+                        _logger.LogDebug($"Removed expired lockout for frequency {key}");
+                    }
+                }
             }
         }
 
