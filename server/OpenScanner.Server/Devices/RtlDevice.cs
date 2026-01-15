@@ -186,15 +186,29 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// <inheritdoc />
     public void ResumeScan()
     {
-        if (!_manualOverride) return;
+        _logger.LogInformation("Resume/Skip requested.");
+
+        // Allow skipping if either on manual hold or receiving a transmission
+        if (!_manualOverride && _state.Status != "RECEIVING") return;
+
         _manualOverride = false;
         
         StopDecoding();
+        
+        // Lock out this channel for a few seconds to avoid re-locking
+        if (_state.CurrentChannel != null)
+        {
+            // By setting hits to a large negative number, we ensure it won't meet the `hitsNeeded` threshold
+            // until the signal is gone and it gets reset to 0.
+            _channelHits[_state.CurrentChannel.Frequency] = -99; 
+            _logger.LogInformation($"Applying temporary lockout for channel: {_state.CurrentChannel.AlphaTag}");
+        }
         _recordingLockoutUntil = DateTime.UtcNow.AddSeconds(3);
+        
         UpdateState(_state with { ManualHoldFrequency = null });
         
-        // Small delay to let hardware settle
-        Task.Delay(500).ContinueWith(_ => StartScanning());
+        // Small delay to let hardware settle before restarting the scan
+        Task.Delay(250).ContinueWith(_ => StartScanning());
     }
 
     /// <inheritdoc />
