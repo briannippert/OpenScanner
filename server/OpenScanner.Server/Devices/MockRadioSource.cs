@@ -161,9 +161,25 @@ public class MockRadioSource : BackgroundService, IRadioSource
     /// <inheritdoc />
     public void ResumeScan()
     {
-        _logger.LogInformation("[Mock] Resuming scan");
+        _logger.LogInformation("[Mock] Resuming scan (Skip)");
+
+        // If currently receiving, and not on manual hold, try to skip the current event
+        if (_state.Status == "RECEIVING" && !_manualHold)
+        {
+            var elapsed = (DateTime.UtcNow - _scenarioStartTime).TotalSeconds;
+            var activeEvent = _scenarioEvents.FirstOrDefault(e => elapsed >= e.Time && elapsed <= (e.Time + e.Duration));
+            
+            if (activeEvent != null)
+            {
+                // Move scenario start time forward to skip this event
+                _scenarioStartTime = DateTime.UtcNow - TimeSpan.FromSeconds(activeEvent.Time + activeEvent.Duration + 0.1); // Add a small buffer
+                _logger.LogInformation($"[Mock] Skipped current event at {activeEvent.Frequency} MHz. New scenario start time adjusted.");
+            }
+        }
+        
         _manualHold = false;
         _holdFrequency = null;
+        _playbackCts?.Cancel();
         _currentDecoder?.Stop();
         _currentDecoder = null;
         UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, ManualHoldFrequency = null });
