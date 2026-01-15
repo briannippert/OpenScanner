@@ -72,6 +72,7 @@ public class Database : IDatabase
         try { conn.Execute("ALTER TABLE channels ADD COLUMN lat REAL;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: lat column already exists or failed"); }
         try { conn.Execute("ALTER TABLE channels ADD COLUMN lon REAL;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: lon column already exists or failed"); }
         try { conn.Execute("ALTER TABLE channels ADD COLUMN range REAL;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: range column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE channels ADD COLUMN avoid INTEGER DEFAULT 0;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: avoid column already exists or failed"); }
 
         conn.Execute(@"
             CREATE TABLE IF NOT EXISTS fire_tones (

@@ -474,6 +474,8 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         foreach (var channel in _channels)
         {
+            if (channel.Avoid) continue;
+
             // Check for channel lockout
             if (_channelLockouts.TryGetValue(channel.Frequency, out var lockoutUntil) && DateTime.UtcNow < lockoutUntil)
             {

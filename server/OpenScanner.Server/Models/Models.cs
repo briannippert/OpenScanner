@@ -67,9 +67,14 @@ public class Channel
     /// </summary>
     public double? Range { get; set; } // in miles
 
+    /// <summary>
+    /// If true, the channel will be skipped during scanning.
+    /// </summary>
+    public bool Avoid { get; set; }
+
     public Channel() { }
 
-    public Channel(double frequency, string alphaTag, string description, string mode = "P25", string type = "RM", string tone = "", string tag = "", string license = "")
+    public Channel(double frequency, string alphaTag, string description, string mode = "P25", string type = "RM", string tone = "", string tag = "", string license = "", bool avoid = false)
     {
         Frequency = frequency;
         AlphaTag = alphaTag;
@@ -79,6 +84,7 @@ public class Channel
         Tone = tone;
         Tag = tag;
         License = license;
+        Avoid = avoid;
     }
 }
 

@@ -39,9 +39,14 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
     
     if ((state.status === 'SCANNING' || !isProgrammed) && channels.length > 0) {
         // Show cycling channels
-        displayFreq = channels[scanIndex % channels.length].frequency;
-        displayAlpha = channels[scanIndex % channels.length].alphaTag;
+        const nonAvoidedChannels = channels.filter(c => !c.avoid);
+        if (nonAvoidedChannels.length > 0) {
+            const currentDisplayChannel = nonAvoidedChannels[scanIndex % nonAvoidedChannels.length];
+            displayFreq = currentDisplayChannel.frequency;
+            displayAlpha = currentDisplayChannel.alphaTag;
+        }
     }
+
 
     return (
         <Paper 

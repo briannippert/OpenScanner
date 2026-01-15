@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider } from '@mui/material';
+import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider, Button } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
 import ChannelManager from './components/ChannelManager';
 import FireToneManager from './components/FireToneManager';
@@ -795,7 +795,7 @@ function App() {
                                             '&:hover': { bgcolor: '#222' }
                                         }}
                                     >
-                                        <CardActionArea onClick={() => handleChannelClick(ch)} sx={{ p: 2 }}>
+                                        <CardActionArea sx={{ p: 2 }}>
                                             <Box display="flex" justifyContent="space-between" alignItems="flex-start">
                                                 <Box>
                                                     <Typography variant="subtitle1" fontWeight="bold" color={manualHold === ch.frequency ? 'warning.main' : 'text.primary'}>
@@ -816,7 +816,35 @@ function App() {
                                                     sx={{ height: 20, fontSize: '0.65rem', bgcolor: '#333' }} 
                                                 />
                                                 <Box flexGrow={1} />
-                                                {manualHold === ch.frequency ? <PauseIcon fontSize="small" color="warning" /> : <PlayArrowIcon fontSize="small" sx={{ opacity: 0.3 }} />}
+                                                <Button
+                                                    variant="contained"
+                                                    size="small"
+                                                    onClick={() => handleSaveChannel({ ...ch, avoid: !ch.avoid })}
+                                                    sx={{ 
+                                                        bgcolor: ch.avoid ? 'error.main' : '#1c1c1c',
+                                                        color: ch.avoid ? 'white' : 'text.primary',
+                                                        minWidth: 'auto', 
+                                                        padding: '4px 8px', 
+                                                        fontSize: '0.7rem',
+                                                        mr: 1
+                                                    }}
+                                                >
+                                                    AVOID
+                                                </Button>
+                                                <Button
+                                                    variant="contained"
+                                                    size="small"
+                                                    onClick={() => handleChannelClick(ch)}
+                                                    sx={{ 
+                                                        bgcolor: manualHold === ch.frequency ? 'warning.main' : '#1c1c1c',
+                                                        color: manualHold === ch.frequency ? 'white' : 'text.primary',
+                                                        minWidth: 'auto', 
+                                                        padding: '4px 8px', 
+                                                        fontSize: '0.7rem'
+                                                    }}
+                                                >
+                                                    HOLD
+                                                </Button>
                                             </Box>
                                         </CardActionArea>
                                     </Card>

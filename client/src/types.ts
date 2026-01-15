@@ -8,6 +8,7 @@ export interface Channel {
     description: string;
     mode: string;
     tag: string;
+    avoid: boolean;
 }
 
 export interface ScannerState {
