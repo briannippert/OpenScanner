@@ -57,6 +57,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     private int _preRollSize = 0;
     private const int MaxPreRollBytes = 48000 * 2 * 2; // 2 seconds (48k, 16bit)
     private readonly object _audioLock = new();
+    private readonly Dictionary<double, DateTime> _channelLockouts = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RtlDevice"/> class.
@@ -195,15 +196,13 @@ public class RtlDevice : BackgroundService, IRadioSource
         
         StopDecoding();
         
-        // Lock out this channel for a few seconds to avoid re-locking
+        // Lock out this channel for 10 seconds to avoid re-locking
         if (_state.CurrentChannel != null)
         {
-            // By setting hits to a large negative number, we ensure it won't meet the `hitsNeeded` threshold
-            // until the signal is gone and it gets reset to 0.
-            _channelHits[_state.CurrentChannel.Frequency] = -99; 
-            _logger.LogInformation($"Applying temporary lockout for channel: {_state.CurrentChannel.AlphaTag}");
+            _channelLockouts[_state.CurrentChannel.Frequency] = DateTime.UtcNow.AddSeconds(10); 
+            _logger.LogInformation($"Applying 10s lockout for channel: {_state.CurrentChannel.AlphaTag}");
         }
-        _recordingLockoutUntil = DateTime.UtcNow.AddSeconds(3);
+        _recordingLockoutUntil = DateTime.UtcNow.AddSeconds(3); // Keep recording lockout as is
         
         UpdateState(_state with { ManualHoldFrequency = null });
         
@@ -448,6 +447,13 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         foreach (var channel in _channels)
         {
+            // Check for channel lockout
+            if (_channelLockouts.TryGetValue(channel.Frequency, out var lockoutUntil) && DateTime.UtcNow < lockoutUntil)
+            {
+                _logger.LogDebug($"Channel {channel.AlphaTag} ({channel.Frequency} MHz) is locked out until {lockoutUntil:HH:mm:ss}");
+                continue; // Skip this channel if it's locked out
+            }
+
             double freqDiff = (channel.Frequency - centerFreq) * 1000000;
             int binIndex = (int)((freqDiff / sampleRate) * fftSize + fftSize / 2.0);
 
