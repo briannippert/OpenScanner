@@ -120,7 +120,7 @@ function App() {
       if (window.audioCtx && !filterNodeRef.current) {
           const filter = window.audioCtx.createBiquadFilter();
           filter.type = 'lowpass';
-          filter.frequency.value = 4000;
+          filter.frequency.value = 2000;
           if (gainNodeRef.current) {
               filter.connect(gainNodeRef.current);
           }
@@ -548,7 +548,7 @@ function App() {
                 if (!filterNodeRef.current || filterNodeRef.current.context !== ctx) {
                     const filter = ctx.createBiquadFilter();
                     filter.type = 'lowpass';
-                    filter.frequency.value = 4000;
+                    filter.frequency.value = 2000;
                     filter.connect(gainNodeRef.current);
                     filterNodeRef.current = filter;
                 }
