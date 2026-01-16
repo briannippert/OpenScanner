@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider, Button } from '@mui/material';
+import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider, Button } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
 import ChannelManager from './components/ChannelManager';
 import FireToneManager from './components/FireToneManager';
@@ -229,7 +229,10 @@ function App() {
           window.audioCtx.resume();
       }
 
-      if (manualHold === ch.frequency) {
+      // Check if we are already holding this frequency (with tolerance for float precision)
+      const isHolding = manualHold !== undefined && Math.abs(manualHold - ch.frequency) < 0.0001;
+
+      if (isHolding) {
           sendCommand('scan');
       } else {
           sendCommand('hold', ch.frequency);
@@ -795,7 +798,7 @@ function App() {
                                             '&:hover': { bgcolor: '#222' }
                                         }}
                                     >
-                                        <CardActionArea sx={{ p: 2 }}>
+                                        <Box sx={{ p: 2 }}>
                                             <Box display="flex" justifyContent="space-between" alignItems="flex-start">
                                                 <Box>
                                                     <Typography variant="subtitle1" fontWeight="bold" color={manualHold === ch.frequency ? 'warning.main' : 'text.primary'}>
@@ -846,7 +849,7 @@ function App() {
                                                     HOLD
                                                 </Button>
                                             </Box>
-                                        </CardActionArea>
+                                        </Box>
                                     </Card>
                                 </Grid>
                             ))}

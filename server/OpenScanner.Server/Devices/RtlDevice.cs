@@ -272,7 +272,7 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         _channelHits.Clear();
         _scanStartTime = DateTime.UtcNow;
-        UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0 });
+        UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0, ManualHoldFrequency = null });
 
         var min = _channels.Min(c => c.Frequency);
         var max = _channels.Max(c => c.Frequency);
