@@ -135,7 +135,7 @@ public class WebSocketBroadcaster
 
     private void BroadcastAudio(byte[] audioData)
     {
-        // _logger.LogInformation($"Broadcasting audio: {audioData.Length} bytes to {_audioSessions.Count} clients");
+        _logger.LogInformation($"Broadcasting audio: {audioData.Length} bytes to {_audioSessions.Count} clients");
         if (_audioSessions.IsEmpty) return;
         _ = BroadcastBinary(audioData);
     }

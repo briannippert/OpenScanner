@@ -136,8 +136,8 @@ public class MockRadioSource : BackgroundService, IRadioSource
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Auto-start if configured? For now wait for Start call or use simplistic approach.
-        // In real app, Program.cs calls Start(). 
+        // Auto-start the mock simulation on startup
+        Start();
         await Task.CompletedTask;
     }
 
@@ -173,36 +173,48 @@ public class MockRadioSource : BackgroundService, IRadioSource
                         {
                             // Lock onto it
                             var channel = _channelService.Channels.FirstOrDefault(c => Math.Abs(c.Frequency - activeEvent.Frequency) < 0.001);
-                            if (channel == null)
-                            {
-                                // Mock channel if not found
-                                channel = new Channel(activeEvent.Frequency, "Mock", "Mock Channel", activeEvent.DecoderType ?? "FM", "FM");
-                            }
-
-                            UpdateState(_state with { 
-                                Status = _manualOverride ? "MONITORING" : "RECEIVING",
-                                CurrentFrequency = activeEvent.Frequency,
-                                CurrentChannel = channel,
-                                SourceID = activeEvent.SourceId,
-                                TargetID = activeEvent.TargetId
-                            });
                             
-                            // Start recording via service
-                            if (!_recordingService.IsRecording)
+                            // Check if avoided
+                            if (channel != null && channel.Avoid && !_manualOverride)
                             {
-                                _recordingService.StartRecording(channel, activeEvent.SourceId, activeEvent.TargetId, _preRollBuffer);
+                                canHear = false;
+                            }
+                            else
+                            {
+                                if (channel == null)
+                                {
+                                    // Mock channel if not found
+                                    channel = new Channel(activeEvent.Frequency, "Mock", "Mock Channel", activeEvent.DecoderType ?? "FM", "FM");
+                                }
+
+                                UpdateState(_state with { 
+                                    Status = _manualOverride ? "MONITORING" : "RECEIVING",
+                                    CurrentFrequency = activeEvent.Frequency,
+                                    CurrentChannel = channel,
+                                    SourceID = activeEvent.SourceId,
+                                    TargetID = activeEvent.TargetId
+                                });
+                                
+                                // Start recording via service
+                                if (!_recordingService.IsRecording)
+                                {
+                                    _recordingService.StartRecording(channel, activeEvent.SourceId, activeEvent.TargetId, _preRollBuffer);
+                                }
                             }
                         }
 
-                        // Simulate Audio
-                        if (!string.IsNullOrEmpty(activeEvent.AudioFile))
+                        if (canHear)
                         {
-                            await PlayAudioFile(activeEvent.AudioFile, token);
-                        }
-                        else
-                        {
-                            // Generate silence or noise
-                            await Task.Delay(100, token);
+                            // Simulate Audio
+                            if (!string.IsNullOrEmpty(activeEvent.AudioFile))
+                            {
+                                await PlayAudioFile(activeEvent.AudioFile, token);
+                            }
+                            else
+                            {
+                                // Generate silence or noise
+                                await Task.Delay(100, token);
+                            }
                         }
                     }
                     else
@@ -239,6 +251,10 @@ public class MockRadioSource : BackgroundService, IRadioSource
     {
         // Look for file in TestData
         var path = Path.Combine(Directory.GetCurrentDirectory(), "TestData", filename);
+        
+        // Debug path
+        // _logger.LogInformation($"Attempting to play audio from: {path}");
+
         // Fallback for tests
         if (!File.Exists(path)) path = Path.Combine(Directory.GetCurrentDirectory(), "bin/Debug/net10.0/TestData", filename);
         if (!File.Exists(path)) 
@@ -249,6 +265,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
 
         if (File.Exists(path))
         {
+            // _logger.LogInformation($"Playing audio file: {path}");
             // Mock: Just read chunks and fire OnAudio
             // For real fidelity, we should respect sample rate.
             // Assuming 48k 16bit mono for now as per system standard.
@@ -270,6 +287,10 @@ public class MockRadioSource : BackgroundService, IRadioSource
                 // Throttle
                 await Task.Delay(33, token);
             }
+        }
+        else
+        {
+            _logger.LogWarning($"Audio file not found: {filename}. Searched at {path} and TestData subdirs.");
         }
     }
 

@@ -24,4 +24,11 @@
     <EmbeddedResource Include="Sql/**/*.sql" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Remove="TestData/**/*" />
+    <Content Include="TestData/**/*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
