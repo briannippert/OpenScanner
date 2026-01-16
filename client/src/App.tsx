@@ -87,6 +87,7 @@ function App() {
   const wsAudio = useRef<WebSocket | null>(null);
   const audioAnalyserRef = useRef<AnalyserNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
+  const filterNodeRef = useRef<BiquadFilterNode | null>(null);
   const wakeLock = useRef<WakeLockSentinel | null>(null);
   const activeSource = useRef<AudioBufferSourceNode | null>(null);
 
@@ -114,6 +115,16 @@ function App() {
           gainNode.gain.value = volume;
           gainNode.connect(window.audioCtx.destination);
           gainNodeRef.current = gainNode;
+      }
+
+      if (window.audioCtx && !filterNodeRef.current) {
+          const filter = window.audioCtx.createBiquadFilter();
+          filter.type = 'lowpass';
+          filter.frequency.value = 4000;
+          if (gainNodeRef.current) {
+              filter.connect(gainNodeRef.current);
+          }
+          filterNodeRef.current = filter;
       }
 
       if (window.audioCtx && window.audioCtx.state === 'suspended') {
@@ -481,12 +492,12 @@ function App() {
 
         wsAudio.current.onmessage = async (event) => {
           // Debug: Log EVERYTHING received
-          console.log("[Audio DEBUG] Message received:", event.data);
+          // console.log("[Audio DEBUG] Message received:", event.data);
 
           if (event.data instanceof Blob) {
             try {
                 // Log incoming data size
-                console.log(`[Audio] Received Blob size: ${event.data.size}`);
+                // console.log(`[Audio] Received Blob size: ${event.data.size}`);
 
                 // Handle Audio
                 const arrayBuffer = await event.data.arrayBuffer();
@@ -531,6 +542,15 @@ function App() {
                     gainNode.gain.value = volume;
                     gainNode.connect(ctx.destination);
                     gainNodeRef.current = gainNode;
+                    filterNodeRef.current = null; // Force filter recreation
+                }
+
+                if (!filterNodeRef.current || filterNodeRef.current.context !== ctx) {
+                    const filter = ctx.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    filter.frequency.value = 4000;
+                    filter.connect(gainNodeRef.current);
+                    filterNodeRef.current = filter;
                 }
 
                 let analyser = audioAnalyserRef.current;
@@ -541,7 +561,7 @@ function App() {
                     analyser = ctx.createAnalyser();
                     analyser.fftSize = 1024;
                     
-                    analyser.connect(gainNodeRef.current);
+                    analyser.connect(filterNodeRef.current);
                     
                     audioAnalyserRef.current = analyser;
                     setAudioAnalyser(analyser);
@@ -559,17 +579,18 @@ function App() {
                     
                     // Scheduler to prevent crackling/overlaps
                     const currentTime = ctx.currentTime;
-                    // Reduced jitter buffer for lower latency (50ms)
-                    const JITTER_BUFFER = 0.05; 
+                    // Jitter buffer: 0.15s (150ms) gives more headroom than 50ms to prevent choppy audio
+                    // caused by network variance, at the cost of slight latency.
+                    const JITTER_BUFFER = 0.15; 
                     const MAX_DRIFT = 0.5; // Reset if > 500ms ahead
 
                     if (nextStartTime.current < currentTime) {
-                        // Underrun: We fell behind. Resume immediately.
+                        // Underrun: We fell behind. Resume immediately + small safety buffer
                         // console.log("[Audio] Underrun detected, resetting sync");
-                        nextStartTime.current = currentTime;
+                        nextStartTime.current = currentTime + 0.05; 
                     } else if (nextStartTime.current > currentTime + MAX_DRIFT) {
                         // Drift: We are too far ahead. Reset to tight buffer.
-                        console.log("[Audio] Large drift detected, resetting sync");
+                        // console.log("[Audio] Large drift detected, resetting sync");
                         nextStartTime.current = currentTime + JITTER_BUFFER;
                     }
                     
