@@ -17,6 +17,9 @@ public class RtlDevice : BackgroundService, IRadioSource
     private readonly GpsService _gps;
     private readonly ToneDetector _toneDetector;
     private readonly IDecoderFactory _decoderFactory;
+    private readonly ITranscriptionService _transcriptionService;
+    private readonly IRecordingService _recordingService;
+    private readonly IChannelService _channelService;
 
     /// <inheritdoc />
     public event Action<ScannerState>? OnStateChanged;
@@ -27,103 +30,70 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// <inheritdoc />
     public event Action<byte[]>? OnAudio;
 
-    private string? _currentRecordingPath;
     private ScannerState _state = new ScannerState("IDLE", 0);
-    private List<Channel> _channels = new();
     private bool _manualOverride = false;
     
     private string? _lastDetectedTone;
 
-    private (double Lat, double Lon)? _lastGeoPosition;
     private DateTime _recordingLockoutUntil = DateTime.MinValue;
     private CancellationTokenSource? _scanCts;
     private Process? _scannerProcess;
     private Dictionary<double, int> _channelHits = new();
     private DateTime _scanStartTime;
     private CancellationTokenSource? _sessionTimeoutCts;
-    private FileStream? _recordingStream;
     private CancellationTokenSource? _decodeCts;
     private IDecoder? _currentDecoder;
     private CancellationTokenSource? _activityTimeoutCts;
-    private long _recordingStartTime;
-    private int? _currentSourceID;
-    private int? _currentTargetID;
     private DateTime _lastActivityReset = DateTime.MinValue;
 
     private FileStream? _iqDumpStream;
     private string? _iqDumpPath;
-
-    // Pre-roll buffer to capture start of transmissions
+    
+    // Audio buffering
     private readonly LinkedList<byte[]> _preRollBuffer = new();
-    private int _preRollSize = 0;
-    private const int MaxPreRollBytes = 48000 * 2 * 2; // 2 seconds (48k, 16bit)
-    private readonly object _audioLock = new();
+    private const int PreRollMaxBytes = 96000 * 2; // ~2 seconds at 48kHz 16-bit
+
     private readonly ConcurrentDictionary<double, DateTime> _channelLockouts = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RtlDevice"/> class.
     /// </summary>
-    public RtlDevice(IDatabase db, ILogger<RtlDevice> logger, GpsService gps, ToneDetector toneDetector, IDecoderFactory decoderFactory)
+    public RtlDevice(
+        IDatabase db, 
+        ILogger<RtlDevice> logger, 
+        GpsService gps, 
+        ToneDetector toneDetector, 
+        IDecoderFactory decoderFactory, 
+        ITranscriptionService transcriptionService, 
+        IRecordingService recordingService,
+        IChannelService channelService)
     {
         _db = db;
         _logger = logger;
         _gps = gps;
         _toneDetector = toneDetector;
         _decoderFactory = decoderFactory;
+        _transcriptionService = transcriptionService;
+        _recordingService = recordingService;
+        _channelService = channelService;
         _state = new ScannerState("IDLE", 0);
         
         _gps.OnGpsUpdate += (data) => 
         {
             UpdateState(_state with { Gps = data });
-            CheckGeoRefresh(data.Lat, data.Lon);
+            _channelService.CheckGeoRefresh(data.Lat, data.Lon);
         };
 
         _toneDetector.OnToneDetected += (tone) => {
             _lastDetectedTone = tone.Name;
             UpdateState(_state with { LastDetectedTone = tone.Name });
         };
+
+        _recordingService.OnNewLog += (log) => {
+            OnNewLog?.Invoke(log);
+        };
         
-        ReloadChannels();
-    }
-
-    private void CheckGeoRefresh(double lat, double lon)
-    {
-        if (!_lastGeoPosition.HasValue)
-        {
-            _lastGeoPosition = (lat, lon);
-            RefreshGeoChannels(lat, lon);
-            return;
-        }
-
-        // Only refresh if moved > 1 mile
-        double dist = CalculateDistance(_lastGeoPosition.Value.Lat, _lastGeoPosition.Value.Lon, lat, lon);
-        if (dist > 1.0)
-        {
-            _lastGeoPosition = (lat, lon);
-            RefreshGeoChannels(lat, lon);
-        }
-    }
-
-    private void RefreshGeoChannels(double lat, double lon)
-    {
-        Task.Run(async () => {
-            var localChannels = (await _db.GetChannelsNearAsync(lat, lon)).ToList();
-            if (localChannels.Count > 0)
-            {
-                _logger.LogInformation($"Geo-Sync: Found {localChannels.Count} local channels.");
-                _channels = localChannels; 
-            }
-        });
-    }
-
-    private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
-    {
-        var d1 = lat1 * (Math.PI / 180.0);
-        var num1 = lon1 * (Math.PI / 180.0);
-        var d2 = lat2 * (Math.PI / 180.0);
-        var num2 = lon2 * (Math.PI / 180.0) - num1;
-        var d3 = Math.Pow(Math.Sin((d2 - d1) / 2.0), 2.0) + Math.Cos(d1) * Math.Cos(d2) * Math.Pow(Math.Sin(num2 / 2.0), 2.0);
-        return 6376500.0 * (2.0 * Math.Atan2(Math.Sqrt(d3), Math.Sqrt(1.0 - d3))) * 0.000621371;
+        _channelService.ReloadChannels();
     }
 
     /// <inheritdoc />
@@ -132,10 +102,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// <inheritdoc />
     public void ReloadChannels()
     {
-        Task.Run(async () => {
-            _channels = (await _db.GetAllChannelsAsync()).ToList();
-            _logger.LogInformation($"Loaded {_channels.Count} channels.");
-        });
+        _channelService.ReloadChannels();
     }
 
     /// <inheritdoc />
@@ -171,7 +138,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// <inheritdoc />
     public void HoldFrequency(double freq)
     {
-        var channel = _channels.FirstOrDefault(c => Math.Abs(c.Frequency - freq) < 0.001);
+        var channel = _channelService.Channels.FirstOrDefault(c => Math.Abs(c.Frequency - freq) < 0.001);
         if (channel == null) return;
 
         _logger.LogInformation($"Manual hold on {channel.AlphaTag}");
@@ -206,6 +173,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         if (_state.CurrentChannel != null)
         {
             var lockoutFrequency = _state.CurrentChannel.Frequency;
+            //Need to configure this to be a setting you can set from the front end
             _channelLockouts[lockoutFrequency] = DateTime.UtcNow.AddSeconds(10); 
             _logger.LogInformation($"Applying 10s lockout for channel: {_state.CurrentChannel.AlphaTag} ({lockoutFrequency} MHz)");
         }
@@ -268,14 +236,14 @@ public class RtlDevice : BackgroundService, IRadioSource
 
     private void StartScanning()
     {
-        if (_channels.Count == 0 || _manualOverride || _state.Status == "RECEIVING") return;
+        if (_channelService.Channels.Count == 0 || _manualOverride || _state.Status == "RECEIVING") return;
 
         _channelHits.Clear();
         _scanStartTime = DateTime.UtcNow;
         UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0, ManualHoldFrequency = null });
 
-        var min = _channels.Min(c => c.Frequency);
-        var max = _channels.Max(c => c.Frequency);
+        var min = _channelService.Channels.Min(c => c.Frequency);
+        var max = _channelService.Channels.Max(c => c.Frequency);
         var center = (min + max) / 2.0;
         var rate = 2048000;
 
@@ -472,7 +440,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             }
         }
 
-        foreach (var channel in _channels)
+        foreach (var channel in _channelService.Channels)
         {
             if (channel.Avoid) continue;
 
@@ -564,7 +532,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             if (!token.IsCancellationRequested)
             {
                 // If we are currently recording, don't timeout
-                if (_recordingStream != null) return;
+                if (_recordingService.IsRecording) return;
 
                 _logger.LogInformation("Session timeout (no data), resuming scan...");
                 StopDecoding();
@@ -577,24 +545,26 @@ public class RtlDevice : BackgroundService, IRadioSource
     private void StopDecoding()
     {
         _decodeCts?.Cancel();
-        StopRecording();
+        if (_state.CurrentChannel != null)
+        {
+            _recordingService.StopRecording(_state.CurrentChannel, _lastDetectedTone);
+        }
+        
         if (_currentDecoder != null)
         {
             _currentDecoder.Stop();
             _currentDecoder = null;
         }
+        
+        // Clear pre-roll when we stop decoding/move on? 
+        // Or keep it? Usually better to clear or let it ring out.
+        lock(_preRollBuffer) _preRollBuffer.Clear();
     }
 
     private void StartDecoding(Channel channel)
     {
         StopDecoding();
         
-        lock (_audioLock)
-        {
-            _preRollBuffer.Clear();
-            _preRollSize = 0;
-        }
-
         _decodeCts = new CancellationTokenSource();
         var token = _decodeCts.Token;
 
@@ -604,34 +574,28 @@ public class RtlDevice : BackgroundService, IRadioSource
             
             _currentDecoder.OnAudio += (chunk) => 
             {
+                // Maintain pre-roll buffer
+                lock (_preRollBuffer)
+                {
+                    _preRollBuffer.AddLast(chunk);
+                    long currentSize = 0;
+                    foreach (var b in _preRollBuffer) currentSize += b.Length;
+                    while (currentSize > PreRollMaxBytes && _preRollBuffer.First != null)
+                    {
+                        currentSize -= _preRollBuffer.First.Value.Length;
+                        _preRollBuffer.RemoveFirst();
+                    }
+                }
+
                 // Analyze for Fire Tone Outs
                 _toneDetector.ProcessAudio(chunk);
-                lock (_audioLock)
+                OnAudio?.Invoke(chunk);
+
+                _recordingService.ProcessAudio(chunk);
+                
+                if (_recordingService.IsRecording)
                 {
-                    // Strict attribution check
-                    if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - channel.Frequency) > 0.001) return;
-
-                    OnAudio?.Invoke(chunk);
-
-                    // Update pre-roll
-                    _preRollBuffer.AddLast(chunk);
-                    _preRollSize += chunk.Length;
-                    while (_preRollSize > MaxPreRollBytes)
-                    {
-                        var first = _preRollBuffer.First;
-                        if (first != null)
-                        {
-                            _preRollSize -= first.Value.Length;
-                            _preRollBuffer.RemoveFirst();
-                        }
-                    }
-
-                    if (_recordingStream != null)
-                    {
-                        _recordingStream.Write(chunk, 0, chunk.Length);
-                        _recordingStream.Flush();
-                        ResetActivityTimeout(); 
-                    }
+                    ResetActivityTimeout(); 
                 }
             };
 
@@ -677,7 +641,11 @@ public class RtlDevice : BackgroundService, IRadioSource
         {
             if (!t.IsCanceled)
             {
-                StopRecording();
+                if (_state.CurrentChannel != null)
+                {
+                    _recordingService.StopRecording(_state.CurrentChannel, _lastDetectedTone);
+                }
+
                 if (_manualOverride) UpdateState(_state with { Status = "MONITORING" });
             }
         });
@@ -703,337 +671,11 @@ public class RtlDevice : BackgroundService, IRadioSource
         }
         
         // Start recording if not already started
-        if (_recordingStream == null)
+        if (!_recordingService.IsRecording)
         {
-            StartRecording(originChannel, src, tgt);
+            _recordingService.StartRecording(originChannel, src, tgt, _preRollBuffer);
         }
 
         ResetActivityTimeout();
     }
-
-    private void StartRecording(Channel originChannel, int? src = null, int? tgt = null)
-    {
-        // Double check strict attribution and lockout
-        if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - originChannel.Frequency) > 0.001) return;
-        if (DateTime.UtcNow < _recordingLockoutUntil) return;
-
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var filename = $"rec_{now}_{_state.CurrentChannel.Frequency}.raw";
-        // Ensure data dir exists
-        var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../data/recordings");
-        if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
-
-        var newPath = Path.Combine(dataDir, filename);
-        
-        lock (_audioLock)
-        {
-            if (_recordingStream != null) return;
-
-            _currentRecordingPath = newPath;
-            _recordingStartTime = now;
-            _currentSourceID = src;
-            _currentTargetID = tgt;
-
-            try 
-            {
-                _recordingStream = new FileStream(_currentRecordingPath, FileMode.Create);
-                _logger.LogInformation($"Starting recording: {filename}");
-
-                // Flush pre-roll buffer
-                foreach (var chunk in _preRollBuffer)
-                {
-                    _recordingStream.Write(chunk, 0, chunk.Length);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to create recording file");
-            }
-        }
-    }
-
-    private void StopRecording()
-    {
-        string? recordingPath;
-        long startTime;
-        Channel? capturedChannel = _state.CurrentChannel;
-
-                        lock (_audioLock)
-                        {
-                            if (_recordingStream == null) return;
-                            _recordingStream.Close();
-                            _recordingStream = null;
-                            recordingPath = _currentRecordingPath;
-                            startTime = _recordingStartTime;
-                        }            var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
-        
-        if (duration >= 0.5 && recordingPath != null && File.Exists(recordingPath))
-        {
-             var fileInfo = new FileInfo(recordingPath);
-             if (fileInfo.Length < 4096) 
-             {
-                 try { File.Delete(recordingPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete small recording file"); }
-                 return;
-             }
-
-             if (capturedChannel != null)
-             {
-                 // Convert RAW to WAV (More robust than MP3)
-                 var wavPath = Path.ChangeExtension(recordingPath, ".wav");
-                 try 
-                 {
-                     var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg")
-                     {
-                         RedirectStandardOutput = true,
-                         RedirectStandardError = true,
-                         UseShellExecute = false,
-                         CreateNoWindow = true
-                     };
-                     // Input: Raw 48k
-                     convertStart.ArgumentList.Add("-f"); convertStart.ArgumentList.Add("s16le");
-                     convertStart.ArgumentList.Add("-ar"); convertStart.ArgumentList.Add("48000");
-                     convertStart.ArgumentList.Add("-ac"); convertStart.ArgumentList.Add("1");
-                     convertStart.ArgumentList.Add("-i"); convertStart.ArgumentList.Add(recordingPath);
-                     // Output: WAV PCM
-                     convertStart.ArgumentList.Add(wavPath);
-                     convertStart.ArgumentList.Add("-y");
-
-                     using (var proc = Process.Start(convertStart))
-                     {
-                         proc?.WaitForExit();
-                     }
-
-                     if (File.Exists(wavPath))
-                     {
-                         try { File.Delete(recordingPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete original RAW file after conversion"); }
-                         recordingPath = wavPath;
-                     }
-                 }
-                 catch (Exception ex)
-                 {
-                     _logger.LogError(ex, "WAV conversion failed");
-                 }
-
-                 // Run Transcription
-                 string? transcription = null;
-                 try 
-                 {
-                     transcription = TranscribeAudio(recordingPath);
-                 }
-                 catch (Exception ex)
-                 {
-                     _logger.LogError(ex, "Transcription failed");
-                 }
-
-                 if (!string.IsNullOrEmpty(transcription))
-                 {
-                     UpdateState(_state with { LastTranscription = transcription });
-                 }
-
-                                  var log = new CallLog(
-                                      $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
-                                      DateTime.UtcNow.ToString("o"),
-                                      capturedChannel.Frequency,
-                                      capturedChannel.AlphaTag,
-                                      capturedChannel.Description,
-                                      (_state.Gps?.Lat != 0) ? _state.Gps?.Lat : null,
-                                      (_state.Gps?.Lon != 0) ? _state.Gps?.Lon : null,
-                                      Path.GetFileName(recordingPath),
-                                      duration,
-                                      transcription,
-                                      _currentSourceID,
-                                      _currentTargetID,
-                                      _lastDetectedTone
-                                  );
-                 
-                                  _db.SaveTransmissionAsync(log).ContinueWith(t => {
-                                      if (t.IsFaulted) _logger.LogError(t.Exception, "Failed to save transmission");
-                                  });
-                 
-                                  _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {_currentSourceID} | Tone: {_lastDetectedTone} | Text: {transcription}");
-                                  OnNewLog?.Invoke(log);
-                              }
-                         }
-                         else if (recordingPath != null)
-                         {
-                             try { File.Delete(recordingPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete aborted recording file"); }
-                         }
-                         
-                         _lastDetectedTone = null;
-                         UpdateState(_state with { SourceID = null, TargetID = null, CurrentTone = null, LastDetectedTone = null });    
-        // Only clear the path if we haven't started a new recording
-        lock (_audioLock)
-        {
-            if (_recordingStream == null && _currentRecordingPath == recordingPath)
-            {
-                _currentRecordingPath = null;
-            }
-        }
-    }
-
-        private string? TranscribeAudio(string audioPath)
-        {
-            // Check setting
-            var enabled = _db.GetSettingAsync("EnableTranscription").GetAwaiter().GetResult();
-            if (enabled != "true") return null;
-    
-            // Temp file for resampling to 16k
-            var tempWavPath = audioPath + ".16k.wav";            
-        // Robustly find whisper.cpp root
-        var currentDir = new DirectoryInfo(Directory.GetCurrentDirectory());
-        string? whisperRoot = null;
-        
-        // 1. Try absolute path first (Server specific)
-        if (Directory.Exists("/home/brian/radio/OpenScanner/whisper.cpp"))
-        {
-            whisperRoot = "/home/brian/radio/OpenScanner/whisper.cpp";
-        }
-        else 
-        {
-            // 2. Search up
-            for (int i = 0; i < 6; i++) 
-            {
-                if (currentDir == null) break;
-                var probe = Path.Combine(currentDir.FullName, "whisper.cpp");
-                if (Directory.Exists(probe))
-                {
-                    whisperRoot = probe;
-                    break;
-                }
-                
-                probe = Path.Combine(currentDir.FullName, "../whisper.cpp");
-                 if (Directory.Exists(probe))
-                {
-                    whisperRoot = Path.GetFullPath(probe);
-                    break;
-                }
-
-                currentDir = currentDir.Parent;
-            }
-        }
-
-        if (whisperRoot == null)
-        {
-             var projectRoot = Directory.GetCurrentDirectory(); 
-             whisperRoot = Path.GetFullPath(Path.Combine(projectRoot, "../../whisper.cpp"));
-        }
-
-        var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");
-        var modelPath = Path.Combine(whisperRoot, "models/ggml-small.en.bin"); 
-
-        if (!File.Exists(whisperBin) || !File.Exists(modelPath))
-        {
-            _logger.LogWarning($"Whisper not found at {whisperBin} or model missing at {modelPath}. Search root was: {whisperRoot}");
-            return null;
-        }
-        
-        var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        
-        if (Path.GetExtension(audioPath).Equals(".raw", StringComparison.OrdinalIgnoreCase))
-        {
-            convertStart.ArgumentList.Add("-f");
-            convertStart.ArgumentList.Add("s16le");
-            convertStart.ArgumentList.Add("-ar");
-            convertStart.ArgumentList.Add("48000"); // Raw is always 48k now
-            convertStart.ArgumentList.Add("-ac");
-            convertStart.ArgumentList.Add("1");
-        }
-
-        convertStart.ArgumentList.Add("-i");
-        convertStart.ArgumentList.Add(audioPath);
-        convertStart.ArgumentList.Add("-af");
-        convertStart.ArgumentList.Add("volume=15dB"); 
-        convertStart.ArgumentList.Add("-ar");
-        convertStart.ArgumentList.Add("16000");
-        convertStart.ArgumentList.Add("-ac");
-        convertStart.ArgumentList.Add("1");
-        convertStart.ArgumentList.Add(tempWavPath);
-        convertStart.ArgumentList.Add("-y");
-        
-        using (var proc = Process.Start(convertStart))
-        {
-            if (proc != null)
-            {
-                var stderr = proc.StandardError.ReadToEnd();
-                proc.WaitForExit();
-                if (proc.ExitCode != 0)
-                {
-                    _logger.LogError($"FFmpeg conversion failed with exit code {proc.ExitCode}. Stderr: {stderr}");
-                }
-            }
-        }
-
-        if (!File.Exists(tempWavPath)) return null;
-
-        // 2. Run Whisper with Radio Context
-        // Prompt helps Whisper bias towards radio terminology and style
-        var prompt = "Dispatch, Unit 1, 10-4, copy, over. Priority traffic, code 3 response to street intersection. Suspect description: white male, blue jeans. License plate, vehicle registration, bolo. Structure fire, medical emergency, staging area. Status check, affirmative, negative, stand by. Channel 2, tac channel, command post. Kilo, Tango, Zulu, X-ray. 10-20 location, 10-8 in service, 10-7 out of service.";
-        var whisperArgs = $"-m \"{modelPath}\" -f \"{tempWavPath}\" -nt -otxt -l en --prompt \"{prompt}\""; 
-        
-        var whisperStart = new ProcessStartInfo(whisperBin, whisperArgs)
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = whisperRoot
-        };
-
-        try
-        {
-            using var proc = Process.Start(whisperStart);
-            if (proc != null)
-            {
-                var stdoutTask = proc.StandardOutput.ReadToEndAsync();
-                var stderrTask = proc.StandardError.ReadToEndAsync();
-                
-                if (!proc.WaitForExit(60000)) // 60s timeout
-                {
-                    _logger.LogWarning("Whisper timed out");
-                    proc.Kill();
-                }
-                else
-                {
-                    var stderr = stderrTask.Result;
-                    var stdout = stdoutTask.Result;
-                    
-                    if (proc.ExitCode != 0)
-                    {
-                        _logger.LogError($"Whisper failed with exit code {proc.ExitCode}.\nStderr: {stderr}\nStdout: {stdout}");
-                    }
-                    else
-                    {
-                        // Log debug info if no file created
-                        if (!File.Exists(tempWavPath + ".txt"))
-                        {
-                             _logger.LogWarning($"Whisper finished but no output file.\nStderr: {stderr}\nStdout: {stdout}");
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error running Whisper process");
-        }
-
-        File.Delete(tempWavPath); // Clean up WAV
-
-        var txtPath = tempWavPath + ".txt";
-        if (File.Exists(txtPath))
-        {
-            var text = File.ReadAllText(txtPath).Trim();
-            File.Delete(txtPath);
-            // Whisper sometimes outputs [BLANK_AUDIO] or metadata in brackets
-            if (text.StartsWith("[") && text.EndsWith("]")) return null;
-            return string.IsNullOrEmpty(text) ? null : text;
-        }
-
-        return null;
-    }}
+}

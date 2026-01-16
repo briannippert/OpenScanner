@@ -11,7 +11,7 @@ namespace OpenScanner.Server.Services;
 public class GpsService : BackgroundService
 {
     private readonly ILogger<GpsService> _logger;
-    private GpsData? _lastGps;
+    public GpsData? LastKnownLocation { get; private set; }
     private DateTime _lastUpdate = DateTime.MinValue;
 
     /// <summary>
@@ -36,7 +36,7 @@ public class GpsService : BackgroundService
     {
         // If data is older than 10 seconds, consider it stale
         if (DateTime.UtcNow - _lastUpdate > TimeSpan.FromSeconds(10)) return null;
-        return _lastGps;
+        return LastKnownLocation;
     }
 
     /// <summary>
@@ -127,15 +127,15 @@ public class GpsService : BackgroundService
         if (totalSeen == 0) return;
 
         // Update state preserving other data
-        if (_lastGps != null)
+        if (LastKnownLocation != null)
         {
-            _lastGps = _lastGps with { Sats = satsUsed, SatsVisible = totalSeen };
+            LastKnownLocation = LastKnownLocation with { Sats = satsUsed, SatsVisible = totalSeen };
         }
         else
         {
-            _lastGps = new GpsData(0, 0, 0, 0, "", 0, satsUsed, totalSeen);
+            LastKnownLocation = new GpsData(0, 0, 0, 0, "", 0, satsUsed, totalSeen);
         }
-        OnGpsUpdate?.Invoke(_lastGps);
+        OnGpsUpdate?.Invoke(LastKnownLocation);
     }
 
     internal void ParseTpv(JsonElement root)
@@ -143,7 +143,7 @@ public class GpsService : BackgroundService
         // "mode": 0 (n/a), 1 (no fix), 2 (2D), 3 (3D)
         int mode = root.TryGetProperty("mode", out var modeProp) ? modeProp.GetInt32() : 0;
         bool hasFix = mode >= 2;
-        bool wasFixed = (_lastGps?.Fix ?? 0) >= 2;
+        bool wasFixed = (LastKnownLocation?.Fix ?? 0) >= 2;
 
         if (hasFix && !wasFixed)
         {
@@ -156,17 +156,17 @@ public class GpsService : BackgroundService
 
         if (!hasFix) 
         {
-            if (_lastGps != null && _lastGps.Fix != mode)
+            if (LastKnownLocation != null && LastKnownLocation.Fix != mode)
             {
-                _lastGps = _lastGps with { Fix = mode };
-                OnGpsUpdate?.Invoke(_lastGps);
+                LastKnownLocation = LastKnownLocation with { Fix = mode };
+                OnGpsUpdate?.Invoke(LastKnownLocation);
             }
             return;
         }
         
-        double lat = root.TryGetProperty("lat", out var l) ? l.GetDouble() : (_lastGps?.Lat ?? 0);
-        double lon = root.TryGetProperty("lon", out var ln) ? ln.GetDouble() : (_lastGps?.Lon ?? 0);
-        double alt = root.TryGetProperty("alt", out var a) ? a.GetDouble() : (_lastGps?.Alt ?? 0);
+        double lat = root.TryGetProperty("lat", out var l) ? l.GetDouble() : (LastKnownLocation?.Lat ?? 0);
+        double lon = root.TryGetProperty("lon", out var ln) ? ln.GetDouble() : (LastKnownLocation?.Lon ?? 0);
+        double alt = root.TryGetProperty("alt", out var a) ? a.GetDouble() : (LastKnownLocation?.Alt ?? 0);
         double speed = root.TryGetProperty("speed", out var s) ? s.GetDouble() : 0;
         string time = root.TryGetProperty("time", out var t) ? t.GetString() ?? "" : "";
         
@@ -175,11 +175,11 @@ public class GpsService : BackgroundService
         if (root.TryGetProperty("hdop", out var h)) hdop = h.GetDouble();
 
         // Preserve previous satellite counts
-        int currentSats = _lastGps?.Sats ?? 0;
-        int? currentVisible = _lastGps?.SatsVisible;
+        int currentSats = LastKnownLocation?.Sats ?? 0;
+        int? currentVisible = LastKnownLocation?.SatsVisible;
 
         var gps = new GpsData(lat, lon, alt, speed, time, modeProp.GetInt32(), currentSats, currentVisible, hdop);
-        _lastGps = gps;
+        LastKnownLocation = gps;
         _lastUpdate = DateTime.UtcNow;
         OnGpsUpdate?.Invoke(gps);
     }

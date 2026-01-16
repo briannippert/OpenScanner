@@ -7,6 +7,35 @@ using OpenScanner.Server.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Debug: Check for TestData audio file
+var testFile = "p25_raw.wav";
+var possiblePaths = new[]
+{
+    Path.Combine(Directory.GetCurrentDirectory(), "TestData", testFile),
+    Path.Combine(AppContext.BaseDirectory, "TestData", testFile),
+    Path.Combine(Directory.GetCurrentDirectory(), "server/OpenScanner.Server/TestData", testFile)
+};
+Console.WriteLine("--- AUDIO FILE DIAGNOSTIC ---");
+foreach (var p in possiblePaths)
+{
+    Console.WriteLine($"Checking: {p} -> {(File.Exists(p) ? "FOUND" : "MISSING")}");
+}
+Console.WriteLine("-----------------------------");
+
+// Debug: Print loaded configuration sources
+Console.WriteLine("Loaded Configuration Sources:");
+foreach (var source in builder.Configuration.Sources)
+{
+    if (source is Microsoft.Extensions.Configuration.Json.JsonConfigurationSource jsonSource)
+    {
+        Console.WriteLine($" - JSON: {jsonSource.Path} (Optional: {jsonSource.Optional})");
+    }
+    else
+    {
+        Console.WriteLine($" - Other: {source.GetType().Name}");
+    }
+}
+
 // Add Services
 builder.Services.AddControllers(); // Added for Controllers
 
@@ -25,6 +54,9 @@ builder.Services.AddTransient<OpenScanner.Server.Decoders.NFM>();
 builder.Services.AddTransient<OpenScanner.Server.Decoders.AM>();
 builder.Services.AddTransient<OpenScanner.Server.Decoders.WFM>();
 builder.Services.AddSingleton<IDecoderFactory, OpenScanner.Server.Decoders.DecoderFactory>();
+builder.Services.AddSingleton<ITranscriptionService, WhisperTranscriptionService>();
+builder.Services.AddSingleton<IRecordingService, RecordingService>();
+builder.Services.AddSingleton<IChannelService, ChannelService>();
 
 var radioProvider = builder.Configuration["Radio:Provider"] ?? "RTL-SDR";
 if (radioProvider == "Mock")

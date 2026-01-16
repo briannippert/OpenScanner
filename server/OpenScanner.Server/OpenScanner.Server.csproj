@@ -24,4 +24,20 @@
     <EmbeddedResource Include="Sql/**/*.sql" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Remove="TestData/**/*" />
+    <Content Include="TestData/**/*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="BuildFrontend" BeforeTargets="Build">
+    <PropertyGroup>
+      <ClientDir>$(MSBuildProjectDirectory)/../../client</ClientDir>
+    </PropertyGroup>
+    <Message Text="Building Frontend..." Importance="high" />
+    <Exec Command="npm install" WorkingDirectory="$(ClientDir)" />
+    <Exec Command="npm run build" WorkingDirectory="$(ClientDir)" />
+  </Target>
+
 </Project>

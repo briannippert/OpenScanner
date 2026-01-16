@@ -136,7 +136,18 @@ public class WebSocketBroadcaster
     private void BroadcastAudio(byte[] audioData)
     {
         // _logger.LogInformation($"Broadcasting audio: {audioData.Length} bytes to {_audioSessions.Count} clients");
-        if (_audioSessions.IsEmpty) return;
+        if (_audioSessions.IsEmpty) 
+        {
+            // _logger.LogWarning("Audio generated but no clients connected.");
+            return;
+        }
+        
+        // Log occasionally to confirm flow
+        if (DateTime.UtcNow.Second % 5 == 0 && DateTime.UtcNow.Millisecond < 100)
+        {
+             _logger.LogInformation($"[WebSocket] Sending {audioData.Length} bytes to {_audioSessions.Count} clients");
+        }
+
         _ = BroadcastBinary(audioData);
     }
 
