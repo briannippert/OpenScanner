@@ -7,6 +7,21 @@ using OpenScanner.Server.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Debug: Check for TestData audio file
+var testFile = "p25_raw.wav";
+var possiblePaths = new[]
+{
+    Path.Combine(Directory.GetCurrentDirectory(), "TestData", testFile),
+    Path.Combine(AppContext.BaseDirectory, "TestData", testFile),
+    Path.Combine(Directory.GetCurrentDirectory(), "server/OpenScanner.Server/TestData", testFile)
+};
+Console.WriteLine("--- AUDIO FILE DIAGNOSTIC ---");
+foreach (var p in possiblePaths)
+{
+    Console.WriteLine($"Checking: {p} -> {(File.Exists(p) ? "FOUND" : "MISSING")}");
+}
+Console.WriteLine("-----------------------------");
+
 // Debug: Print loaded configuration sources
 Console.WriteLine("Loaded Configuration Sources:");
 foreach (var source in builder.Configuration.Sources)

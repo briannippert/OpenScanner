@@ -480,12 +480,25 @@ function App() {
         };
 
         wsAudio.current.onmessage = async (event) => {
+          // Debug: Log EVERYTHING received
+          console.log("[Audio DEBUG] Message received:", event.data);
+
           if (event.data instanceof Blob) {
             try {
+                // Log incoming data size
+                console.log(`[Audio] Received Blob size: ${event.data.size}`);
+
                 // Handle Audio
                 const arrayBuffer = await event.data.arrayBuffer();
                 
+                // Validate if it makes sense as Int16 (Raw PCM)
+                if (arrayBuffer.byteLength % 2 !== 0) {
+                    console.warn(`[Audio] Warning: Byte length ${arrayBuffer.byteLength} is not a multiple of 2 (Int16)`);
+                }
+
                 const int16Array = new Int16Array(arrayBuffer);
+                // console.log(`[Audio] Decoded ${int16Array.length} samples`);
+
                 const float32Array = new Float32Array(int16Array.length);
                 for (let i = 0; i < int16Array.length; i++) {
                     float32Array[i] = int16Array[i] / 32768;
@@ -493,7 +506,7 @@ function App() {
                 
                 let ctx = window.audioCtx;
                 if (!ctx) {
-                    // console.log("Initializing new AudioContext");
+                    console.log("[Audio] Initializing new AudioContext...");
                     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
                     if (AudioContextClass) {
                         ctx = new AudioContextClass({ sampleRate: 48000 });
@@ -502,25 +515,32 @@ function App() {
                 }
 
                 if (ctx && ctx.state === 'suspended') {
+                    console.log("[Audio] Resuming suspended context...");
                     await ctx.resume();
                 }
 
-                if (!ctx) return;
+                if (!ctx) {
+                    console.error("[Audio] Failed to get AudioContext");
+                    return;
+                }
+
+                // Ensure gain node belongs to current context
+                if (!gainNodeRef.current || gainNodeRef.current.context !== ctx) {
+                    console.log("[Audio] Recreating GainNode for current context");
+                    const gainNode = ctx.createGain();
+                    gainNode.gain.value = volume;
+                    gainNode.connect(ctx.destination);
+                    gainNodeRef.current = gainNode;
+                }
 
                 let analyser = audioAnalyserRef.current;
                 
                 // If analyser is missing or belongs to a different/closed context, recreate it
                 if (!analyser || analyser.context !== ctx || analyser.context.state === 'closed') {
-                    // console.log("Initializing AnalyserNode");
+                    console.log("[Audio] Recreating AnalyserNode");
                     analyser = ctx.createAnalyser();
                     analyser.fftSize = 1024;
                     
-                    if (!gainNodeRef.current) {
-                        const gainNode = ctx.createGain();
-                        gainNode.gain.value = volume;
-                        gainNode.connect(ctx.destination);
-                        gainNodeRef.current = gainNode;
-                    }
                     analyser.connect(gainNodeRef.current);
                     
                     audioAnalyserRef.current = analyser;
@@ -545,19 +565,21 @@ function App() {
 
                     if (nextStartTime.current < currentTime) {
                         // Underrun: We fell behind. Resume immediately.
+                        // console.log("[Audio] Underrun detected, resetting sync");
                         nextStartTime.current = currentTime;
                     } else if (nextStartTime.current > currentTime + MAX_DRIFT) {
                         // Drift: We are too far ahead. Reset to tight buffer.
+                        console.log("[Audio] Large drift detected, resetting sync");
                         nextStartTime.current = currentTime + JITTER_BUFFER;
                     }
                     
                     source.start(nextStartTime.current);
                     nextStartTime.current += audioBuffer.duration;
                 } else {
-                    console.error("AnalyserNode is invalid, dropping audio packet");
+                    console.error("[Audio] AnalyserNode is invalid, dropping audio packet");
                 }
             } catch (err) {
-                console.error("Audio processing error:", err);
+                console.error("[Audio] Processing error:", err);
             }
           }
         };

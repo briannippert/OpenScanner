@@ -149,6 +149,15 @@ public class MockRadioSource : BackgroundService, IRadioSource
             {
                 var elapsed = (DateTime.UtcNow - _startTime).TotalSeconds;
 
+                // Loop scenario if we passed the end (max time + 10s buffer)
+                var maxTime = _scenarioEvents.Any() ? _scenarioEvents.Max(e => e.Time + e.Duration) : 0;
+                if (maxTime > 0 && elapsed > maxTime + 10)
+                {
+                    _startTime = DateTime.UtcNow;
+                    _logger.LogInformation("[MockRadioSource] Scenario loop resetting...");
+                    elapsed = 0;
+                }
+
                 // Find active event
                 var activeEvent = _scenarioEvents.FirstOrDefault(e => 
                     elapsed >= e.Time && elapsed < (e.Time + e.Duration));
@@ -208,10 +217,11 @@ public class MockRadioSource : BackgroundService, IRadioSource
                             // Simulate Audio
                             if (!string.IsNullOrEmpty(activeEvent.AudioFile))
                             {
-                                await PlayAudioFile(activeEvent.AudioFile, token);
+                                await PlayAudioFile(activeEvent, token);
                             }
                             else
                             {
+                                _logger.LogWarning($"[MockRadioSource] Event active but AudioFile is null/empty. Check scenario JSON mapping. Frequency: {activeEvent.Frequency}");
                                 // Generate silence or noise
                                 await Task.Delay(100, token);
                             }
@@ -247,50 +257,96 @@ public class MockRadioSource : BackgroundService, IRadioSource
         }
     }
 
-    private async Task PlayAudioFile(string filename, CancellationToken token)
+    private async Task PlayAudioFile(ScenarioEvent evt, CancellationToken token)
     {
-        // Look for file in TestData
-        var path = Path.Combine(Directory.GetCurrentDirectory(), "TestData", filename);
+        string filename = evt.AudioFile!;
         
-        // Debug path
-        // _logger.LogInformation($"Attempting to play audio from: {path}");
-
-        // Fallback for tests
-        if (!File.Exists(path)) path = Path.Combine(Directory.GetCurrentDirectory(), "bin/Debug/net10.0/TestData", filename);
-        if (!File.Exists(path)) 
+        // Robust path resolution
+        var searchPaths = new List<string>
         {
-            // Try simple name in current dir
-            path = filename;
-        }
+            Path.Combine(Directory.GetCurrentDirectory(), "TestData", filename),
+            Path.Combine(Directory.GetCurrentDirectory(), "bin", "Debug", "net10.0", "TestData", filename),
+            Path.Combine(AppContext.BaseDirectory, "TestData", filename),
+            // Look relative to the server project if running from root
+            Path.Combine(Directory.GetCurrentDirectory(), "server", "OpenScanner.Server", "TestData", filename)
+        };
+        
+        string? path = searchPaths.FirstOrDefault(p => File.Exists(p));
+        
+        // Final fallback: try filename directly
+        if (path == null && File.Exists(filename)) path = filename;
 
-        if (File.Exists(path))
+        if (path != null)
         {
-            // _logger.LogInformation($"Playing audio file: {path}");
-            // Mock: Just read chunks and fire OnAudio
-            // For real fidelity, we should respect sample rate.
-            // Assuming 48k 16bit mono for now as per system standard.
-            var buffer = new byte[3200]; // ~33ms
-            using var fs = File.OpenRead(path);
-            // Skip header if wav
-            if (path.EndsWith(".wav")) fs.Position = 44;
+            _logger.LogInformation($"[MockRadioSource] SUCCESS: Playing audio file from: {path} (Decoder: {evt.DecoderType ?? "None"})");
 
-            int bytesRead;
-            while ((bytesRead = await fs.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
+            if (evt.DecoderType?.ToUpper() == "P25")
             {
-                var chunk = new byte[bytesRead];
-                Array.Copy(buffer, chunk, bytesRead);
+                // Use Real Decoder
+                var decoder = _decoderFactory.GetDecoder("P25");
                 
-                OnAudio?.Invoke(chunk);
-                _recordingService.ProcessAudio(chunk);
-                _toneDetector.ProcessAudio(chunk);
+                // Use ffmpeg with -re (read at native rate) to simulate real-time input.
+                // This prevents the decoder from running too fast and flooding the client.
+                decoder.InputSource = $"/usr/bin/ffmpeg -re -i \"{path}\" -f s16le -ar 48000 -ac 1 -loglevel quiet -";
                 
-                // Throttle
-                await Task.Delay(33, token);
+                // Hook up events
+                Action<byte[]> audioHandler = (chunk) => 
+                {
+                    OnAudio?.Invoke(chunk);
+                    _recordingService.ProcessAudio(chunk);
+                    _toneDetector.ProcessAudio(chunk);
+                };
+                
+                decoder.OnAudio += audioHandler;
+
+                try 
+                {
+                    // Create dummy channel for decoder context
+                    var dummyChannel = new Channel { Frequency = evt.Frequency };
+                    await decoder.StartAsync(dummyChannel, token);
+                }
+                finally
+                {
+                    decoder.OnAudio -= audioHandler;
+                    decoder.Stop();
+                }
+            }
+            else
+            {
+                // Direct Playback (Simulated/Demodulated Audio)
+                // For real fidelity, we should respect sample rate.
+                // Assuming 48k 16bit mono for now as per system standard.
+                var buffer = new byte[3200]; // ~33ms
+                using var fs = File.OpenRead(path);
+                // Skip header if wav
+                if (path.EndsWith(".wav") && fs.Length > 44) fs.Position = 44;
+
+                int bytesRead;
+                long totalBytes = 0;
+                while ((bytesRead = await fs.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
+                {
+                    totalBytes += bytesRead;
+                    // Log every ~100 chunks to avoid spam, but confirm activity
+                    if (totalBytes % (3200 * 50) == 0) 
+                    {
+                        _logger.LogInformation($"[MockRadioSource] Streaming audio... Total: {totalBytes} bytes");
+                    }
+
+                    var chunk = new byte[bytesRead];
+                    Array.Copy(buffer, chunk, bytesRead);
+                    
+                    OnAudio?.Invoke(chunk);
+                    _recordingService.ProcessAudio(chunk);
+                    _toneDetector.ProcessAudio(chunk);
+                    
+                    // Throttle
+                    await Task.Delay(33, token);
+                }
             }
         }
         else
         {
-            _logger.LogWarning($"Audio file not found: {filename}. Searched at {path} and TestData subdirs.");
+            _logger.LogWarning($"Audio file not found: {filename}. Searched in {string.Join(", ", searchPaths)}");
         }
     }
 
