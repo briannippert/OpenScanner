@@ -16,17 +16,32 @@ public class MockRadioSourceTests
     private readonly Mock<GpsService> _gpsServiceMock;
     private readonly Mock<ToneDetector> _toneDetectorMock;
     private readonly Mock<IDecoderFactory> _decoderFactoryMock = new();
+    private readonly Mock<ITranscriptionService> _transcriptionServiceMock = new();
+    private readonly Mock<IRecordingService> _recordingServiceMock = new();
+    private readonly Mock<IChannelService> _channelServiceMock = new();
 
     public MockRadioSourceTests()
     {
         _gpsServiceMock = new Mock<GpsService>(new Mock<ILogger<GpsService>>().Object);
         _toneDetectorMock = new Mock<ToneDetector>(_dbMock.Object, new Mock<ILogger<ToneDetector>>().Object);
+        
+        // Setup default channel service mock behavior if needed
+        _channelServiceMock.Setup(x => x.Channels).Returns(new List<Channel>());
     }
 
     [Fact]
     public void MockRadioSource_InitializesInScanningMode()
     {
-        var source = new MockRadioSource(_loggerMock.Object, _dbMock.Object, _gpsServiceMock.Object, _toneDetectorMock.Object, _decoderFactoryMock.Object);
+        var source = new MockRadioSource(
+            _loggerMock.Object, 
+            _dbMock.Object, 
+            _gpsServiceMock.Object, 
+            _toneDetectorMock.Object, 
+            _decoderFactoryMock.Object,
+            _transcriptionServiceMock.Object,
+            _recordingServiceMock.Object,
+            _channelServiceMock.Object);
+            
         source.Start();
         
         var state = source.GetState();
@@ -37,7 +52,20 @@ public class MockRadioSourceTests
     [Fact]
     public void MockRadioSource_HoldFrequency_UpdatesState()
     {
-        var source = new MockRadioSource(_loggerMock.Object, _dbMock.Object, _gpsServiceMock.Object, _toneDetectorMock.Object, _decoderFactoryMock.Object);
+        var source = new MockRadioSource(
+            _loggerMock.Object, 
+            _dbMock.Object, 
+            _gpsServiceMock.Object, 
+            _toneDetectorMock.Object, 
+            _decoderFactoryMock.Object,
+            _transcriptionServiceMock.Object,
+            _recordingServiceMock.Object,
+            _channelServiceMock.Object);
+
+        // Setup channel for hold
+        var testChannel = new Channel(155.0325, "Test", "Test Desc", "FM", "FM");
+        _channelServiceMock.Setup(x => x.Channels).Returns(new List<Channel> { testChannel });
+
         source.HoldFrequency(155.0325);
         
         var state = source.GetState();
@@ -49,7 +77,16 @@ public class MockRadioSourceTests
     [Fact]
     public void MockRadioSource_Stop_ResetsState()
     {
-        var source = new MockRadioSource(_loggerMock.Object, _dbMock.Object, _gpsServiceMock.Object, _toneDetectorMock.Object, _decoderFactoryMock.Object);
+        var source = new MockRadioSource(
+            _loggerMock.Object, 
+            _dbMock.Object, 
+            _gpsServiceMock.Object, 
+            _toneDetectorMock.Object, 
+            _decoderFactoryMock.Object,
+            _transcriptionServiceMock.Object,
+            _recordingServiceMock.Object,
+            _channelServiceMock.Object);
+
         source.Start();
         source.Stop();
         
@@ -61,12 +98,15 @@ public class MockRadioSourceTests
     [Fact]
     public void MockRadioSource_LoadsScenarioFile_OnInit()
     {
-        // This relies on TestData/scenario.json being present in the output directory
-        var source = new MockRadioSource(_loggerMock.Object, _dbMock.Object, _gpsServiceMock.Object, _toneDetectorMock.Object, _decoderFactoryMock.Object);
-        
-        // We can't directly check private _scenarioEvents, but we can verify it doesn't log an error 
-        // and we can check if it picks up an event if we wait (though that's more of a scenario test).
-        // Since we moved scenario.json to TestData, the constructor should find it.
+        var source = new MockRadioSource(
+            _loggerMock.Object, 
+            _dbMock.Object, 
+            _gpsServiceMock.Object, 
+            _toneDetectorMock.Object, 
+            _decoderFactoryMock.Object,
+            _transcriptionServiceMock.Object,
+            _recordingServiceMock.Object,
+            _channelServiceMock.Object);
         
         // verify no error logs
         _loggerMock.Verify(

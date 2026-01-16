@@ -25,6 +25,9 @@ builder.Services.AddTransient<OpenScanner.Server.Decoders.NFM>();
 builder.Services.AddTransient<OpenScanner.Server.Decoders.AM>();
 builder.Services.AddTransient<OpenScanner.Server.Decoders.WFM>();
 builder.Services.AddSingleton<IDecoderFactory, OpenScanner.Server.Decoders.DecoderFactory>();
+builder.Services.AddSingleton<ITranscriptionService, WhisperTranscriptionService>();
+builder.Services.AddSingleton<IRecordingService, RecordingService>();
+builder.Services.AddSingleton<IChannelService, ChannelService>();
 
 var radioProvider = builder.Configuration["Radio:Provider"] ?? "RTL-SDR";
 if (radioProvider == "Mock")
