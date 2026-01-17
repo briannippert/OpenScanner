@@ -131,6 +131,11 @@ public class MockRadioSource : BackgroundService, IRadioSource
         UpdateState(_state with { Status = "SCANNING", ManualHoldFrequency = null });
     }
 
+    public void AvoidFrequency(double freq, double durationSeconds)
+    {
+        _logger.LogInformation($"Mock: Avoiding {freq} for {durationSeconds}s");
+    }
+
     public void StartDumping(string label) { }
     public void StopDumping() { }
 

@@ -10,7 +10,7 @@ import VuMeter from './VuMeter';
 interface Props {
     state: ScannerState;
     analyser?: AnalyserNode;
-    onScan?: () => void;
+    onScan?: (freq?: number) => void;
     channels?: Channel[];
 }
 
@@ -84,11 +84,11 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                     <Box display="flex" gap={1} alignItems="center">
                         {onScan && state.status !== 'SCANNING' && state.status !== 'IDLE' && (
                             <Chip 
-                                label={state.status === 'RECEIVING' || state.status === 'MONITORING' ? "SKIP" : "RESUME"} 
+                                label="SKIP" 
                                 color="primary" 
                                 variant="outlined" 
                                 size="small" 
-                                onClick={onScan}
+                                onClick={() => onScan(state.currentFrequency || undefined)}
                                 icon={<PlayArrowIcon />}
                                 sx={{ cursor: 'pointer', height: 24, fontSize: '0.65rem' }}
                             />

@@ -153,6 +153,19 @@ public class RtlDevice : BackgroundService, IRadioSource
     }
 
     /// <inheritdoc />
+    public void AvoidFrequency(double freq, double durationSeconds)
+    {
+        _channelLockouts[freq] = DateTime.UtcNow.AddSeconds(durationSeconds);
+        _logger.LogInformation($"Temporarily avoiding {freq} MHz for {durationSeconds} seconds.");
+
+        // If we are currently on this frequency, resume scan
+        if (_state.CurrentFrequency.HasValue && Math.Abs(_state.CurrentFrequency.Value - freq) < 0.001)
+        {
+            ResumeScan();
+        }
+    }
+
+    /// <inheritdoc />
     public void ResumeScan()
     {
         _logger.LogInformation("Resume/Skip requested.");
@@ -169,18 +182,6 @@ public class RtlDevice : BackgroundService, IRadioSource
         StopDecoding(); // Stops the decoder
         StopScanning(); // Stops the rtl_sdr process and the scanner loop
 
-        // Lock out this channel for 10 seconds to avoid re-locking
-        if (_state.CurrentChannel != null)
-        {
-            var lockoutFrequency = _state.CurrentChannel.Frequency;
-            //Need to configure this to be a setting you can set from the front end
-            _channelLockouts[lockoutFrequency] = DateTime.UtcNow.AddSeconds(10); 
-            _logger.LogInformation($"Applying 10s lockout for channel: {_state.CurrentChannel.AlphaTag} ({lockoutFrequency} MHz)");
-        }
-        else
-        {
-            _logger.LogWarning("ResumeScan executed, but CurrentChannel was null. No lockout applied.");
-        }
         _recordingLockoutUntil = DateTime.UtcNow.AddSeconds(3);
         
         // State is updated within StartScanning

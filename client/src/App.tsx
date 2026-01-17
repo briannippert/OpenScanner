@@ -234,6 +234,18 @@ function App() {
     }).catch(err => console.error("Command failed:", err));
   };
 
+  const handleSkip = (freq?: number) => {
+    if (freq) {
+        fetch('/api/control', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'avoid', frequency: freq, duration: 10 })
+        }).catch(err => console.error("Skip command failed:", err));
+    } else {
+        sendCommand('scan');
+    }
+  };
+
   const handleChannelClick = async (ch: Channel) => {
       // Resume audio context on user interaction
       if (window.audioCtx && window.audioCtx.state === 'suspended') {
@@ -817,9 +829,7 @@ function App() {
                             state={scannerState} 
                             analyser={audioAnalyser}
                             channels={channels}
-                            onScan={() => {
-                                sendCommand('scan');
-                            }}
+                            onScan={handleSkip}
                         />
                     </Box>
 

@@ -106,6 +106,23 @@ public class ScannerController : ControllerBase
             case "start": _radio.Start(); break;
             case "stop": _radio.Stop(); break;
             case "scan": _radio.ResumeScan(); break;
+            case "avoid":
+                double? avoidFreq = null;
+                double avoidDuration = 10; // Default 10 seconds
+
+                if (body.TryGetProperty("frequency", out var af) && af.ValueKind == JsonValueKind.Number)
+                    avoidFreq = af.GetDouble();
+                else if (body.TryGetProperty("frequency", out var afs) && double.TryParse(afs.GetString(), out var afd))
+                    avoidFreq = afd;
+
+                if (body.TryGetProperty("duration", out var dur) && dur.ValueKind == JsonValueKind.Number)
+                    avoidDuration = dur.GetDouble();
+
+                if (avoidFreq.HasValue)
+                {
+                    _radio.AvoidFrequency(avoidFreq.Value, avoidDuration);
+                }
+                break;
             case "hold": 
                 double? targetFreq = null;
                 if (body.TryGetProperty("frequency", out var f) && f.ValueKind == JsonValueKind.Number)
