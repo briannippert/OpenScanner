@@ -234,7 +234,7 @@ function App() {
     }).catch(err => console.error("Command failed:", err));
   };
 
-  const handleChannelClick = (ch: Channel) => {
+  const handleChannelClick = async (ch: Channel) => {
       // Resume audio context on user interaction
       if (window.audioCtx && window.audioCtx.state === 'suspended') {
           window.audioCtx.resume();
@@ -246,6 +246,10 @@ function App() {
       if (isHolding) {
           sendCommand('scan');
       } else {
+          // If the channel is avoided, un-avoid it first
+          if (ch.avoid) {
+              await handleSaveChannel({ ...ch, avoid: false });
+          }
           sendCommand('hold', ch.frequency);
       }
   };
@@ -865,7 +869,14 @@ function App() {
                                                 <Button
                                                     variant="contained"
                                                     size="small"
-                                                    onClick={() => handleSaveChannel({ ...ch, avoid: !ch.avoid })}
+                                                    onClick={async () => {
+                                                        const newAvoid = !ch.avoid;
+                                                        await handleSaveChannel({ ...ch, avoid: newAvoid });
+                                                        // If we are now avoiding the channel we are holding, stop holding
+                                                        if (newAvoid && manualHold !== undefined && Math.abs(manualHold - ch.frequency) < 0.0001) {
+                                                            sendCommand('scan');
+                                                        }
+                                                    }}
                                                     sx={{ 
                                                         bgcolor: ch.avoid ? 'error.main' : '#1c1c1c',
                                                         color: ch.avoid ? 'white' : 'text.primary',

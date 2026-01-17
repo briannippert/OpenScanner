@@ -58,6 +58,17 @@ public class ScannerController : ControllerBase
     public async Task<IActionResult> UpdateChannel(int id, Channel channel)
     {
         channel.Id = id;
+        
+        // If we are avoiding this channel, check if we are currently holding it
+        if (channel.Avoid)
+        {
+            var state = _radio.GetState();
+            if (state.ManualHoldFrequency.HasValue && Math.Abs(state.ManualHoldFrequency.Value - channel.Frequency) < 0.0001)
+            {
+                _radio.ResumeScan();
+            }
+        }
+
         await _db.UpdateChannelAsync(channel);
         _radio.ReloadChannels();
         return Ok();
@@ -83,7 +94,7 @@ public class ScannerController : ControllerBase
     [HttpPost("control")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public IActionResult ControlScanner([FromBody] JsonElement body)
+    public async Task<IActionResult> ControlScanner([FromBody] JsonElement body)
     {
         if (!body.TryGetProperty("action", out var actionProp))
             return BadRequest("Action is required");
@@ -96,10 +107,31 @@ public class ScannerController : ControllerBase
             case "stop": _radio.Stop(); break;
             case "scan": _radio.ResumeScan(); break;
             case "hold": 
+                double? targetFreq = null;
                 if (body.TryGetProperty("frequency", out var f) && f.ValueKind == JsonValueKind.Number)
-                    _radio.HoldFrequency(f.GetDouble());
+                    targetFreq = f.GetDouble();
                 else if (body.TryGetProperty("frequency", out var fs) && double.TryParse(fs.GetString(), out var fd))
-                     _radio.HoldFrequency(fd);
+                    targetFreq = fd;
+                
+                if (targetFreq.HasValue)
+                {
+                    // Check if channel is avoided, if so, un-avoid it
+                    var channels = await _db.GetAllChannelsAsync();
+                    foreach (var ch in channels)
+                    {
+                        if (Math.Abs(ch.Frequency - targetFreq.Value) < 0.0001)
+                        {
+                            if (ch.Avoid)
+                            {
+                                ch.Avoid = false;
+                                await _db.UpdateChannelAsync(ch);
+                                _radio.ReloadChannels();
+                            }
+                            break;
+                        }
+                    }
+                    _radio.HoldFrequency(targetFreq.Value);
+                }
                 break;
             case "set_squelch":
                  if (body.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.Number)
