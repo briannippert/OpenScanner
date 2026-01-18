@@ -14,6 +14,7 @@ public class Database : IDatabase
     private readonly string _connectionString;
     private readonly string _dataDir;
     private readonly ILogger<Database> _logger;
+    private readonly IConfiguration _configuration;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="Database"/> class.
@@ -22,6 +23,7 @@ public class Database : IDatabase
     /// <param name="logger">Logger instance.</param>
     public Database(IConfiguration configuration, ILogger<Database> logger)
     {
+        _configuration = configuration;
         _logger = logger;
         var root = Directory.GetCurrentDirectory();
         
@@ -72,6 +74,7 @@ public class Database : IDatabase
         try { conn.Execute("ALTER TABLE channels ADD COLUMN lat REAL;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: lat column already exists or failed"); }
         try { conn.Execute("ALTER TABLE channels ADD COLUMN lon REAL;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: lon column already exists or failed"); }
         try { conn.Execute("ALTER TABLE channels ADD COLUMN range REAL;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: range column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE channels ADD COLUMN avoid INTEGER DEFAULT 0;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: avoid column already exists or failed"); }
 
         conn.Execute(@"
             CREATE TABLE IF NOT EXISTS fire_tones (
@@ -99,13 +102,12 @@ public class Database : IDatabase
         var count = conn.ExecuteScalar<int>("SELECT count(*) FROM channels");
         if (count == 0)
         {
-            var seed = new[]
+            var channels = _configuration.GetSection("Channels").Get<List<Channel>>();
+            if (channels != null && channels.Any())
             {
-                new Channel(155.0325, "Salem Police", "Police Operations", "P25", "RM", "117 NAC", "Law Dispatch", "WQGI420"),
-                new Channel(155.8875, "Salem Fire", "Fire Operations", "P25", "RM", "117 NAC", "Fire Dispatch", "WPMN513")
-            };
-            var seedSql = SqlLoader.GetSql("Channels/Seed.sql");
-            conn.Execute(seedSql, seed);
+                var seedSql = SqlLoader.GetSql("Channels/Seed.sql");
+                conn.Execute(seedSql, channels);
+            }
         }
     }
 

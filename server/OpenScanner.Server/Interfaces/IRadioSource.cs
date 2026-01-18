@@ -56,6 +56,13 @@ public interface IRadioSource
     void HoldFrequency(double freq);
 
     /// <summary>
+    /// Temporarily avoids a frequency for a specified duration.
+    /// </summary>
+    /// <param name="freq">The frequency in MHz.</param>
+    /// <param name="durationSeconds">Duration to avoid in seconds.</param>
+    void AvoidFrequency(double freq, double durationSeconds);
+
+    /// <summary>
     /// Resumes normal scanning operation after a hold.
     /// </summary>
     void ResumeScan();

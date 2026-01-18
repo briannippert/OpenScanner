@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { 
     Dialog, DialogTitle, DialogContent, DialogActions, 
     Button, List, ListItem, ListItemText, IconButton, 
-    TextField, Box, Fab, Typography, MenuItem, Select, FormControl, InputLabel
+    TextField, Box, Fab, Typography, MenuItem, Select, FormControl, InputLabel,
+    Switch, FormControlLabel, FormGroup
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -35,7 +36,8 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
             type: 'RM',
             tone: '',
             mode: 'P25',
-            tag: ''
+            tag: '',
+            avoid: false
         } as Channel);
         setIsFormOpen(true);
     };
@@ -53,7 +55,7 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
         }
     };
 
-    const handleChange = (field: keyof Channel, value: string | number) => {
+    const handleChange = (field: keyof Channel, value: string | number | boolean) => {
         if (!editing) return;
         setEditing({ ...editing, [field]: value });
     };
@@ -113,7 +115,7 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                                     value={editing.license} 
                                     onChange={e => handleChange('license', e.target.value)} 
                                     sx={{ flex: 1 }}
-                                />
+                                 />
                                 <TextField 
                                     label="Tag" 
                                     value={editing.tag} 
@@ -121,6 +123,12 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                                     sx={{ flex: 1 }}
                                 />
                             </Box>
+                             <FormGroup>
+                                <FormControlLabel 
+                                    control={<Switch checked={editing.avoid} onChange={e => handleChange('avoid', e.target.checked)} />} 
+                                    label="Avoid Channel" 
+                                />
+                            </FormGroup>
                         </Box>
                     </DialogContent>
                     <DialogActions>
@@ -153,7 +161,18 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                                 }
                                 secondary={ch.description}
                             />
-                            <Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1}}>
+                                <FormControlLabel
+                                    control={
+                                        <Switch
+                                            checked={ch.avoid}
+                                            onChange={() => onSave({ ...ch, avoid: !ch.avoid })}
+                                            name="avoid"
+                                            color="secondary"
+                                        />
+                                    }
+                                    label="Avoid"
+                                />
                                 <IconButton onClick={() => handleEdit(ch)} color="info">
                                     <EditIcon />
                                 </IconButton>

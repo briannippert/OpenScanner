@@ -16,6 +16,16 @@ const mockTones = [
 ];
 
 test.beforeEach(async ({ page }) => {
+  // Unregister Service Workers to prevent caching interference
+  await page.evaluate(async () => {
+      if ('serviceWorker' in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          for (const registration of registrations) {
+              await registration.unregister();
+          }
+      }
+  });
+
   // Mock WebSocket before page loads
   await page.addInitScript(() => {
     class MockWebSocket extends EventTarget {
@@ -56,27 +66,27 @@ test.beforeEach(async ({ page }) => {
   });
 
   // Mock API routes
-  await page.route('**/api/channels', async route => {
+  await page.route(/\/api\/channels/, async route => {
     await route.fulfill({ json: mockChannels });
   });
 
-  await page.route('**/api/firetones', async route => {
+  await page.route(/\/api\/firetones/, async route => {
     await route.fulfill({ json: mockTones });
   });
 
-  await page.route('**/api/history', async route => {
-    await route.fulfill({ json: mockLogs });
+  await page.route(/\/api\/history(\?.*)?$/, async route => {
+     await route.fulfill({ json: mockLogs });
   });
 
-  await page.route('**/api/history/years', async route => {
+  await page.route(/\/api\/history\/years/, async route => {
     await route.fulfill({ json: ["2024"] });
   });
 
-  await page.route('**/api/system/info', async route => {
+  await page.route(/\/api\/system\/info/, async route => {
     await route.fulfill({ json: { Commit: "test-commit-hash", Version: "1.0.0" } });
   });
 
-  await page.route('**/api/control', async route => {
+  await page.route(/\/api\/control/, async route => {
      await route.fulfill({ status: 200, body: 'OK' });
   });
 
@@ -93,7 +103,7 @@ test.describe('App Layout', () => {
     await expect(page.getByText('CHANNEL CONTROL')).toBeVisible();
     
     // Channel List
-    await expect(page.getByRole('button', { name: /Police Dispatch/ })).toBeVisible();
+    await expect(page.getByText('Police Dispatch').first()).toBeVisible();
     
     // Recent Activity
     await expect(page.getByText('Recent Activity')).toBeVisible();
@@ -120,7 +130,7 @@ test.describe('Channel Management', () => {
   });
 
   test('can add new channel', async ({ page }) => {
-    await page.route('**/api/channels', async route => {
+    await page.route(/\/api\/channels/, async route => {
        if (route.request().method() === 'POST') {
            const postData = route.request().postDataJSON();
            expect(postData.alphaTag).toBe('New Channel');
@@ -149,7 +159,7 @@ test.describe('Channel Management', () => {
 test.describe('Scanner Control', () => {
   test('clicking channel card triggers hold', async ({ page }) => {
     let holdRequestSent = false;
-    await page.route('**/api/control', async route => {
+    await page.route(/\/api\/control/, async route => {
         const data = route.request().postDataJSON();
         if (data.action === 'hold' && data.frequency === 155.000) {
             holdRequestSent = true;
@@ -158,7 +168,7 @@ test.describe('Scanner Control', () => {
     });
 
     // Click on "Police Dispatch" card
-    await page.getByRole('button', { name: /Police Dispatch/ }).click({ force: true });
+    await page.locator('.MuiCard-root').filter({ hasText: 'Police Dispatch' }).getByRole('button', { name: 'HOLD' }).click({ force: true });
     
     // Verify API call
     await expect.poll(() => holdRequestSent).toBeTruthy();
@@ -178,7 +188,7 @@ test.describe('Transmission Log', () => {
     const searchInput = page.getByPlaceholder('Search logs...');
     
     // Mock search results
-    await page.route('**/api/history/search?q=Fire', async route => {
+    await page.route(/\/api\/history\/search/, async route => {
         await route.fulfill({ json: [mockLogs[1]] });
     });
 

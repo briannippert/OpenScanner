@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, CardActionArea, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider } from '@mui/material';
+import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider, Button } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
 import ChannelManager from './components/ChannelManager';
 import FireToneManager from './components/FireToneManager';
@@ -87,6 +87,7 @@ function App() {
   const wsAudio = useRef<WebSocket | null>(null);
   const audioAnalyserRef = useRef<AnalyserNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
+  const filterNodeRef = useRef<BiquadFilterNode | null>(null);
   const wakeLock = useRef<WakeLockSentinel | null>(null);
   const activeSource = useRef<AudioBufferSourceNode | null>(null);
 
@@ -114,6 +115,16 @@ function App() {
           gainNode.gain.value = volume;
           gainNode.connect(window.audioCtx.destination);
           gainNodeRef.current = gainNode;
+      }
+
+      if (window.audioCtx && !filterNodeRef.current) {
+          const filter = window.audioCtx.createBiquadFilter();
+          filter.type = 'lowpass';
+          filter.frequency.value = 2000;
+          if (gainNodeRef.current) {
+              filter.connect(gainNodeRef.current);
+          }
+          filterNodeRef.current = filter;
       }
 
       if (window.audioCtx && window.audioCtx.state === 'suspended') {
@@ -223,15 +234,34 @@ function App() {
     }).catch(err => console.error("Command failed:", err));
   };
 
-  const handleChannelClick = (ch: Channel) => {
+  const handleSkip = (freq?: number) => {
+    if (freq) {
+        fetch('/api/control', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'avoid', frequency: freq, duration: 10 })
+        }).catch(err => console.error("Skip command failed:", err));
+    } else {
+        sendCommand('scan');
+    }
+  };
+
+  const handleChannelClick = async (ch: Channel) => {
       // Resume audio context on user interaction
       if (window.audioCtx && window.audioCtx.state === 'suspended') {
           window.audioCtx.resume();
       }
 
-      if (manualHold === ch.frequency) {
+      // Check if we are already holding this frequency (with tolerance for float precision)
+      const isHolding = manualHold !== undefined && Math.abs(manualHold - ch.frequency) < 0.0001;
+
+      if (isHolding) {
           sendCommand('scan');
       } else {
+          // If the channel is avoided, un-avoid it first
+          if (ch.avoid) {
+              await handleSaveChannel({ ...ch, avoid: false });
+          }
           sendCommand('hold', ch.frequency);
       }
   };
@@ -480,12 +510,25 @@ function App() {
         };
 
         wsAudio.current.onmessage = async (event) => {
+          // Debug: Log EVERYTHING received
+          // console.log("[Audio DEBUG] Message received:", event.data);
+
           if (event.data instanceof Blob) {
             try {
+                // Log incoming data size
+                // console.log(`[Audio] Received Blob size: ${event.data.size}`);
+
                 // Handle Audio
                 const arrayBuffer = await event.data.arrayBuffer();
                 
+                // Validate if it makes sense as Int16 (Raw PCM)
+                if (arrayBuffer.byteLength % 2 !== 0) {
+                    console.warn(`[Audio] Warning: Byte length ${arrayBuffer.byteLength} is not a multiple of 2 (Int16)`);
+                }
+
                 const int16Array = new Int16Array(arrayBuffer);
+                // console.log(`[Audio] Decoded ${int16Array.length} samples`);
+
                 const float32Array = new Float32Array(int16Array.length);
                 for (let i = 0; i < int16Array.length; i++) {
                     float32Array[i] = int16Array[i] / 32768;
@@ -493,7 +536,7 @@ function App() {
                 
                 let ctx = window.audioCtx;
                 if (!ctx) {
-                    // console.log("Initializing new AudioContext");
+                    console.log("[Audio] Initializing new AudioContext...");
                     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
                     if (AudioContextClass) {
                         ctx = new AudioContextClass({ sampleRate: 48000 });
@@ -502,26 +545,42 @@ function App() {
                 }
 
                 if (ctx && ctx.state === 'suspended') {
+                    console.log("[Audio] Resuming suspended context...");
                     await ctx.resume();
                 }
 
-                if (!ctx) return;
+                if (!ctx) {
+                    console.error("[Audio] Failed to get AudioContext");
+                    return;
+                }
+
+                // Ensure gain node belongs to current context
+                if (!gainNodeRef.current || gainNodeRef.current.context !== ctx) {
+                    console.log("[Audio] Recreating GainNode for current context");
+                    const gainNode = ctx.createGain();
+                    gainNode.gain.value = volume;
+                    gainNode.connect(ctx.destination);
+                    gainNodeRef.current = gainNode;
+                    filterNodeRef.current = null; // Force filter recreation
+                }
+
+                if (!filterNodeRef.current || filterNodeRef.current.context !== ctx) {
+                    const filter = ctx.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    filter.frequency.value = 2000;
+                    filter.connect(gainNodeRef.current);
+                    filterNodeRef.current = filter;
+                }
 
                 let analyser = audioAnalyserRef.current;
                 
                 // If analyser is missing or belongs to a different/closed context, recreate it
                 if (!analyser || analyser.context !== ctx || analyser.context.state === 'closed') {
-                    // console.log("Initializing AnalyserNode");
+                    console.log("[Audio] Recreating AnalyserNode");
                     analyser = ctx.createAnalyser();
                     analyser.fftSize = 1024;
                     
-                    if (!gainNodeRef.current) {
-                        const gainNode = ctx.createGain();
-                        gainNode.gain.value = volume;
-                        gainNode.connect(ctx.destination);
-                        gainNodeRef.current = gainNode;
-                    }
-                    analyser.connect(gainNodeRef.current);
+                    analyser.connect(filterNodeRef.current);
                     
                     audioAnalyserRef.current = analyser;
                     setAudioAnalyser(analyser);
@@ -539,25 +598,28 @@ function App() {
                     
                     // Scheduler to prevent crackling/overlaps
                     const currentTime = ctx.currentTime;
-                    // Reduced jitter buffer for lower latency (50ms)
-                    const JITTER_BUFFER = 0.05; 
+                    // Jitter buffer: 0.15s (150ms) gives more headroom than 50ms to prevent choppy audio
+                    // caused by network variance, at the cost of slight latency.
+                    const JITTER_BUFFER = 0.15; 
                     const MAX_DRIFT = 0.5; // Reset if > 500ms ahead
 
                     if (nextStartTime.current < currentTime) {
-                        // Underrun: We fell behind. Resume immediately.
-                        nextStartTime.current = currentTime;
+                        // Underrun: We fell behind. Resume immediately + small safety buffer
+                        // console.log("[Audio] Underrun detected, resetting sync");
+                        nextStartTime.current = currentTime + 0.05; 
                     } else if (nextStartTime.current > currentTime + MAX_DRIFT) {
                         // Drift: We are too far ahead. Reset to tight buffer.
+                        // console.log("[Audio] Large drift detected, resetting sync");
                         nextStartTime.current = currentTime + JITTER_BUFFER;
                     }
                     
                     source.start(nextStartTime.current);
                     nextStartTime.current += audioBuffer.duration;
                 } else {
-                    console.error("AnalyserNode is invalid, dropping audio packet");
+                    console.error("[Audio] AnalyserNode is invalid, dropping audio packet");
                 }
             } catch (err) {
-                console.error("Audio processing error:", err);
+                console.error("[Audio] Processing error:", err);
             }
           }
         };
@@ -767,9 +829,7 @@ function App() {
                             state={scannerState} 
                             analyser={audioAnalyser}
                             channels={channels}
-                            onScan={() => {
-                                sendCommand('scan');
-                            }}
+                            onScan={handleSkip}
                         />
                     </Box>
 
@@ -795,7 +855,7 @@ function App() {
                                             '&:hover': { bgcolor: '#222' }
                                         }}
                                     >
-                                        <CardActionArea onClick={() => handleChannelClick(ch)} sx={{ p: 2 }}>
+                                        <Box sx={{ p: 2 }}>
                                             <Box display="flex" justifyContent="space-between" alignItems="flex-start">
                                                 <Box>
                                                     <Typography variant="subtitle1" fontWeight="bold" color={manualHold === ch.frequency ? 'warning.main' : 'text.primary'}>
@@ -816,9 +876,44 @@ function App() {
                                                     sx={{ height: 20, fontSize: '0.65rem', bgcolor: '#333' }} 
                                                 />
                                                 <Box flexGrow={1} />
-                                                {manualHold === ch.frequency ? <PauseIcon fontSize="small" color="warning" /> : <PlayArrowIcon fontSize="small" sx={{ opacity: 0.3 }} />}
+                                                <Button
+                                                    variant="contained"
+                                                    size="small"
+                                                    onClick={async () => {
+                                                        const newAvoid = !ch.avoid;
+                                                        await handleSaveChannel({ ...ch, avoid: newAvoid });
+                                                        // If we are now avoiding the channel we are holding, stop holding
+                                                        if (newAvoid && manualHold !== undefined && Math.abs(manualHold - ch.frequency) < 0.0001) {
+                                                            sendCommand('scan');
+                                                        }
+                                                    }}
+                                                    sx={{ 
+                                                        bgcolor: ch.avoid ? 'error.main' : '#1c1c1c',
+                                                        color: ch.avoid ? 'white' : 'text.primary',
+                                                        minWidth: 'auto', 
+                                                        padding: '4px 8px', 
+                                                        fontSize: '0.7rem',
+                                                        mr: 1
+                                                    }}
+                                                >
+                                                    AVOID
+                                                </Button>
+                                                <Button
+                                                    variant="contained"
+                                                    size="small"
+                                                    onClick={() => handleChannelClick(ch)}
+                                                    sx={{ 
+                                                        bgcolor: manualHold === ch.frequency ? 'warning.main' : '#1c1c1c',
+                                                        color: manualHold === ch.frequency ? 'white' : 'text.primary',
+                                                        minWidth: 'auto', 
+                                                        padding: '4px 8px', 
+                                                        fontSize: '0.7rem'
+                                                    }}
+                                                >
+                                                    HOLD
+                                                </Button>
                                             </Box>
-                                        </CardActionArea>
+                                        </Box>
                                     </Card>
                                 </Grid>
                             ))}

@@ -49,6 +49,14 @@ Once installed, open your browser to:
 For API documentation, visit:
 `http://<your-pi-ip>/swagger`
 
+## Updating
+
+To update OpenScanner to the latest version, simply navigate to the project directory and re-run the installation script. This will pull the latest changes from the `main` branch, rebuild the components, and restart the service:
+
+```bash
+sudo ./scripts/install_service.sh
+```
+
 ## Management
 
 - **Status Check**: `systemctl status openscanner`

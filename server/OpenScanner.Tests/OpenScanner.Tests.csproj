@@ -35,10 +35,9 @@
 
     <ItemGroup>
 
-      <None Update="TestData\**">
-
+      <None Include="..\TestData\**">
+        <Link>TestData\%(RecursiveDir)%(Filename)%(Extension)</Link>
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-
       </None>
 
     </ItemGroup>

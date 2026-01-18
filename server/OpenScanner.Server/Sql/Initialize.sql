@@ -35,5 +35,6 @@ CREATE TABLE IF NOT EXISTS channels (
     tag TEXT,
     lat REAL,
     lon REAL,
-    range REAL
+    range REAL,
+    avoid INTEGER DEFAULT 0
 );
