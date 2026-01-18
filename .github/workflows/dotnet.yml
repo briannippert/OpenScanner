@@ -27,7 +27,7 @@ jobs:
     - name: Install System Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg cmake build-essential libitpp-dev libsndfile1-dev libusb-1.0-0-dev libncurses-dev libcodec2-dev
+        sudo apt-get install -y ffmpeg cmake build-essential libitpp-dev libsndfile1-dev libusb-1.0-0-dev libncurses-dev libcodec2-dev libpulse-dev librtlsdr-dev
 
     - name: Build and Install mbelib
       run: |
