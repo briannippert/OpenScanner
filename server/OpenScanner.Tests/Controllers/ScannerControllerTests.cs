@@ -81,80 +81,80 @@ public class ScannerControllerTests
     }
 
     [Fact]
-    public void ControlScanner_Start_CallsRadioStart()
+    public async Task ControlScanner_Start_CallsRadioStart()
     {
         var body = JsonSerializer.SerializeToElement(new { action = "start" });
-        var result = _controller.ControlScanner(body) as OkResult;
+        var result = await _controller.ControlScanner(body) as OkResult;
         
         Assert.NotNull(result);
         _radioMock.Verify(r => r.Start(), Times.Once);
     }
 
     [Fact]
-    public void ControlScanner_Stop_CallsRadioStop()
+    public async Task ControlScanner_Stop_CallsRadioStop()
     {
         var body = JsonSerializer.SerializeToElement(new { action = "stop" });
-        var result = _controller.ControlScanner(body) as OkResult;
+        var result = await _controller.ControlScanner(body) as OkResult;
         
         Assert.NotNull(result);
         _radioMock.Verify(r => r.Stop(), Times.Once);
     }
 
     [Fact]
-    public void ControlScanner_Hold_CallsRadioHold()
+    public async Task ControlScanner_Hold_CallsRadioHold()
     {
         var body = JsonSerializer.SerializeToElement(new { action = "hold", frequency = 155.5 });
-        var result = _controller.ControlScanner(body) as OkResult;
+        var result = await _controller.ControlScanner(body) as OkResult;
         
         Assert.NotNull(result);
         _radioMock.Verify(r => r.HoldFrequency(155.5), Times.Once);
     }
     
     [Fact]
-    public void ControlScanner_SetSquelch_CallsRadioSetSquelch()
+    public async Task ControlScanner_SetSquelch_CallsRadioSetSquelch()
     {
         var body = JsonSerializer.SerializeToElement(new { action = "set_squelch", value = -40 });
-        var result = _controller.ControlScanner(body) as OkResult;
+        var result = await _controller.ControlScanner(body) as OkResult;
         
         Assert.NotNull(result);
         _radioMock.Verify(r => r.SetSquelch(-40), Times.Once);
     }
 
     [Fact]
-    public void ControlScanner_StartDump_CallsRadioStartDump()
+    public async Task ControlScanner_StartDump_CallsRadioStartDump()
     {
         var body = JsonSerializer.SerializeToElement(new { action = "start_dump", label = "test" });
-        var result = _controller.ControlScanner(body) as OkResult;
+        var result = await _controller.ControlScanner(body) as OkResult;
 
         Assert.NotNull(result);
         _radioMock.Verify(r => r.StartDumping("test"), Times.Once);
     }
 
     [Fact]
-    public void ControlScanner_StopDump_CallsRadioStopDump()
+    public async Task ControlScanner_StopDump_CallsRadioStopDump()
     {
         var body = JsonSerializer.SerializeToElement(new { action = "stop_dump" });
-        var result = _controller.ControlScanner(body) as OkResult;
+        var result = await _controller.ControlScanner(body) as OkResult;
 
         Assert.NotNull(result);
         _radioMock.Verify(r => r.StopDumping(), Times.Once);
     }
 
     [Fact]
-    public void ControlScanner_UnknownAction_ReturnsBadRequest()
+    public async Task ControlScanner_UnknownAction_ReturnsBadRequest()
     {
         var body = JsonSerializer.SerializeToElement(new { action = "invalid" });
-        var result = _controller.ControlScanner(body) as BadRequestObjectResult;
+        var result = await _controller.ControlScanner(body) as BadRequestObjectResult;
 
         Assert.NotNull(result);
         Assert.Equal("Unknown action: invalid", result.Value);
     }
     
     [Fact]
-    public void ControlScanner_MissingAction_ReturnsBadRequest()
+    public async Task ControlScanner_MissingAction_ReturnsBadRequest()
     {
         var body = JsonSerializer.SerializeToElement(new { foo = "bar" });
-        var result = _controller.ControlScanner(body) as BadRequestObjectResult;
+        var result = await _controller.ControlScanner(body) as BadRequestObjectResult;
 
         Assert.NotNull(result);
         Assert.Equal("Action is required", result.Value);

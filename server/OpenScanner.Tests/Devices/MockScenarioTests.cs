@@ -70,7 +70,7 @@ public class MockScenarioTests
             {
                 Time = 1, // Start after 1 second
                 Frequency = 155.000,
-                AudioFile = "P25-C4FM-VC_IF.wav",
+                AudioFile = "p25_raw.wav",
                 Duration = 4,
                 SourceId = 101,
                 TargetId = 202,
@@ -92,6 +92,7 @@ public class MockScenarioTests
         // Assert - Should be receiving
         var state = _source.GetState();
         Assert.Equal("RECEIVING", state.Status);
+        Assert.True(audioReceived, "Should have received audio data");
         
         _source.Stop();
     }

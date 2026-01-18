@@ -55,7 +55,8 @@ public class MockRadioSource : BackgroundService, IRadioSource
         _recordingService.OnNewLog += (log) => OnNewLog?.Invoke(log);
         
         // Try to load default scenario
-        var scenarioPath = Path.Combine(Directory.GetCurrentDirectory(), "TestData", "scenario.json");
+        var scenarioPath = Path.Combine(AppContext.BaseDirectory, "TestData", "scenario.json");
+        
         if (File.Exists(scenarioPath))
         {
              try 
@@ -222,7 +223,15 @@ public class MockRadioSource : BackgroundService, IRadioSource
                             // Simulate Audio
                             if (!string.IsNullOrEmpty(activeEvent.AudioFile))
                             {
-                                await PlayAudioFile(activeEvent, token);
+                                try
+                                {
+                                    await PlayAudioFile(activeEvent, token);
+                                }
+                                catch (ObjectDisposedException)
+                                {
+                                    // Normal during shutdown
+                                    break;
+                                }
                             }
                             else
                             {
@@ -266,29 +275,36 @@ public class MockRadioSource : BackgroundService, IRadioSource
     {
         string filename = evt.AudioFile!;
         
-        // Robust path resolution
-        var searchPaths = new List<string>
-        {
-            Path.Combine(Directory.GetCurrentDirectory(), "TestData", filename),
-            Path.Combine(Directory.GetCurrentDirectory(), "bin", "Debug", "net10.0", "TestData", filename),
-            Path.Combine(AppContext.BaseDirectory, "TestData", filename),
-            // Look relative to the server project if running from root
-            Path.Combine(Directory.GetCurrentDirectory(), "server", "OpenScanner.Server", "TestData", filename)
-        };
+        // Robust path resolution - prioritize AppContext.BaseDirectory
+        var path = Path.Combine(AppContext.BaseDirectory, "TestData", filename);
         
-        string? path = searchPaths.FirstOrDefault(p => File.Exists(p));
+        // Fallback for development/legacy support if needed, but primary should be enough with CopyToOutputDirectory
+        if (!File.Exists(path))
+        {
+            path = Path.Combine(Directory.GetCurrentDirectory(), "TestData", filename);
+        }
         
         // Final fallback: try filename directly
-        if (path == null && File.Exists(filename)) path = filename;
+        if (!File.Exists(path) && File.Exists(filename)) path = filename;
 
-        if (path != null)
+        if (File.Exists(path))
         {
             _logger.LogInformation($"[MockRadioSource] SUCCESS: Playing audio file from: {path} (Decoder: {evt.DecoderType ?? "None"})");
+
+            if (token.IsCancellationRequested) return;
 
             if (evt.DecoderType?.ToUpper() == "P25")
             {
                 // Use Real Decoder
-                var decoder = _decoderFactory.GetDecoder("P25");
+                IDecoder decoder;
+                try
+                {
+                    decoder = _decoderFactory.GetDecoder("P25");
+                }
+                catch (ObjectDisposedException)
+                {
+                    return; // Shutdown
+                }
                 
                 // Use ffmpeg with -re (read at native rate) to simulate real-time input.
                 // This prevents the decoder from running too fast and flooding the client.
@@ -351,7 +367,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
         }
         else
         {
-            _logger.LogWarning($"Audio file not found: {filename}. Searched in {string.Join(", ", searchPaths)}");
+            _logger.LogWarning($"Audio file not found: {filename}. Checked: {path}");
         }
     }
 
