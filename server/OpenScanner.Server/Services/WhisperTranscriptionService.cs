@@ -68,7 +68,7 @@ public class WhisperTranscriptionService : ITranscriptionService
 
         if (!File.Exists(whisperBin) || !File.Exists(modelPath))
         {
-            _logger.LogWarning($"Whisper not found at {whisperBin} or model missing at {modelPath}. Search root was: {whisperRoot}");
+            _logger.LogError($"Whisper not found at {whisperBin} or model missing at {modelPath}. Search root was: {whisperRoot}");
             return null;
         }
 
@@ -138,9 +138,9 @@ public class WhisperTranscriptionService : ITranscriptionService
                 var stdoutTask = proc.StandardOutput.ReadToEndAsync();
                 var stderrTask = proc.StandardError.ReadToEndAsync();
 
-                if (!proc.WaitForExit(60000)) // 60s timeout
+                if (!proc.WaitForExit(120000)) // 120s timeout
                 {
-                    _logger.LogWarning("Whisper timed out");
+                    _logger.LogError("Whisper timed out");
                     proc.Kill();
                 }
                 else
@@ -157,7 +157,7 @@ public class WhisperTranscriptionService : ITranscriptionService
                         // Log debug info if no file created
                         if (!File.Exists(tempWavPath + ".txt"))
                         {
-                            _logger.LogWarning($"Whisper finished but no output file.\nStderr: {stderr}\nStdout: {stdout}");
+                            _logger.LogError($"Whisper finished but no output file.\nStderr: {stderr}\nStdout: {stdout}");
                         }
                     }
                 }
