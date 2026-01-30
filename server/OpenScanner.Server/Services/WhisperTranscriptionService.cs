@@ -138,7 +138,7 @@ public class WhisperTranscriptionService : ITranscriptionService
                 var stdoutTask = proc.StandardOutput.ReadToEndAsync();
                 var stderrTask = proc.StandardError.ReadToEndAsync();
 
-                if (!proc.WaitForExit(60000)) // 60s timeout
+                if (!proc.WaitForExit(120000)) // 120s timeout
                 {
                     _logger.LogError("Whisper timed out");
                     proc.Kill();
