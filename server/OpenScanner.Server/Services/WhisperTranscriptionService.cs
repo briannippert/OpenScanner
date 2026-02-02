@@ -28,33 +28,25 @@ public class WhisperTranscriptionService : ITranscriptionService
         var currentDir = new DirectoryInfo(Directory.GetCurrentDirectory());
         string? whisperRoot = null;
 
-        // 1. Try absolute path first (Server specific)
-        if (Directory.Exists("/home/brian/radio/OpenScanner/whisper.cpp"))
+        // 1. Search up to find whisper.cpp
+        for (int i = 0; i < 6; i++)
         {
-            whisperRoot = "/home/brian/radio/OpenScanner/whisper.cpp";
-        }
-        else
-        {
-            // 2. Search up
-            for (int i = 0; i < 6; i++)
+            if (currentDir == null) break;
+            var probe = Path.Combine(currentDir.FullName, "whisper.cpp");
+            if (Directory.Exists(probe))
             {
-                if (currentDir == null) break;
-                var probe = Path.Combine(currentDir.FullName, "whisper.cpp");
-                if (Directory.Exists(probe))
-                {
-                    whisperRoot = probe;
-                    break;
-                }
-
-                probe = Path.Combine(currentDir.FullName, "../whisper.cpp");
-                if (Directory.Exists(probe))
-                {
-                    whisperRoot = Path.GetFullPath(probe);
-                    break;
-                }
-
-                currentDir = currentDir.Parent;
+                whisperRoot = probe;
+                break;
             }
+
+            probe = Path.Combine(currentDir.FullName, "../whisper.cpp");
+            if (Directory.Exists(probe))
+            {
+                whisperRoot = Path.GetFullPath(probe);
+                break;
+            }
+
+            currentDir = currentDir.Parent;
         }
 
         if (whisperRoot == null)
@@ -64,7 +56,7 @@ public class WhisperTranscriptionService : ITranscriptionService
         }
 
         var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");
-        var modelPath = Path.Combine(whisperRoot, "models/ggml-small.en.bin");
+        var modelPath = Path.Combine(whisperRoot, "models/ggml-tiny.en.bin");
 
         if (!File.Exists(whisperBin) || !File.Exists(modelPath))
         {
