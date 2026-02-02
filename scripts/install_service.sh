@@ -178,10 +178,10 @@ if [ ! -f "$PROJECT_ROOT/whisper.cpp/build/bin/whisper-cli" ]; then
     log_success "Whisper.cpp built."
 fi
 
-if [ ! -f "$PROJECT_ROOT/whisper.cpp/models/ggml-tiny.en.bin" ]; then
+if [ ! -f "$PROJECT_ROOT/whisper.cpp/models/ggml-small.en.bin" ]; then
     log_info "Downloading Whisper model..."
     cd "$PROJECT_ROOT/whisper.cpp"
-    sudo -u "$REAL_USER" bash ./models/download-ggml-model.sh tiny.en
+    sudo -u "$REAL_USER" bash ./models/download-ggml-model.sh small.en
     log_success "Whisper model downloaded."
 fi
 cd "$PROJECT_ROOT"

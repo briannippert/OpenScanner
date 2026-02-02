@@ -56,7 +56,7 @@ public class WhisperTranscriptionService : ITranscriptionService
         }
 
         var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");
-        var modelPath = Path.Combine(whisperRoot, "models/ggml-tiny.en.bin");
+        var modelPath = Path.Combine(whisperRoot, "models/ggml-small.en.bin");
 
         if (!File.Exists(whisperBin) || !File.Exists(modelPath))
         {
