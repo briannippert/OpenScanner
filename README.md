@@ -34,12 +34,17 @@ OpenScanner is a high-performance, web-based digital radio scanner designed for 
 
 ## Quick Start
 
-### 1. Deploy OpenScanner
-The unified installer handles everything: it installs required radio drivers (DSD-FME, mbelib), builds the .NET backend and React frontend, and sets up Whisper AI.
+### 1. Clone & Install
+The unified installer handles everything: it installs required system libraries and radio drivers (DSD-FME, mbelib), builds the .NET backend and React frontend, and sets up Whisper AI.
 
 ```bash
-chmod +x scripts/install_service.sh
-sudo ./scripts/install_service.sh
+# Clone the repository
+git clone https://github.com/briannippert/OpenScanner.git
+cd OpenScanner
+
+# Run the installer (do NOT run with sudo, it will prompt for password when needed)
+chmod +x scripts/*.sh
+./scripts/install_service.sh
 ```
 
 ### 2. Access the UI
@@ -49,18 +54,24 @@ Once installed, open your browser to:
 For API documentation, visit:
 `http://<your-pi-ip>/swagger`
 
+## Installation Options
+
+- **Full Install**: `./scripts/install_service.sh` (Builds everything and installs the systemd service).
+- **Dependencies Only**: `./scripts/install_service.sh --deps-only` (Installs all required system libraries, radio drivers, and Whisper models, then exits without building the app or installing the service).
+
 ## Updating
 
-To update OpenScanner to the latest version, simply navigate to the project directory and re-run the installation script. This will pull the latest changes from the `main` branch, rebuild the components, and restart the service:
+To update OpenScanner to the latest version, simply navigate to the project directory and re-run the installation script. This will pull the latest changes, rebuild components, and restart the service:
 
 ```bash
-sudo ./scripts/install_service.sh
+./scripts/install_service.sh
 ```
 
 ## Management
 
 - **Status Check**: `systemctl status openscanner`
 - **View Logs**: `journalctl -u openscanner -f`
+- **Uninstall Service**: `./scripts/uninstall_service.sh`
 - **Data Location**: Database and recordings are stored in the `/data` directory in the project root.
 
 ## Acknowledgments

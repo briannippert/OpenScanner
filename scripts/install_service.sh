@@ -2,7 +2,7 @@
 set -e # Exit immediately if a command exits with a non-zero status
 
 # ==========================================
-# OpenScanner Service Installer (Robust)
+# OpenScanner Service Installer (User Mode)
 # ==========================================
 
 # Colors
@@ -19,27 +19,45 @@ log_success() { echo -e "${GREEN}[OK] $1${NC}"; }
 log_warn() { echo -e "${YELLOW}[WARN] $1${NC}"; }
 log_error() { echo -e "${RED}[ERROR] $1${NC}"; }
 
-# Check Root
-if [ "$EUID" -ne 0 ]; then
-  log_error "Please run as root (e.g., sudo ./install_service.sh)"
+# Parse Arguments
+DEPS_ONLY=false
+for arg in "$@"; do
+  case $arg in
+    --deps-only)
+      DEPS_ONLY=true
+      shift
+      ;;
+  esac
+done
+
+# Check NOT Root
+if [ "$EUID" -eq 0 ]; then
+  log_error "Please run as a regular user (NOT root)."
+  log_error "The script will ask for sudo password when needed."
   exit 1
 fi
 
-# Detect Real User
-REAL_USER=${SUDO_USER:-$USER}
-REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+# Ensure sudo is available
+if ! command -v sudo &> /dev/null; then
+    log_error "This script requires 'sudo' to install system dependencies."
+    exit 1
+fi
+
+# Refresh sudo credentials upfront
+sudo -v
+
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 log_step "Initializing Setup"
 log_info "Project Root: $PROJECT_ROOT"
-log_info "User: $REAL_USER ($REAL_HOME)"
+log_info "User: $USER ($HOME)"
 
 # ----------------------------------------------------------------
 # 1. Environment & Cleanup
 # ----------------------------------------------------------------
 log_step "Stopping existing service..."
 if systemctl is-active --quiet openscanner; then
-    systemctl stop openscanner
+    sudo systemctl stop openscanner
     log_info "Service stopped."
 else
     log_info "Service was not running."
@@ -50,10 +68,7 @@ fi
 # ----------------------------------------------------------------
 log_step "Updating Repository..."
 if git remote get-url origin &> /dev/null; then
-    # Fix ownership before pulling to avoid permission errors
-    chown -R "$REAL_USER":"$REAL_USER" "$PROJECT_ROOT/.git"
-    
-    if sudo -u "$REAL_USER" git pull origin main; then
+    if git pull origin main; then
         log_success "Code pulled successfully."
     else
         log_warn "Git pull failed. Continuing with local files..."
@@ -91,11 +106,11 @@ if [ "$INSTALL_DOTNET" = true ]; then
     if command -v apt-get &> /dev/null; then
         # Add Microsoft repository (Standard robust method for Debian/Ubuntu)
         wget https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
-        dpkg -i packages-microsoft-prod.deb
+        sudo dpkg -i packages-microsoft-prod.deb
         rm packages-microsoft-prod.deb
         
-        apt-get update -qq || log_warn "apt-get update encountered errors. Attempting to continue..."
-        apt-get install -y -qq dotnet-sdk-10.0
+        sudo apt-get update -qq || log_warn "apt-get update encountered errors. Attempting to continue..."
+        sudo apt-get install -y -qq dotnet-sdk-10.0
         log_success ".NET 10 SDK installed."
     else
          log_warn "Could not install .NET SDK automatically. Please install .NET 10 SDK manually."
@@ -103,10 +118,12 @@ if [ "$INSTALL_DOTNET" = true ]; then
 fi
 
 # --- Check NBGV Tool ---
+# Add .dotnet/tools to PATH first, as it might already be installed there
+export PATH="$PATH:$HOME/.dotnet/tools"
+
 if ! command -v nbgv &> /dev/null; then
     log_info "Installing nbgv versioning tool..."
     dotnet tool install -g nbgv
-    export PATH="$PATH:$REAL_HOME/.dotnet/tools"
 fi
 
 # --- Check Node.js (For Client Build) ---
@@ -119,7 +136,7 @@ if [ -z "$NODE_PATH" ]; then
     if ! command -v curl &> /dev/null; then
         if command -v apt-get &> /dev/null; then
              log_info "Installing curl..."
-             apt-get update -qq && apt-get install -y -qq curl
+             sudo apt-get update -qq && sudo apt-get install -y -qq curl
         else
              log_error "curl is required but not found. Please install curl."
              exit 1
@@ -127,8 +144,10 @@ if [ -z "$NODE_PATH" ]; then
     fi
 
     # Download and install nvm
-    log_info "Installing nvm..."
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+    if [ ! -d "$HOME/.nvm" ]; then
+        log_info "Installing nvm..."
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+    fi
 
     # Load nvm
     export NVM_DIR="$HOME/.nvm"
@@ -155,8 +174,8 @@ fi
 # ----------------------------------------------------------------
 log_step "Installing System Libraries..."
 
-apt-get update -qq || log_warn "apt-get update encountered errors. Attempting to continue..."
-apt-get install -y -qq git cmake build-essential \
+sudo apt-get update -qq || log_warn "apt-get update encountered errors. Attempting to continue..."
+sudo apt-get install -y -qq git cmake build-essential \
     libitpp-dev libsndfile1-dev libusb-1.0-0-dev libncurses-dev \
     rtl-sdr librtlsdr-dev libcodec2-dev libpulse-dev libasound2-dev \
     gpsd gpsd-clients ffmpeg > /dev/null
@@ -166,22 +185,22 @@ log_success "Libraries installed."
 log_step "Checking Whisper.cpp..."
 if [ ! -d "$PROJECT_ROOT/whisper.cpp" ]; then
     log_info "Cloning whisper.cpp..."
-    sudo -u "$REAL_USER" git clone https://github.com/ggerganov/whisper.cpp.git "$PROJECT_ROOT/whisper.cpp"
+    git clone https://github.com/ggerganov/whisper.cpp.git "$PROJECT_ROOT/whisper.cpp"
 fi
 
 if [ ! -f "$PROJECT_ROOT/whisper.cpp/build/bin/whisper-cli" ]; then
     log_info "Building whisper.cpp..."
     cd "$PROJECT_ROOT/whisper.cpp"
     # Using cmake for consistent build path expected by server
-    sudo -u "$REAL_USER" cmake -B build
-    sudo -u "$REAL_USER" cmake --build build --config Release -j$(nproc)
+    cmake -B build
+    cmake --build build --config Release -j$(nproc)
     log_success "Whisper.cpp built."
 fi
 
 if [ ! -f "$PROJECT_ROOT/whisper.cpp/models/ggml-small.en.bin" ]; then
     log_info "Downloading Whisper model..."
     cd "$PROJECT_ROOT/whisper.cpp"
-    sudo -u "$REAL_USER" bash ./models/download-ggml-model.sh small.en
+    bash ./models/download-ggml-model.sh small.en
     log_success "Whisper model downloaded."
 fi
 cd "$PROJECT_ROOT"
@@ -189,14 +208,14 @@ cd "$PROJECT_ROOT"
 # Configure GPSD
 log_step "Configuring GPSD..."
 if [ ! -f /etc/default/gpsd ]; then
-    cat <<EOF > /etc/default/gpsd
+    sudo bash -c 'cat <<EOF > /etc/default/gpsd
 START_DAEMON="true"
 USBAUTO="true"
 DEVICES="/dev/ttyACM0"
 GPSD_OPTIONS="-n"
 GPSD_SOCKET="/var/run/gpsd.sock"
-EOF
-    systemctl restart gpsd
+EOF'
+    sudo systemctl restart gpsd
 fi
 
 # Check Hardware Drivers & Install dsd-fme
@@ -220,8 +239,8 @@ if ! command -v dsd-fme &> /dev/null || ! ldconfig -p | grep -q libmbe; then
         mkdir -p build && cd build
         cmake ..
         make -j$(nproc)
-        make install
-        ldconfig
+        sudo make install
+        sudo ldconfig
         cd ../..
     fi
 
@@ -237,14 +256,19 @@ if ! command -v dsd-fme &> /dev/null || ! ldconfig -p | grep -q libmbe; then
         mkdir -p build && cd build
         cmake ..
         make -j$(nproc)
-        make install
-        ldconfig
+        sudo make install
+        sudo ldconfig
         cd ../..
     fi
     cd ..
     log_success "Radio dependencies installed."
 else
     log_success "Radio dependencies found."
+fi
+
+if [ "$DEPS_ONLY" = true ]; then
+    log_success "Dependencies installed. Skipping build and service installation (--deps-only)."
+    exit 0
 fi
 
 # ----------------------------------------------------------------
@@ -258,15 +282,19 @@ cd "$PROJECT_ROOT/client"
 if [ -f "package-lock.json" ] && [ -n "$NODE_PATH" ]; then
     # Sync version if nbgv is available
     if command -v nbgv &> /dev/null; then
-        NPM_VER=$(nbgv get-version -v NpmPackageVersion)
-        npm version "$NPM_VER" --no-git-tag-version --silent
-        log_info "Synced package.json to version $NPM_VER"
+        if NPM_VER=$(nbgv get-version -v NpmPackageVersion 2>/dev/null); then
+            npm version "$NPM_VER" --no-git-tag-version --silent || true
+            log_info "Synced package.json to version $NPM_VER"
+        fi
     fi
 
-    npm ci --silent
-    if [ $? -ne 0 ]; then npm install --silent; fi
+    # Try npm ci, fallback to npm install if it fails
+    if ! npm ci --silent; then
+        log_warn "npm ci failed, falling back to npm install..."
+        npm install --silent
+    fi
     
-    # Fix permissions
+    # Fix permissions for binaries
     chmod +x node_modules/.bin/* || true
 
     if npm run build; then
@@ -299,7 +327,9 @@ NET_EXEC="$PROJECT_ROOT/server/OpenScanner.Server/bin/Release/net10.0/publish/Op
 # Ensure executable permission
 chmod +x "$NET_EXEC"
 
-cat <<EOF > "$SERVICE_FILE"
+# Create temp file for service config
+TEMP_SERVICE_FILE=$(mktemp)
+cat <<EOF > "$TEMP_SERVICE_FILE"
 [Unit]
 Description=OpenScanner Radio Service (.NET)
 After=network.target sound.target
@@ -318,16 +348,19 @@ Environment=ASPNETCORE_URLS=http://0.0.0.0:80
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable openscanner
-systemctl restart openscanner
+# Move service file to correct location with sudo
+sudo mv "$TEMP_SERVICE_FILE" "$SERVICE_FILE"
+sudo chown root:root "$SERVICE_FILE"
+sudo chmod 644 "$SERVICE_FILE"
+
+sudo systemctl daemon-reload
+sudo systemctl enable openscanner
+sudo systemctl restart openscanner
 
 # ----------------------------------------------------------------
 # 7. Finalize
 # ----------------------------------------------------------------
 log_step "Finalizing Permissions..."
-# Crucial: Give files back to the user so they can edit them later
-chown -R "$REAL_USER":"$REAL_USER" "$PROJECT_ROOT"
 # Restore executable bits for scripts
 chmod +x "$PROJECT_ROOT"/scripts/*.sh
 

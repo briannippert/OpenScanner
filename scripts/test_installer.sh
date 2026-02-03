@@ -12,11 +12,14 @@ log_info() { echo -e "${BLUE}[TEST INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[TEST SUCCESS] $1${NC}"; }
 log_error() { echo -e "${RED}[TEST ERROR] $1${NC}"; }
 
-# Check Root
-if [ "$EUID" -ne 0 ]; then
-  log_error "Please run as root (e.g., sudo ./scripts/test_installer.sh)"
+# Check NOT Root
+if [ "$EUID" -eq 0 ]; then
+  log_error "Please run as a regular user (NOT root)."
   exit 1
 fi
+
+# Ensure sudo works
+sudo -v
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
@@ -42,14 +45,14 @@ fi
 # Remove installed binaries/libs to trigger the installer's "missing" checks
 if command -v dsd-fme &> /dev/null; then
     log_info "Removing installed dsd-fme binary..."
-    rm -f "$(which dsd-fme)"
+    sudo rm -f "$(which dsd-fme)"
 fi
 
 log_info "Removing installed mbelib libraries..."
-rm -f /usr/local/lib/libmbe*
-rm -f /usr/local/include/mbelib.h
-rm -f /usr/include/mbelib.h
-ldconfig # Update shared library cache
+sudo rm -f /usr/local/lib/libmbe*
+sudo rm -f /usr/local/include/mbelib.h
+sudo rm -f /usr/include/mbelib.h
+sudo ldconfig # Update shared library cache
 
 # --- Application Builds ---
 log_info "Cleaning previous application builds..."
@@ -58,6 +61,7 @@ rm -rf server/OpenScanner.Server/bin server/OpenScanner.Server/obj
 
 # 1. Run Installer
 log_info "Step 1: Running install_service.sh..."
+# Run as current user!
 if "$SCRIPT_DIR/install_service.sh"; then
     log_success "Installer script finished successfully."
 else
@@ -82,8 +86,6 @@ log_info "Step 3: Checking HTTP response on port 80..."
 if command -v curl &> /dev/null; then
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:80/ || true)
     # Expect 200 (OK) or 302 (Redirect) or maybe 404 if index not found but server up.
-    # Actually, the server likely serves the React app or an API.
-    # Even a 404 means the server is listening. 000 means connection failed.
     if [ "$HTTP_CODE" -ne "000" ]; then
          log_success "Server responded with HTTP $HTTP_CODE."
     else
@@ -96,6 +98,7 @@ fi
 
 # 4. Teardown
 log_info "Step 4: Tearing down (running uninstall_service.sh)..."
+# Uninstaller now handles sudo internally
 if "$SCRIPT_DIR/uninstall_service.sh"; then
     log_success "Uninstaller script finished successfully."
 else
