@@ -170,13 +170,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     {
         _logger.LogInformation("Resume/Skip requested.");
 
-        // Allow skipping if either on manual hold or receiving a transmission
-        if (!_manualOverride && _state.Status != "RECEIVING")
-        {
-            _logger.LogWarning("ResumeScan called but not in a valid state to skip (not manual override and not receiving).");
-            return;
-        }
-
+        // Force reset regardless of current state
         _manualOverride = false;
         
         StopDecoding(); // Stops the decoder
@@ -184,7 +178,14 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         _recordingLockoutUntil = DateTime.UtcNow.AddSeconds(3);
         
-        // State is updated within StartScanning
+        // Ensure state is IDLE so StartScanning accepts the request
+        UpdateState(_state with { 
+            Status = "IDLE", 
+            CurrentFrequency = null, 
+            CurrentChannel = null, 
+            SignalStrength = 0,
+            ManualHoldFrequency = null
+        });
         
         // Small delay to let hardware settle before restarting the scan
         Task.Delay(250).ContinueWith(_ => StartScanning());
