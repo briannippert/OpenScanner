@@ -1,1 +1,1 @@
-SELECT DISTINCT alphaTag, frequency FROM transmissions WHERE strftime('%Y', timestamp) = @Year AND strftime('%m', timestamp) = @Month AND strftime('%d', timestamp) = @Day ORDER BY alphaTag, frequency
+SELECT DISTINCT alphaTag, frequency FROM transmissions WHERE strftime('%Y', timestamp, 'localtime') = @Year AND strftime('%m', timestamp, 'localtime') = @Month AND strftime('%d', timestamp, 'localtime') = @Day ORDER BY alphaTag, frequency
