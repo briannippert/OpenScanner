@@ -1,1 +1,1 @@
-SELECT DISTINCT strftime('%m', timestamp) FROM transmissions WHERE strftime('%Y', timestamp) = @Year ORDER BY 1 DESC
+SELECT DISTINCT strftime('%m', timestamp, 'localtime') FROM transmissions WHERE strftime('%Y', timestamp, 'localtime') = @Year ORDER BY 1 DESC

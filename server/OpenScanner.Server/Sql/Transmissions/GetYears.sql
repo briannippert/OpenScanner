@@ -1,1 +1,1 @@
-SELECT DISTINCT strftime('%Y', timestamp) FROM transmissions ORDER BY 1 DESC
+SELECT DISTINCT strftime('%Y', timestamp, 'localtime') FROM transmissions ORDER BY 1 DESC
