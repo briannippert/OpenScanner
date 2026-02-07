@@ -3,8 +3,18 @@ name: Installer Test
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - 'scripts/install_service.sh'
+      - 'scripts/uninstall_service.sh'
+      - 'scripts/test_installer.sh'
+      - '.github/workflows/installer-test.yml'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - 'scripts/install_service.sh'
+      - 'scripts/uninstall_service.sh'
+      - 'scripts/test_installer.sh'
+      - '.github/workflows/installer-test.yml'
 
 jobs:
   test-installer:
