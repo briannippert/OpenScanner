@@ -197,10 +197,15 @@ if [ ! -f "$PROJECT_ROOT/whisper.cpp/build/bin/whisper-cli" ]; then
     log_success "Whisper.cpp built."
 fi
 
-if [ ! -f "$PROJECT_ROOT/whisper.cpp/models/ggml-small.en.bin" ]; then
-    log_info "Downloading Whisper model..."
+# Get model from appsettings.json
+WHISPER_MODEL=$(grep '"Model":' "$PROJECT_ROOT/server/OpenScanner.Server/appsettings.json" | head -n 1 | cut -d'"' -f4 || echo "small.en")
+log_info "Transcription Model: $WHISPER_MODEL"
+
+if [ ! -f "$PROJECT_ROOT/whisper.cpp/models/ggml-$WHISPER_MODEL.bin" ]; then
+    log_info "Downloading Whisper model ($WHISPER_MODEL)..."
     cd "$PROJECT_ROOT/whisper.cpp"
-    bash ./models/download-ggml-model.sh small.en
+    # download script takes the name without ggml- and .bin (e.g. small.en)
+    bash ./models/download-ggml-model.sh "$WHISPER_MODEL"
     log_success "Whisper model downloaded."
 fi
 cd "$PROJECT_ROOT"

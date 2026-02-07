@@ -9,11 +9,13 @@ public class WhisperTranscriptionService : ITranscriptionService
 {
     private readonly IDatabase _db;
     private readonly ILogger<WhisperTranscriptionService> _logger;
+    private readonly IConfiguration _config;
 
-    public WhisperTranscriptionService(IDatabase db, ILogger<WhisperTranscriptionService> logger)
+    public WhisperTranscriptionService(IDatabase db, ILogger<WhisperTranscriptionService> logger, IConfiguration config)
     {
         _db = db;
         _logger = logger;
+        _config = config;
     }
 
     public string? TranscribeAudio(string audioPath)
@@ -21,6 +23,9 @@ public class WhisperTranscriptionService : ITranscriptionService
         // Check setting
         var enabled = _db.GetSettingAsync("EnableTranscription").GetAwaiter().GetResult();
         if (enabled != "true") return null;
+
+        // Get model name from config (e.g. "small.en")
+        var modelName = _config["Transcription:Model"] ?? "small.en";
 
         // Temp file for resampling to 16k
         var tempWavPath = audioPath + ".16k.wav";
@@ -56,7 +61,7 @@ public class WhisperTranscriptionService : ITranscriptionService
         }
 
         var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");
-        var modelPath = Path.Combine(whisperRoot, "models/ggml-small.en.bin");
+        var modelPath = Path.Combine(whisperRoot, $"models/ggml-{modelName}.bin");
 
         if (!File.Exists(whisperBin) || !File.Exists(modelPath))
         {
