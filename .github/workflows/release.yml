@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install NBGV
+        run: dotnet tool install -g nbgv
+
+      - name: Get Version
+        id: nbgv
+        run: |
+          VERSION=$(nbgv get-version -v SemVer2)
+          NPM_VERSION=$(nbgv get-version -v NpmPackageVersion)
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
+          echo "NPM_VERSION=$NPM_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+
+      - name: Sync package.json version
+        working-directory: ./client
+        run: |
+          npm version ${{ steps.nbgv.outputs.NPM_VERSION }} --no-git-tag-version
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.nbgv.outputs.TAG }}
+          name: Release ${{ steps.nbgv.outputs.VERSION }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
