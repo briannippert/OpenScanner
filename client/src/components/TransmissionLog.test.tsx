@@ -92,7 +92,7 @@ describe('TransmissionLog Component', () => {
              const buttonsInRow = row.querySelectorAll('button');
              // 0: Play, 1: Delete
              fireEvent.click(buttonsInRow[0]);
-             expect(mockOnPlay).toHaveBeenCalledWith('1', 'audio1.wav', 5.5);
+             expect(mockOnPlay).toHaveBeenCalledWith('1', '/audio/audio1.wav', 5.5);
         }
     });
 
