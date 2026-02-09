@@ -330,7 +330,7 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog } & LogNod
                     <Box sx={{ display: 'flex', gap: 0.5 }}>
                         {log.audio_path && (
                             <>
-                                <IconButton size="small" onClick={() => onPlay(log.id, `/audio/${log.audio_path!}`, log.duration)}>
+                                <IconButton size="small" onClick={() => onPlay(log.id, log.audio_path!, log.duration)}>
                                     {playingId === log.id 
                                         ? <StopCircle sx={{ color: 'error.main', fontSize: 20 }} />
                                         : <PlayCircleOutline sx={{ color: 'primary.main', fontSize: 20 }} />
@@ -340,7 +340,7 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog } & LogNod
                                     size="small" 
                                     component="a" 
                                     href={`/audio/${log.audio_path}`} 
-                                    download={log.audio_path.split('/').pop()}
+                                    download={log.audio_path.split('/').pop() || 'recording.wav'}
                                     title="Download recording"
                                 >
                                     <Download sx={{ color: 'primary.main', fontSize: 20, opacity: 0.7 }} />
@@ -354,9 +354,9 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog } & LogNod
                 }
             >
                 <ListItemText 
-                    sx={{ pr: 6 }}
+                    sx={{ pr: 20 }}
                     primary={
-                        <Box display="flex" alignItems="center" gap={1}>
+                        <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
                             <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#aaa' }}>
                                 {new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                             </Typography>
