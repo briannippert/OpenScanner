@@ -19,6 +19,7 @@ import {
     PlayCircleOutline, 
     StopCircle, 
         Delete,
+        Download,
         Folder,
         Search,
     
@@ -328,12 +329,23 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog } & LogNod
                 secondaryAction={
                     <Box sx={{ display: 'flex', gap: 0.5 }}>
                         {log.audio_path && (
-                            <IconButton size="small" onClick={() => onPlay(log.id, log.audio_path!, log.duration)}>
-                                {playingId === log.id 
-                                    ? <StopCircle sx={{ color: 'error.main', fontSize: 20 }} />
-                                    : <PlayCircleOutline sx={{ color: 'primary.main', fontSize: 20 }} />
-                                }
-                            </IconButton>
+                            <>
+                                <IconButton size="small" onClick={() => onPlay(log.id, log.audio_path!, log.duration)}>
+                                    {playingId === log.id 
+                                        ? <StopCircle sx={{ color: 'error.main', fontSize: 20 }} />
+                                        : <PlayCircleOutline sx={{ color: 'primary.main', fontSize: 20 }} />
+                                    }
+                                </IconButton>
+                                <IconButton 
+                                    size="small" 
+                                    component="a" 
+                                    href={log.audio_path} 
+                                    download={log.audio_path.split('/').pop()}
+                                    title="Download recording"
+                                >
+                                    <Download sx={{ color: 'primary.main', fontSize: 20, opacity: 0.7 }} />
+                                </IconButton>
+                            </>
                         )}
                         <IconButton size="small" onClick={() => onDelete(log.id)}>
                             <Delete sx={{ color: '#444', fontSize: 18 }} />
