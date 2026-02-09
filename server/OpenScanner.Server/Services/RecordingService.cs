@@ -117,13 +117,15 @@ public class RecordingService : IRecordingService
         }
 
         var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
-        
+        _logger.LogInformation($"Recording duration: {duration:F1}s. Raw file exists: {File.Exists(recordingPath)}");
+
         if (duration >= 0.5 && recordingPath != null && File.Exists(recordingPath))
         {
              var fileInfo = new FileInfo(recordingPath);
              if (fileInfo.Length < 4096) 
              {
                  try { File.Delete(recordingPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete small recording file"); }
+                 _logger.LogInformation("Deleted small recording file (less than 4KB).");
                  return;
              }
 
@@ -151,13 +153,23 @@ public class RecordingService : IRecordingService
 
                      using (var proc = Process.Start(convertStart))
                      {
+                         string output = proc?.StandardOutput.ReadToEnd() ?? string.Empty;
+                         string error = proc?.StandardError.ReadToEnd() ?? string.Empty;
                          proc?.WaitForExit();
+
+                         if (!string.IsNullOrEmpty(output)) _logger.LogInformation($"FFmpeg Output: {output}");
+                         if (!string.IsNullOrEmpty(error)) _logger.LogError($"FFmpeg Error: {error}");
                      }
 
                      if (File.Exists(wavPath))
                      {
+                         _logger.LogInformation($"WAV file created successfully: {wavPath}");
                          try { File.Delete(recordingPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete original RAW file after conversion"); }
                          recordingPath = wavPath;
+                     }
+                     else
+                     {
+                         _logger.LogError($"WAV file was not created by FFmpeg at {wavPath}.");
                      }
                  }
                  catch (Exception ex)
@@ -196,11 +208,14 @@ public class RecordingService : IRecordingService
                       lastDetectedTone
                   );
                  
+                  
+                  _logger.LogInformation($"Recording path before saving: {recordingPath}, exists: {File.Exists(recordingPath)}");
                   _db.SaveTransmissionAsync(log).ContinueWith(t => {
                       if (t.IsFaulted) _logger.LogError(t.Exception, "Failed to save transmission");
                   });
                  
                   _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {_currentSourceID} | Tone: {lastDetectedTone} | Text: {transcription}");
+                 _logger.LogInformation($"Recording saved to: {recordingPath}"); // Add this line
                   OnNewLog?.Invoke(log);
              }
         }
