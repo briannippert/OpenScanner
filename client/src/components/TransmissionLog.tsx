@@ -330,7 +330,7 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog } & LogNod
                     <Box sx={{ display: 'flex', gap: 0.5 }}>
                         {log.audio_path && (
                             <>
-                                <IconButton size="small" onClick={() => onPlay(log.id, `/audio/${log.audio_path!}`, log.duration)}>
+                                <IconButton size="small" onClick={() => onPlay(log.id, log.audio_path!, log.duration)}>
                                     {playingId === log.id 
                                         ? <StopCircle sx={{ color: 'error.main', fontSize: 20 }} />
                                         : <PlayCircleOutline sx={{ color: 'primary.main', fontSize: 20 }} />
@@ -340,7 +340,7 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog } & LogNod
                                     size="small" 
                                     component="a" 
                                     href={`/audio/${log.audio_path}`} 
-                                    download={log.audio_path.split('/').pop()}
+                                    download={log.audio_path.split('/').pop() || 'recording.wav'}
                                     title="Download recording"
                                 >
                                     <Download sx={{ color: 'primary.main', fontSize: 20, opacity: 0.7 }} />
