@@ -1,0 +1,65 @@
+name: Frontend Build and Lint
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'client/**'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'client/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./client
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install NBGV
+        run: dotnet tool install -g nbgv
+
+      - name: Sync package.json version
+        working-directory: ./client
+        run: |
+          NPM_VERSION=$(nbgv get-version -v NpmPackageVersion)
+          npm version $NPM_VERSION --no-git-tag-version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test -- --run
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+
+      - name: Run Playwright tests
+        run: npm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: client/playwright-report/
+          retention-days: 30
+
+      - name: Build
+        run: npm run build
