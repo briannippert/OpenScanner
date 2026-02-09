@@ -354,9 +354,9 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog } & LogNod
                 }
             >
                 <ListItemText 
-                    sx={{ pr: 6 }}
+                    sx={{ pr: 20 }}
                     primary={
-                        <Box display="flex" alignItems="center" gap={1}>
+                        <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
                             <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#aaa' }}>
                                 {new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                             </Typography>
