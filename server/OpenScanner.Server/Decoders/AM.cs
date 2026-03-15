@@ -11,13 +11,11 @@ public class AM : DSDBase
 
     public override string GetCommandLine(Channel channel)
     {
-        int captureRate = 48000;
         int outputRate = 48000;
-        int dsdOutputRate = 48000; 
-        string rtlMode = "am";
-        string dsdArgs = "-fA -v1"; 
+        int captureRate = 24000;
 
-        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -l 15 - | stdbuf -o0 tee >(stdbuf -i0 -o0 /usr/local/bin/dsd-fme {dsdArgs} -i - -o /dev/null) | stdbuf -o0 /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -probesize 32 -analyzeduration 0 -i - -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
+        // AM Pipeline with moderate squelch and increased gain for better signal handling
+        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -M am -s {captureRate} -r {captureRate} -g 42 -p 0 -l 50 -t 30 - | /usr/bin/ffmpeg -f s16le -ar {captureRate} -ac 1 -i - -af 'highpass=f=300,lowpass=f=4000,volume=5.0' -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
     }
 
     protected override Task OnStarted(CancellationToken token)
