@@ -73,6 +73,27 @@ public class WebSocketBroadcaster
         _audioSessions.TryAdd(id, session);
         _logger.LogInformation($"New Audio WebSocket connection: {id}");
 
+        // Send pre-roll buffer to catch up new clients with the beginning of the transmission
+        var preRollData = _radio.GetPreRollBuffer();
+        foreach (var chunk in preRollData)
+        {
+            try
+            {
+                await session.Lock.WaitAsync();
+                if (socket.State == WebSocketState.Open)
+                {
+                    var segment = new ArraySegment<byte>(chunk);
+                    await socket.SendAsync(segment, WebSocketMessageType.Binary, true, CancellationToken.None);
+                }
+                session.Lock.Release();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to send pre-roll audio chunk to WebSocket {Id}", id);
+                session.Lock.Release();
+            }
+        }
+
         await HandleSessionLoop(socket, id, _audioSessions);
     }
 

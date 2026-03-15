@@ -214,6 +214,15 @@ public class RtlDevice : BackgroundService, IRadioSource
         }
     }
 
+    /// <inheritdoc />
+    public byte[][] GetPreRollBuffer()
+    {
+        lock (_preRollBuffer)
+        {
+            return _preRollBuffer.ToArray();
+        }
+    }
+
     /// <summary>
     /// Executes the background service.
     /// </summary>
@@ -299,12 +308,18 @@ public class RtlDevice : BackgroundService, IRadioSource
 
     private async Task RunSingleScanSegment(double centerFreqMhz, int sampleRate, CancellationToken token)
     {
-        var centerHz = (long)(centerFreqMhz * 1000000);
-        var args = $"-f {centerHz} -s {sampleRate} -g 40 -" ;
+        // 2.5 second delay to ensure hardware is fully reset and ready
+        await Task.Delay(2500, token);
 
-        _logger.LogInformation($"Scanning Bank: {centerFreqMhz:F3} MHz");
+        // Standard stable sample rate for R820T tuner
+        int scanRate = 1024000; 
+        var binPath = "/usr/bin/rtl_sdr";
+        // -b 1: Use 1 buffer to reduce latency and improve startup reliability
+        var args = $"-f {centerFreqMhz:F3}M -s {scanRate} -g 20 -b 1 -";
 
-        var psi = new ProcessStartInfo("rtl_sdr", args)
+        _logger.LogInformation($"Starting Scanner: {centerFreqMhz:F3} MHz (Cmd: {binPath} {args})");
+
+        var psi = new ProcessStartInfo(binPath, args)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -319,7 +334,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         }
         catch (Exception ex)
         {
-             _logger.LogError(ex, "Failed to start rtl_sdr");
+             _logger.LogError(ex, "Failed to start rtl_sdr scanner process");
              UpdateState(_state with { IsHardwareConnected = false });
              return;
         }
@@ -335,9 +350,11 @@ public class RtlDevice : BackgroundService, IRadioSource
                     var line = await _scannerProcess.StandardError.ReadLineAsync(token);
                     if (string.IsNullOrEmpty(line)) continue;
                     
+                    _logger.LogInformation($"Scanner HW: {line}");
+
                     if (line.Contains("Found") || line.Contains("Using device")) 
                         UpdateState(_state with { IsHardwareConnected = true });
-                    if (line.Contains("No supported devices"))
+                    if (line.Contains("No supported devices") || line.Contains("Failed to open"))
                     {
                         UpdateState(_state with { IsHardwareConnected = false });
                         _scanCts?.Cancel();
@@ -356,42 +373,63 @@ public class RtlDevice : BackgroundService, IRadioSource
         var buffer = new byte[bufferSize];
         var baseStream = _scannerProcess.StandardOutput.BaseStream;
         var lastUpdate = DateTime.MinValue;
+        var segmentStartTime = DateTime.UtcNow;
 
         try
         {
+            long totalBytesRead = 0;
             while (!token.IsCancellationRequested)
             {
-                // Watchdog: If ReadAsync hangs for > 3 seconds, we assume hardware stall
-                // Use a separate watchdog token to avoid cancellation false-positives
+                // Watchdog: If ReadAsync hangs for > 5 seconds, we assume hardware stall
                 using var watchdogCts = new CancellationTokenSource();
                 var readTask = baseStream.ReadAsync(buffer, 0, buffer.Length, token);
-                var timeoutTask = Task.Delay(3000, watchdogCts.Token);
+                var timeoutTask = Task.Delay(5000, watchdogCts.Token);
 
                 var completedTask = await Task.WhenAny(readTask, timeoutTask);
                 if (completedTask == timeoutTask)
                 {
-                    _logger.LogWarning("Scanner hardware stalled (Read Timeout). Restarting...");
+                    bool isAlive = _scannerProcess != null && !_scannerProcess.HasExited;
+                    _logger.LogWarning($"Scanner hardware stalled (No data for 5s). Process Alive: {isAlive}, Total Bytes: {totalBytesRead}. Restarting...");
                     break; 
                 }
 
                 // Data received, cancel the watchdog task
                 watchdogCts.Cancel();
                 var bytesRead = await readTask;
-                if (bytesRead == 0) break;
+                if (bytesRead <= 0) 
+                {
+                    _logger.LogDebug("Scanner process stopped sending data.");
+                    break;
+                }
+
+                totalBytesRead += bytesRead;
+
+                // Heartbeat: Log every 5MB to confirm hardware is working
+                if (totalBytesRead % (1024 * 1024 * 5) < bytesRead)
+                {
+                    _logger.LogInformation($"Scanner: Data flowing... ({totalBytesRead / (1024 * 1024)} MB total)");
+                }
 
                 // Rate limit FFT updates (approx 50Hz)
                 if ((DateTime.UtcNow - lastUpdate).TotalMilliseconds < 20) continue;
                 lastUpdate = DateTime.UtcNow;
 
-                // Warm-up: Skip first 200ms of data (per bank) to let hardware settle
-                if ((DateTime.UtcNow - _scannerProcess.StartTime).TotalMilliseconds < 200) continue;
+                // Warm-up: Skip first 200ms of data
+                if ((DateTime.UtcNow - segmentStartTime).TotalMilliseconds < 200) continue;
 
                 if (_iqDumpStream != null)
                 {
                     await _iqDumpStream.WriteAsync(buffer, 0, bytesRead, token);
                 }
 
-                ProcessSamples(buffer, bytesRead, centerFreqMhz, sampleRate);
+                try 
+                {
+                    ProcessSamples(buffer, bytesRead, centerFreqMhz, scanRate);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing scanner samples");
+                }
             }
         }
         catch (OperationCanceledException) 
@@ -420,14 +458,12 @@ public class RtlDevice : BackgroundService, IRadioSource
         for (int i = 1; i < sorted.Count; i++)
         {
             var c = sorted[i];
-            // Check if adding this channel keeps the spread under 1.5 MHz (leaving margin)
-            // Center will be (Min + Max) / 2. Spread is Max - Min.
-            // If we add 'c', new max is c.Frequency. New min is currentCluster[0].Frequency.
-            if (c.Frequency - currentCluster[0].Frequency > 1.5)
+            // Use a conservative 0.5MHz spread
+            if (c.Frequency - currentCluster[0].Frequency > 0.5)
             {
                 // Close current cluster
                 var center = (currentCluster.Min(x => x.Frequency) + currentCluster.Max(x => x.Frequency)) / 2.0;
-                // Offset by 250kHz to avoid DC spike in the middle of target frequencies
+                // Offset by 250kHz to be safely away from DC spike but well within bandwidth
                 centers.Add(center + 0.25);
                 
                 currentCluster.Clear();
@@ -619,7 +655,11 @@ public class RtlDevice : BackgroundService, IRadioSource
             IsAudioStreaming = true
         });
 
-        StartDecoding(channel);
+        // Delay starting the decoder to let hardware settle after scanner stop
+        Task.Delay(2000).ContinueWith(_ => {
+            if (_decodeCts != null && _decodeCts.IsCancellationRequested) return;
+            StartDecoding(channel);
+        });
 
         // Safety timeout
         if (!_manualOverride)

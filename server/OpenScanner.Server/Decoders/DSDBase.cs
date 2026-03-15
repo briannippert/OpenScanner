@@ -148,7 +148,8 @@ public abstract class DSDBase : IDecoder
             line.Contains("HDU") || // P25 Header Data Unit
             line.Contains("TDU") || // P25 Terminator
             (line.Contains("P25") && !line.Contains("TSBK")) || 
-            line.Contains("CTCSS") || line.Contains("DCS") || line.Contains("ANALOG");
+            line.Contains("CTCSS") || line.Contains("DCS") || line.Contains("ANALOG") ||
+            line.Contains("MDC1200");
 
         if (isActivity)
         {
@@ -156,7 +157,16 @@ public abstract class DSDBase : IDecoder
             int? tgt = null;
             string? tone = null;
 
-            if (line.Contains("Source:"))
+            if (line.Contains("MDC1200:"))
+            {
+                var parts = line.Split("MDC1200:");
+                if (parts.Length > 1)
+                {
+                    var idStr = parts[1].Trim().Split(' ').Last();
+                    if (int.TryParse(idStr, System.Globalization.NumberStyles.HexNumber, null, out var s)) src = s;
+                }
+            }
+            else if (line.Contains("Source:"))
             {
                 var parts = line.Split("Source:");
                 if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var s)) src = s;

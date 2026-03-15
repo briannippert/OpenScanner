@@ -77,4 +77,10 @@ public interface IRadioSource
     /// Stops recording raw IQ data.
     /// </summary>
     void StopDumping();
+
+    /// <summary>
+    /// Gets the current pre-roll audio buffer (audio data from the start of the current transmission).
+    /// </summary>
+    /// <returns>Array of audio byte arrays representing the pre-roll buffer.</returns>
+    byte[][] GetPreRollBuffer();
 }
