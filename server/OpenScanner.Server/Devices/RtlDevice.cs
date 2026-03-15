@@ -103,6 +103,13 @@ public class RtlDevice : BackgroundService, IRadioSource
     public void ReloadChannels()
     {
         _channelService.ReloadChannels();
+
+        // If actively scanning, restart so banks are recalculated with the updated channel list
+        if (_state.Status == "SCANNING")
+        {
+            StopScanning();
+            Task.Delay(250).ContinueWith(_ => StartScanning());
+        }
     }
 
     /// <inheritdoc />
