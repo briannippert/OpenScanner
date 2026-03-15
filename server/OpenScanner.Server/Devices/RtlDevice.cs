@@ -244,23 +244,65 @@ public class RtlDevice : BackgroundService, IRadioSource
         _scanStartTime = DateTime.UtcNow;
         UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0, ManualHoldFrequency = null });
 
-        var min = _channelService.Channels.Min(c => c.Frequency);
-        var max = _channelService.Channels.Max(c => c.Frequency);
-        var center = (min + max) / 2.0;
+        var centers = CalculateScanCenters(_channelService.Channels);
         var rate = 2048000;
 
         _scanCts = new CancellationTokenSource();
         var token = _scanCts.Token;
 
-        Task.Run(() => RunScannerLoop(center, rate, token), token);
+        Task.Run(() => RunScannerLoop(centers, rate, token), token);
     }
 
-    private async Task RunScannerLoop(double centerFreqMhz, int sampleRate, CancellationToken token)
+    private async Task RunScannerLoop(List<double> scanCenters, int sampleRate, CancellationToken token)
+    {
+        int bankIndex = 0;
+        
+        while (!token.IsCancellationRequested)
+        {
+            if (scanCenters.Count == 0) break;
+
+            var center = scanCenters[bankIndex];
+            
+            // Dwell time per bank (e.g. 2s to allow for tuning overhead and capture)
+            // Only use dwell-hopping if we have multiple banks to cycle through
+            if (scanCenters.Count > 1)
+            {
+                using var dwellCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                dwellCts.CancelAfter(2000);
+
+                try 
+                {
+                    await RunSingleScanSegment(center, sampleRate, dwellCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected when dwell time expires or main token cancelled
+                }
+            }
+            else
+            {
+                // Single bank: Run until token is cancelled (e.g. signal lock or manual stop)
+                await RunSingleScanSegment(center, sampleRate, token);
+            }
+            
+            if (token.IsCancellationRequested) break;
+            
+            bankIndex = (bankIndex + 1) % scanCenters.Count;
+        }
+
+        // Loop exited
+        if (!token.IsCancellationRequested && _state.Status == "SCANNING")
+        {
+            UpdateState(_state with { Status = "IDLE" });
+        }
+    }
+
+    private async Task RunSingleScanSegment(double centerFreqMhz, int sampleRate, CancellationToken token)
     {
         var centerHz = (long)(centerFreqMhz * 1000000);
         var args = $"-f {centerHz} -s {sampleRate} -g 40 -" ;
 
-        _logger.LogInformation($"Starting Fast Scan: {centerFreqMhz} MHz");
+        _logger.LogInformation($"Scanning Bank: {centerFreqMhz:F3} MHz");
 
         var psi = new ProcessStartInfo("rtl_sdr", args)
         {
@@ -273,7 +315,6 @@ public class RtlDevice : BackgroundService, IRadioSource
         try 
         {
             _scannerProcess = Process.Start(psi);
-            // Assume connected if process starts, confirm via stderr later
             UpdateState(_state with { IsHardwareConnected = true });
         }
         catch (Exception ex)
@@ -321,8 +362,10 @@ public class RtlDevice : BackgroundService, IRadioSource
             while (!token.IsCancellationRequested)
             {
                 // Watchdog: If ReadAsync hangs for > 3 seconds, we assume hardware stall
+                // Use a separate watchdog token to avoid cancellation false-positives
+                using var watchdogCts = new CancellationTokenSource();
                 var readTask = baseStream.ReadAsync(buffer, 0, buffer.Length, token);
-                var timeoutTask = Task.Delay(3000, token);
+                var timeoutTask = Task.Delay(3000, watchdogCts.Token);
 
                 var completedTask = await Task.WhenAny(readTask, timeoutTask);
                 if (completedTask == timeoutTask)
@@ -331,6 +374,8 @@ public class RtlDevice : BackgroundService, IRadioSource
                     break; 
                 }
 
+                // Data received, cancel the watchdog task
+                watchdogCts.Cancel();
                 var bytesRead = await readTask;
                 if (bytesRead == 0) break;
 
@@ -338,8 +383,8 @@ public class RtlDevice : BackgroundService, IRadioSource
                 if ((DateTime.UtcNow - lastUpdate).TotalMilliseconds < 20) continue;
                 lastUpdate = DateTime.UtcNow;
 
-                // Warm-up: Skip first 500ms of data to let hardware settle
-                if ((DateTime.UtcNow - _scanStartTime).TotalMilliseconds < 500) continue;
+                // Warm-up: Skip first 200ms of data (per bank) to let hardware settle
+                if ((DateTime.UtcNow - _scannerProcess.StartTime).TotalMilliseconds < 200) continue;
 
                 if (_iqDumpStream != null)
                 {
@@ -348,28 +393,61 @@ public class RtlDevice : BackgroundService, IRadioSource
 
                 ProcessSamples(buffer, bytesRead, centerFreqMhz, sampleRate);
             }
-
-            // Loop exited
-            if (_scannerProcess != null && _scannerProcess.HasExited && _scannerProcess.ExitCode != 0)
-            {
-                _logger.LogError($"Scanner process exited unexpectedly with code {_scannerProcess.ExitCode}");
-                UpdateState(_state with { IsHardwareConnected = false, Status = "IDLE" });
-            }
-            else if (_state.Status == "SCANNING")
-            {
-                // Clean exit or stopped
-                UpdateState(_state with { Status = "IDLE" });
-            }
         }
         catch (OperationCanceledException) 
         {
-            _logger.LogDebug("Scanner loop cancelled");
+            // Normal segment end
         }
-        catch (Exception ex) { _logger.LogError(ex, "Error in scan loop"); }
+        catch (Exception ex) { _logger.LogError(ex, "Error in scan loop segment"); }
         finally
         {
             try { _scannerProcess?.Kill(true); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to kill scanner process in finally"); }
+            _scannerProcess = null;
         }
+    }
+
+    private List<double> CalculateScanCenters(List<Channel> channels)
+    {
+        if (!channels.Any()) return new List<double>();
+        
+        var sorted = channels.OrderBy(c => c.Frequency).ToList();
+        var centers = new List<double>();
+        
+        // Simple greedy clustering
+        var currentCluster = new List<Channel>();
+        currentCluster.Add(sorted[0]);
+        
+        for (int i = 1; i < sorted.Count; i++)
+        {
+            var c = sorted[i];
+            // Check if adding this channel keeps the spread under 1.5 MHz (leaving margin)
+            // Center will be (Min + Max) / 2. Spread is Max - Min.
+            // If we add 'c', new max is c.Frequency. New min is currentCluster[0].Frequency.
+            if (c.Frequency - currentCluster[0].Frequency > 1.5)
+            {
+                // Close current cluster
+                var center = (currentCluster.Min(x => x.Frequency) + currentCluster.Max(x => x.Frequency)) / 2.0;
+                // Offset by 250kHz to avoid DC spike in the middle of target frequencies
+                centers.Add(center + 0.25);
+                
+                currentCluster.Clear();
+                currentCluster.Add(c);
+            }
+            else
+            {
+                currentCluster.Add(c);
+            }
+        }
+        
+        // Add last cluster
+        if (currentCluster.Any())
+        {
+            var center = (currentCluster.Min(x => x.Frequency) + currentCluster.Max(x => x.Frequency)) / 2.0;
+            // Offset by 250kHz
+            centers.Add(center + 0.25);
+        }
+        
+        return centers;
     }
 
     private void ProcessSamples(byte[] buffer, int length, double centerFreq, int sampleRate)
@@ -469,9 +547,17 @@ public class RtlDevice : BackgroundService, IRadioSource
 
             if (binIndex >= 0 && binIndex < fftSize)
             {
-                // DC Filter: Ignore center 3 bins
+                // DC Filter: Ignore center 3 bins (approx 24kHz spread)
                 int centerBin = fftSize / 2;
-                if (binIndex >= centerBin - 1 && binIndex <= centerBin + 1) continue;
+                if (binIndex >= centerBin - 1 && binIndex <= centerBin + 1)
+                {
+                    // If we have a strong signal in the center bin, warn that it might be getting filtered
+                    if (fftDb[binIndex] > -40) 
+                    {
+                        _logger.LogDebug($"Strong signal detected in center bin ({channel.Frequency} MHz). DC filter is rejecting it.");
+                    }
+                    continue;
+                }
 
                 double db = fftDb[binIndex];
                 if (db > maxDetectedDb) maxDetectedDb = db;
@@ -481,16 +567,24 @@ public class RtlDevice : BackgroundService, IRadioSource
                 double snr = db - avgNoise;
                 double threshold = _state.Squelch ?? -55;
 
-                if (snr > 15 && db > threshold)
+                if (db > threshold)
                 {
-                    _channelHits[channel.Frequency] = _channelHits.GetValueOrDefault(channel.Frequency, 0) + 1;
-                    
-                    // Instant lock for strong signals (>20dB SNR), otherwise require 3 hits
-                    int hitsNeeded = snr > 20 ? 1 : 3;
-                    
-                    if (_channelHits[channel.Frequency] >= hitsNeeded && (bestChannel == null || db > maxDetectedDb))
+                    if (snr > 15)
                     {
-                        bestChannel = channel;
+                        _channelHits[channel.Frequency] = _channelHits.GetValueOrDefault(channel.Frequency, 0) + 1;
+                        
+                        // Instant lock for strong signals (>20dB SNR), otherwise require 3 hits
+                        int hitsNeeded = snr > 20 ? 1 : 3;
+                        
+                        if (_channelHits[channel.Frequency] >= hitsNeeded && (bestChannel == null || db > maxDetectedDb))
+                        {
+                            bestChannel = channel;
+                        }
+                    }
+                    else
+                    {
+                        _channelHits[channel.Frequency] = 0;
+                        _logger.LogDebug($"Signal detected on {channel.AlphaTag} but SNR too low: {snr:F1}dB (Need 15dB)");
                     }
                 }
                 else

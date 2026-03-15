@@ -37,7 +37,7 @@ public abstract class DSDBase : IDecoder
 
         var cmd = GetCommandLine(channel);
         
-        var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
+        var psi = new ProcessStartInfo("bash", $"-c \"{cmd}\"")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
