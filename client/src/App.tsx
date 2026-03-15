@@ -850,7 +850,7 @@ function App() {
                                     <Card 
                                         sx={{ 
                                             border: manualHold === ch.frequency ? '1px solid #ff9800' : '1px solid #333',
-                                            bgcolor: scannerState.currentChannel?.frequency === ch.frequency ? 'rgba(0, 255, 0, 0.05)' : '#151515',
+                                        bgcolor: '#151515',
                                             transition: 'all 0.2s',
                                             '&:hover': { bgcolor: '#222' }
                                         }}
