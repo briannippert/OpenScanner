@@ -430,7 +430,7 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                             <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#aaa' }}>
                                 {(() => {
                                     const d = new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z');
-                                    return `${d.toLocaleDateString([], { month: '2-digit', day: '2-digit' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+                                    return `${d.toLocaleDateString([], { year: 'numeric', month: '2-digit', day: '2-digit' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
                                 })()}
                             </Typography>
                             <Typography variant="caption" sx={{ color: '#fff', fontWeight: 'bold', fontSize: '0.8rem' }}>
