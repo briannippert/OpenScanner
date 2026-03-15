@@ -13,10 +13,17 @@ public class NFM : DSDBase
     {
         int captureRate = 48000;
         int outputRate = 48000;
-        int dsdOutputRate = 48000; 
-        string rtlMode = "fm";
-        string dsdArgs = "-A"; // Force analog
+        
+        // NFM decoder with optimized squelch and gain settings
+        // Simplified pipeline: no parallel MDC processing to avoid audio artifacts
+        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -M fm -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 -";
+    }
 
-        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} - | stdbuf -i0 -o0 /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | stdbuf -o0 /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -probesize 32 -analyzeduration 0 -i - -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
+    protected override Task OnStarted(CancellationToken token)
+    {
+        // For analog modes, we assume activity is present since the scanner locked on.
+        // This starts the recording and keep-alive mechanisms immediately.
+        RaiseActivity(null, null, null);
+        return Task.CompletedTask;
     }
 }

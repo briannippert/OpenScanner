@@ -178,7 +178,7 @@ sudo apt-get update -qq || log_warn "apt-get update encountered errors. Attempti
 sudo apt-get install -y -qq git cmake build-essential \
     libitpp-dev libsndfile1-dev libusb-1.0-0-dev libncurses-dev \
     rtl-sdr librtlsdr-dev libcodec2-dev libpulse-dev libasound2-dev \
-    gpsd gpsd-clients ffmpeg > /dev/null
+    gpsd gpsd-clients ffmpeg multimon-ng > /dev/null
 log_success "Libraries installed."
 
 # --- Whisper.cpp Setup ---

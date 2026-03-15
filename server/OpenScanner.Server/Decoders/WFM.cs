@@ -15,8 +15,8 @@ public class WFM : DSDBase
         int captureRate = 170000;
         int outputRate = 48000;
         string rtlMode = "wbfm";
-        // WFM: Bypass dsd-fme
-        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
+        // WFM with moderate squelch and increased gain for better signal handling
+        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 -M {rtlMode} -";
     }
 
     protected override Task OnStarted(CancellationToken token)

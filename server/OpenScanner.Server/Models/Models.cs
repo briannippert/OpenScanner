@@ -231,6 +231,55 @@ public record GpsData(
 );
 
 /// <summary>
+/// Scanning mode for a frequency bank.
+/// </summary>
+public enum ScanMode
+{
+    /// <summary>
+    /// All frequencies fit within 2.4 MHz window - scan continuously
+    /// without frequency hopping for maximum responsiveness.
+    /// </summary>
+    FastScan,
+
+    /// <summary>
+    /// Frequencies exceed 2.4 MHz window - use dwell-based frequency
+    /// hopping with 2-second dwell per 0.5 MHz cluster.
+    /// </summary>
+    FrequencyHop
+}
+
+/// <summary>
+/// Represents a scanning bank with optimized mode selection.
+/// </summary>
+public class ScanBank
+{
+    /// <summary>
+    /// Center frequency for this bank.
+    /// </summary>
+    public double CenterFrequency { get; set; }
+
+    /// <summary>
+    /// List of frequencies covered by this bank.
+    /// </summary>
+    public List<double> Frequencies { get; set; } = new();
+
+    /// <summary>
+    /// Total frequency spread in MHz (max - min).
+    /// </summary>
+    public double SpreadMHz { get; set; }
+
+    /// <summary>
+    /// Scan mode for this bank (FastScan or FrequencyHop).
+    /// </summary>
+    public ScanMode Mode { get; set; }
+
+    /// <summary>
+    /// Dwell time in milliseconds (for FrequencyHop mode).
+    /// </summary>
+    public int DwellTimeMs { get; set; } = 300;
+}
+
+/// <summary>
 /// A single point in the RF spectrum.
 /// </summary>
 public record SpectrumPoint(double Frequency, double Db);

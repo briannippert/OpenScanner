@@ -95,10 +95,7 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                                         onChange={e => handleChange('mode', e.target.value)}
                                     >
                                         <MenuItem value="P25">P25 (Digital)</MenuItem>
-                                        <MenuItem value="FM">FM (EXPERIMENTAL)</MenuItem>
-                                        <MenuItem value="NFM">NFM (EXPERIMENTAL)</MenuItem>
-                                        <MenuItem value="WFM">WFM (EXPERIMENTAL)</MenuItem>
-                                        <MenuItem value="AM">AM (EXPERIMENTAL)</MenuItem>
+                                        <MenuItem value="NFM">NFM (Analog)</MenuItem>
                                     </Select>
                                 </FormControl>
                                 <TextField 
