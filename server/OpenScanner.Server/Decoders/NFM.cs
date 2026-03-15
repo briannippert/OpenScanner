@@ -11,8 +11,16 @@ public class NFM : DSDBase
 
     public override string GetCommandLine(Channel channel)
     {
-        // NFM with moderate squelch and increased gain for better signal handling
-        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -M fm -s 48000 -r 48000 -g 42 -p 0 -l 50 -t 30 -";
+        int captureRate = 48000;
+        int outputRate = 48000;
+        
+        // NFM with MDC1200 detection using parallel decoder
+        // Uses tee to split audio: one stream for audio, another for MDC1200 decoder
+        // MDC decoder outputs unit IDs to stderr for real-time display and logging
+        string decoderScript = "/home/brian/Documents/OpenScanner/scripts/mdc1200_decoder.py";
+        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -M fm -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 - | " +
+               $"stdbuf -o0 tee >(stdbuf -i0 -o0 python3 {decoderScript} >/dev/null) | " +
+               $"stdbuf -o0 cat";
     }
 
     protected override Task OnStarted(CancellationToken token)
