@@ -533,7 +533,9 @@ public class RtlDevice : BackgroundService, IRadioSource
         {
             var c = sorted[i];
             // Check if there's a significant gap (> 2 MHz)
-            if (c.Frequency - currentGroup.Last().Frequency > 2.0)
+            // 3.0 MHz gap threshold: keeps 2.5 MHz spans grouped (→ FrequencyHop)
+            // while still splitting truly disjoint bands (e.g. 3.5 MHz apart → separate FastScan)
+            if (c.Frequency - currentGroup.Last().Frequency > 3.0)
             {
                 groups.Add(currentGroup);
                 currentGroup = new List<Channel> { c };
@@ -552,7 +554,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             var maxFreq = group.Max(x => x.Frequency);
             var spread = maxFreq - minFreq;
             
-            if (spread <= 2.4)
+            if (spread <= 2.4 + 1e-9)  // Small epsilon for floating point safety
             {
                 // FastScan mode: all frequencies fit in 2.4 MHz window
                 var center = (minFreq + maxFreq) / 2.0;
