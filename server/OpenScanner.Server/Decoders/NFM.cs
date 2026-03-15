@@ -9,6 +9,9 @@ public class NFM : DSDBase
     {
     }
 
+    // rtl_fm analog FM output is low-level; apply software gain to compensate.
+    protected override float AudioGain => 3.0f;
+
     public override string GetCommandLine(Channel channel)
     {
         int captureRate = 48000;

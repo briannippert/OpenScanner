@@ -76,10 +76,11 @@ public abstract class DSDBase : IDecoder
         }
     }
 
-    // Software pre-amp applied to all decoded audio before sending to clients.
-    // rtl_fm output is typically low-level; this compensates without requiring
-    // hardware gain increases that can introduce RF noise.
-    protected virtual float AudioGain => 3.0f;
+    // Software pre-amp for decoded audio. FM decoders (NFM/WFM) override this
+    // to 3.0f to compensate for the low output level of rtl_fm analog audio.
+    // Digital decoders (P25) and AM (which uses an ffmpeg volume filter) leave
+    // this at 1.0f so their already-normalized audio is not over-amplified.
+    protected virtual float AudioGain => 1.0f;
 
     private async Task ProcessAudioStream(Stream stream, CancellationToken token)
     {
