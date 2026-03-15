@@ -22,7 +22,8 @@ import {
         Download,
         Folder,
         Search,
-    
+        Star,
+        StarBorder,
     CalendarMonth,
     Today,
     Radio,
@@ -34,10 +35,14 @@ interface LogNodeProps {
     playingId: string | null;
     onPlay: (id: string, path: string, duration?: number) => void;
     onDelete: (id: string) => void;
+    onFavoriteToggle: () => void;
 }
 
-interface Props extends LogNodeProps {
+interface Props {
     liveLogs: CallLog[];
+    playingId: string | null;
+    onPlay: (id: string, path: string, duration?: number) => void;
+    onDelete: (id: string) => void;
 }
 
 const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelete }) => {
@@ -46,6 +51,9 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     const [years, setYears] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
     const [recentOpen, setRecentOpen] = useState(true);
+    const [favoritesRefreshKey, setFavoritesRefreshKey] = useState(0);
+
+    const handleFavoriteToggle = () => setFavoritesRefreshKey(k => k + 1);
 
     // Initial load of years
     useEffect(() => {
@@ -121,7 +129,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                             </Typography>
                         )}
                         {searchResults.map(log => (
-                            <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} />
+                            <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
                         ))}
                     </List>
                 ) : (
@@ -140,14 +148,17 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                                     </Typography>
                                 )}
                                 {liveLogs.map(log => (
-                                    <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} />
+                                    <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
                                 ))}
                             </List>
                         </Collapse>
 
+                        {/* Favorites Node */}
+                        <FavoritesNode refreshKey={favoritesRefreshKey} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
+
                         {/* Historical Tree */}
                         {years.map(year => (
-                            <YearNode key={year} year={year} playingId={playingId} onPlay={onPlay} onDelete={onDelete} />
+                            <YearNode key={year} year={year} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
                         ))}
                     </List>
                 )}
@@ -156,7 +167,42 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     );
 };
 
-const YearNode = ({ year, playingId, onPlay, onDelete }: { year: string } & LogNodeProps) => {
+const FavoritesNode = ({ refreshKey, playingId, onPlay, onDelete, onFavoriteToggle }: { refreshKey: number } & LogNodeProps) => {
+    const [open, setOpen] = useState(false);
+    const [logs, setLogs] = useState<CallLog[]>([]);
+
+    useEffect(() => {
+        if (!open) return;
+        fetch('/api/history/favorites')
+            .then(res => res.json())
+            .then(data => setLogs(data))
+            .catch(err => console.error('Failed to fetch favorites:', err));
+    }, [open, refreshKey]);
+
+    return (
+        <>
+            <ListItemButton onClick={() => setOpen(!open)} sx={{ borderBottom: '1px solid #1a1a1a', bgcolor: 'rgba(255, 204, 0, 0.05)' }}>
+                <Star sx={{ mr: 2, color: '#ffcc00', fontSize: 20 }} />
+                <ListItemText primary="Favorites" primaryTypographyProps={{ fontWeight: 'bold', color: '#ffcc00' }} />
+                {open ? <ExpandLess /> : <ExpandMore />}
+            </ListItemButton>
+            <Collapse in={open} timeout="auto" unmountOnExit>
+                <List component="div" disablePadding>
+                    {logs.length === 0 && (
+                        <Typography variant="body2" sx={{ p: 2, textAlign: 'center', color: '#666' }}>
+                            No favorites yet. Star a recording to add it here.
+                        </Typography>
+                    )}
+                    {logs.map(log => (
+                        <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle} />
+                    ))}
+                </List>
+            </Collapse>
+        </>
+    );
+};
+
+const YearNode = ({ year, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
     const [months, setMonths] = useState<string[]>([]);
     const [loaded, setLoaded] = useState(false);
@@ -184,7 +230,7 @@ const YearNode = ({ year, playingId, onPlay, onDelete }: { year: string } & LogN
             <Collapse in={open} timeout="auto" unmountOnExit>
                 <List component="div" disablePadding>
                     {months.map(month => (
-                        <MonthNode key={month} year={year} month={month} playingId={playingId} onPlay={onPlay} onDelete={onDelete} />
+                        <MonthNode key={month} year={year} month={month} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle} />
                     ))}
                 </List>
             </Collapse>
@@ -192,7 +238,7 @@ const YearNode = ({ year, playingId, onPlay, onDelete }: { year: string } & LogN
     );
 };
 
-const MonthNode = ({ year, month, playingId, onPlay, onDelete }: { year: string; month: string } & LogNodeProps) => {
+const MonthNode = ({ year, month, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string; month: string } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
     const [days, setDays] = useState<string[]>([]);
     const [loaded, setLoaded] = useState(false);
@@ -223,7 +269,7 @@ const MonthNode = ({ year, month, playingId, onPlay, onDelete }: { year: string;
             <Collapse in={open} timeout="auto" unmountOnExit>
                 <List component="div" disablePadding>
                     {days.map(day => (
-                        <DayNode key={day} year={year} month={month} day={day} playingId={playingId} onPlay={onPlay} onDelete={onDelete} />
+                        <DayNode key={day} year={year} month={month} day={day} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle} />
                     ))}
                 </List>
             </Collapse>
@@ -231,7 +277,7 @@ const MonthNode = ({ year, month, playingId, onPlay, onDelete }: { year: string;
     );
 };
 
-const DayNode = ({ year, month, day, playingId, onPlay, onDelete }: { year: string; month: string; day: string } & LogNodeProps) => {
+const DayNode = ({ year, month, day, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string; month: string; day: string } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
     const [channels, setChannels] = useState<Channel[]>([]);
     const [loaded, setLoaded] = useState(false);
@@ -263,7 +309,7 @@ const DayNode = ({ year, month, day, playingId, onPlay, onDelete }: { year: stri
                             key={`${ch.frequency}-${idx}`} 
                             year={year} month={month} day={day} 
                             channel={ch} 
-                            playingId={playingId} onPlay={onPlay} onDelete={onDelete} 
+                            playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle}
                         />
                     ))}
                 </List>
@@ -272,7 +318,7 @@ const DayNode = ({ year, month, day, playingId, onPlay, onDelete }: { year: stri
     );
 };
 
-const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete }: { year: string; month: string; day: string; channel: Channel } & LogNodeProps) => {
+const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string; month: string; day: string; channel: Channel } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
     const [logs, setLogs] = useState<CallLog[]>([]);
     const [loaded, setLoaded] = useState(false);
@@ -305,7 +351,7 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete }:
             <Collapse in={open} timeout="auto" unmountOnExit>
                 <List component="div" disablePadding>
                     {logs.map(log => (
-                        <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} />
+                        <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle} />
                     ))}
                 </List>
             </Collapse>
@@ -313,7 +359,25 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete }:
     );
 };
 
-const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog } & LogNodeProps) => {
+const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: CallLog } & LogNodeProps) => {
+    const [isFavorite, setIsFavorite] = useState(log.isFavorite ?? false);
+
+    const handleFavoriteClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const newValue = !isFavorite;
+        setIsFavorite(newValue);
+        fetch(`/api/history/${log.id}/favorite`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ isFavorite: newValue })
+        })
+            .then(() => onFavoriteToggle())
+            .catch(err => {
+                console.error('Failed to update favorite:', err);
+                setIsFavorite(!newValue);
+            });
+    };
+
     return (
         <React.Fragment>
             <ListItem 
@@ -328,6 +392,12 @@ const LogItem = ({ log, playingId, onPlay, onDelete }: { log: CallLog } & LogNod
                 }}
                 secondaryAction={
                     <Box sx={{ display: 'flex', gap: 0.5 }}>
+                        <IconButton size="small" onClick={handleFavoriteClick} title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}>
+                            {isFavorite
+                                ? <Star sx={{ color: '#ffcc00', fontSize: 18 }} />
+                                : <StarBorder sx={{ color: '#444', fontSize: 18 }} />
+                            }
+                        </IconButton>
                         {log.audio_path && (
                             <>
                                 <IconButton size="small" onClick={() => onPlay(log.id, log.audio_path!, log.duration)}>
