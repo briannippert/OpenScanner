@@ -51,7 +51,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     
     // Audio buffering
     private readonly LinkedList<byte[]> _preRollBuffer = new();
-    private const int PreRollMaxBytes = 96000 * 2; // ~2 seconds at 48kHz 16-bit
+    private const int PreRollMaxBytes = 96000 * 5; // ~5 seconds at 48kHz 16-bit to capture full transmission start
 
     private readonly ConcurrentDictionary<double, DateTime> _channelLockouts = new();
 
@@ -703,9 +703,8 @@ public class RtlDevice : BackgroundService, IRadioSource
             _currentDecoder = null;
         }
         
-        // Clear pre-roll when we stop decoding/move on? 
-        // Or keep it? Usually better to clear or let it ring out.
-        lock(_preRollBuffer) _preRollBuffer.Clear();
+        // Don't clear pre-roll buffer here - we want to maintain history
+        // across decoder switches and transmission starts. It will self-regulate by max size.
     }
 
     private void StartDecoding(Channel channel)
