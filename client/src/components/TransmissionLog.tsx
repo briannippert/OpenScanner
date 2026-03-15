@@ -428,7 +428,10 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                     primary={
                         <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
                             <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#aaa' }}>
-                                {new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                {(() => {
+                                    const d = new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z');
+                                    return `${d.toLocaleDateString([], { month: '2-digit', day: '2-digit' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+                                })()}
                             </Typography>
                             <Typography variant="caption" sx={{ color: '#fff', fontWeight: 'bold', fontSize: '0.8rem' }}>
                                 {log.alphaTag}
