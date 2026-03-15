@@ -741,10 +741,10 @@ public class RtlDevice : BackgroundService, IRadioSource
         
         if (!_manualOverride)
         {
-            RestartSessionTimeout(5000); // 5s hang time
+            RestartSessionTimeout(10000); // 10s hang time
         }
 
-        Task.Delay(2000, _activityTimeoutCts.Token).ContinueWith(t => 
+        Task.Delay(5000, _activityTimeoutCts.Token).ContinueWith(t => 
         {
             if (!t.IsCanceled)
             {
