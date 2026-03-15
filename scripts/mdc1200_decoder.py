@@ -167,6 +167,7 @@ def detect_mdc_bursts(sample_rate=48000):
     
     buffer = []
     burst_detected_at = 0
+    last_mdc_time = 0
     
     try:
         while True:
@@ -182,27 +183,39 @@ def detect_mdc_bursts(sample_rate=48000):
                 buffer = buffer[-sample_rate:]
             
             # Look for MDC bursts (energy spike)
-            rms = math.sqrt(sum(s * s for s in samples) / len(samples))
+            rms = math.sqrt(sum(s * s for s in samples) / len(samples)) if samples else 0
             
-            # If we detect energy above threshold, try to decode
-            if rms > 0.1:  # Threshold for signal detection
-                # Try to decode recent samples
-                if len(buffer) > 1200:  # At least 25ms of audio at 48kHz
+            # Lower threshold for detection and check more frequently
+            # MDC bursts can be as low as 0.05 RMS in some cases
+            if rms > 0.05:  # Lowered threshold
+                # Try to decode recent samples - use more data for better detection
+                if len(buffer) > sample_rate // 24:  # At least ~20ms at 48kHz
                     try:
-                        bits = fsk_detector.decode_bits(buffer[-int(sample_rate * 0.1):])
-                        unit_id = MDC1200Decoder.decode(bits)
-                        
-                        if unit_id is not None:
-                            # Output in format expected by DSDBase
-                            sys.stderr.write(f"MDC1200: {unit_id:06x}\n")
-                            sys.stderr.flush()
-                    except:
+                        # Try decoding with different window sizes
+                        for window_size_ms in [80, 100, 120]:
+                            window_samples = int(sample_rate * window_size_ms / 1000)
+                            if len(buffer) >= window_samples:
+                                bits = fsk_detector.decode_bits(buffer[-window_samples:])
+                                unit_id = MDC1200Decoder.decode(bits)
+                                
+                                if unit_id is not None:
+                                    # Avoid duplicate detections within 1 second
+                                    current_time = burst_detected_at
+                                    if current_time - last_mdc_time > 1.0:
+                                        # Output in format expected by DSDBase
+                                        sys.stderr.write(f"MDC1200: {unit_id:06x}\n")
+                                        sys.stderr.flush()
+                                        last_mdc_time = current_time
+                                    break
+                    except Exception as e:
                         pass
             
             # Pass through audio to stdout
             sys.stdout.buffer.write(struct.pack('<' + 'h' * len(samples), 
                                                *[int(s * 32767) for s in samples]))
             sys.stdout.flush()
+            
+            burst_detected_at += len(samples) / sample_rate
     
     except KeyboardInterrupt:
         pass

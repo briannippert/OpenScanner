@@ -19,7 +19,7 @@ public class NFM : DSDBase
         // MDC decoder outputs unit IDs to stderr for real-time display and logging
         string decoderScript = "/home/brian/Documents/OpenScanner/scripts/mdc1200_decoder.py";
         return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -M fm -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 - | " +
-               $"stdbuf -o0 tee >(stdbuf -i0 -o0 python3 {decoderScript} >/dev/null) | " +
+               $"stdbuf -o0 tee >(stdbuf -i0 -o0 python3 {decoderScript}) | " +
                $"stdbuf -o0 cat";
     }
 
