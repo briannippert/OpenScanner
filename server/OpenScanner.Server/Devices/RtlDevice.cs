@@ -261,7 +261,10 @@ public class RtlDevice : BackgroundService, IRadioSource
         _scanStartTime = DateTime.UtcNow;
         UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0, ManualHoldFrequency = null });
 
-        var banks = CalculateScanBanks(_channelService.Channels);
+        var activeChannels = _channelService.Channels.Where(c => !c.Avoid).ToList();
+        if (activeChannels.Count == 0) return;
+
+        var banks = CalculateScanBanks(activeChannels);
         var rate = 2048000;
 
         _scanCts = new CancellationTokenSource();
