@@ -14,12 +14,14 @@ interface Props {
     channels?: Channel[];
 }
 
-const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan }) => {
+const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [] }) => {
     const isReceiving = state.status === 'RECEIVING';
+    const isFastScan = state.status === 'SCANNING' && !state.currentFrequency && channels.length > 1;
     const activeColor = isReceiving ? '#00ff00' : '#555';
 
     const displayFreq = state.currentFrequency;
     const displayAlpha = state.currentChannel?.alphaTag;
+    const fastScanChannels = isFastScan ? channels.filter(c => !c.avoid) : [];
     return (
         <Paper 
             elevation={6} 
@@ -92,19 +94,43 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan }) => {
                     gap: 2 
                 }}>
                     <Box textAlign="center">
-                        <Typography variant="h3" sx={{ 
-                            fontFamily: 'monospace', 
-                            fontWeight: 700, 
-                            color: activeColor,
-                            textShadow: isReceiving ? '0 0 10px rgba(0,255,0,0.5)' : 'none',
-                            fontSize: { xs: '2rem', md: '3rem' }
-                        }}>
-                            {displayFreq ? displayFreq.toFixed(4) : '---.----'}
-                        </Typography>
-                        <Box display="flex" justifyContent="center" gap={1} alignItems="center">
-                            <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: 2 }}>
-                                MHz
-                            </Typography>
+                        {isFastScan ? (
+                            <>
+                                <Typography variant="h5" sx={{
+                                    fontFamily: 'monospace',
+                                    fontWeight: 700,
+                                    color: '#555',
+                                    letterSpacing: 3,
+                                    mb: 1
+                                }}>
+                                    FAST SCAN
+                                </Typography>
+                                <Box display="flex" justifyContent="center" flexWrap="wrap" gap={0.5}>
+                                    {fastScanChannels.map(ch => (
+                                        <Chip
+                                            key={ch.frequency}
+                                            label={ch.alphaTag || ch.frequency.toString()}
+                                            size="small"
+                                            sx={{ height: 20, fontSize: '0.65rem', bgcolor: '#1a1a1a', color: '#666', fontFamily: 'monospace' }}
+                                        />
+                                    ))}
+                                </Box>
+                            </>
+                        ) : (
+                            <>
+                                <Typography variant="h3" sx={{ 
+                                    fontFamily: 'monospace', 
+                                    fontWeight: 700, 
+                                    color: activeColor,
+                                    textShadow: isReceiving ? '0 0 10px rgba(0,255,0,0.5)' : 'none',
+                                    fontSize: { xs: '2rem', md: '3rem' }
+                                }}>
+                                    {displayFreq ? displayFreq.toFixed(4) : '---.----'}
+                                </Typography>
+                                <Box display="flex" justifyContent="center" gap={1} alignItems="center">
+                                    <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: 2 }}>
+                                        MHz
+                                    </Typography>
                             {displayAlpha && (
                                 <Chip 
                                     label={displayAlpha} 
@@ -157,6 +183,8 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan }) => {
                             }}>
                                 {state.sourceID < 100 ? `[BASE]` : `[UNIT ${state.sourceID}]`}
                             </Typography>
+                        )}
+                            </>
                         )}
                     </Box>
                     

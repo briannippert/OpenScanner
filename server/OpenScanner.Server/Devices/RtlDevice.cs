@@ -288,8 +288,10 @@ public class RtlDevice : BackgroundService, IRadioSource
 
             var bank = banks[bankIndex];
 
-            // Broadcast the current scan bank so the frontend shows real-time channel hopping
-            var bankDisplayFreq = bank.Frequencies.Count == 1 ? bank.Frequencies[0] : bank.CenterFrequency;
+            // Broadcast the current scan bank so the frontend shows real-time channel hopping.
+            // For multi-channel FastScan banks, don't show the RTL-SDR center frequency — it's
+            // not in the user's channel list. Show null so the frontend can indicate "watching N channels".
+            var bankDisplayFreq = bank.Frequencies.Count == 1 ? bank.Frequencies[0] : (double?)null;
             var bankDisplayChannel = bank.Frequencies.Count == 1
                 ? _channelService.Channels.FirstOrDefault(c => Math.Abs(c.Frequency - bank.Frequencies[0]) < 0.001)
                 : null;
