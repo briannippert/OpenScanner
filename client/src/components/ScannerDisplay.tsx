@@ -96,11 +96,12 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                     <Box textAlign="center">
                         {isFastScan ? (
                             <>
-                                <Typography variant="h5" sx={{
+                                <Typography variant="h3" sx={{
                                     fontFamily: 'monospace',
                                     fontWeight: 700,
                                     color: '#555',
                                     letterSpacing: 3,
+                                    fontSize: { xs: '2rem', md: '3rem' },
                                     mb: 1
                                 }}>
                                     FAST SCAN

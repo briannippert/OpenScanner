@@ -534,8 +534,15 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         if (spread <= 2.4 + 1e-9)
         {
-            // FastScan: all channels fit in a single 2.4 MHz SDR window — no hopping needed
-            var center = (minFreq + maxFreq) / 2.0;
+            // FastScan: all channels fit in a single 2.4 MHz SDR window — no hopping needed.
+            // For single-channel, offset center by +0.25 MHz so the signal doesn't land on the
+            // DC spike bin (bin fftSize/2). Multi-channel midpoint is already offset from DC.
+            double center;
+            if (sorted.Count == 1)
+                center = sorted[0].Frequency + 0.25;
+            else
+                center = (minFreq + maxFreq) / 2.0;
+
             _logger.LogInformation($"ScanBank FastScan: {minFreq:F3}-{maxFreq:F3} MHz (spread: {spread:F2} MHz)");
             banks.Add(new ScanBank
             {
@@ -548,13 +555,14 @@ public class RtlDevice : BackgroundService, IRadioSource
         }
         else
         {
-            // FrequencyHop: channels too spread for a single window — one bank per channel, cycle through each
+            // FrequencyHop: channels too spread for a single window — one bank per channel, cycle through each.
+            // Offset center by +0.25 MHz so the channel signal doesn't land on the DC spike bin.
             foreach (var ch in sorted)
             {
                 _logger.LogInformation($"ScanBank FrequencyHop: {ch.Frequency:F3} MHz");
                 banks.Add(new ScanBank
                 {
-                    CenterFrequency = ch.Frequency,
+                    CenterFrequency = ch.Frequency + 0.25,
                     Frequencies = new List<double> { ch.Frequency },
                     SpreadMHz = 0,
                     Mode = ScanMode.FrequencyHop,

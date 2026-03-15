@@ -131,8 +131,8 @@ public class MixedScanTests
         // 2.5 MHz span → FrequencyHop: one bank per channel
         Assert.Equal(2, banks.Count);
         Assert.All(banks, b => Assert.Equal(ScanMode.FrequencyHop, b.Mode));
-        Assert.Equal(155.0, banks[0].CenterFrequency);
-        Assert.Equal(157.5, banks[1].CenterFrequency);
+        Assert.Equal(155.0 + 0.25, banks[0].CenterFrequency);
+        Assert.Equal(157.5 + 0.25, banks[1].CenterFrequency);
     }
 
     [Fact]
