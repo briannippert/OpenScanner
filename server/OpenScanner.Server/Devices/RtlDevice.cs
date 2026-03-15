@@ -282,8 +282,8 @@ public class RtlDevice : BackgroundService, IRadioSource
 
     /// <summary>
     /// Main scanner loop that cycles through scan banks.
-    /// For FastScan mode banks, scans continuously without dwell timer.
-    /// For FrequencyHop mode banks, uses dwell-based hopping.
+    /// If multiple banks exist, each bank runs with a dwell timer before moving to the next.
+    /// If only one bank, it runs continuously until the token is cancelled.
     /// </summary>
     private async Task RunScannerLoop(List<ScanBank> banks, int sampleRate, CancellationToken token)
     {
@@ -304,45 +304,29 @@ public class RtlDevice : BackgroundService, IRadioSource
                 : null;
             UpdateState(_state with { CurrentFrequency = bankDisplayFreq, CurrentChannel = bankDisplayChannel });
             
-            if (bank.Mode == ScanMode.FastScan)
+            if (banks.Count > 1)
             {
-                // FastScan: Continuous scanning without dwell timer
-                _logger.LogDebug($"FastScan mode: Center={bank.CenterFrequency:F3} MHz, Spread={bank.SpreadMHz:F2} MHz");
-                
+                // Multiple banks: dwell on each before hopping to the next
+                using var dwellCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                dwellCts.CancelAfter(bank.DwellTimeMs);
+
                 try
                 {
-                    await RunSingleScanSegment(bank.CenterFrequency, sampleRate, token);
+                    await RunSingleScanSegment(bank.CenterFrequency, sampleRate, dwellCts.Token);
                 }
                 catch (OperationCanceledException)
                 {
-                    // Expected when signal lock or manual stop
+                    // Expected when dwell time expires or main token cancelled
                 }
             }
             else
             {
-                // FrequencyHop: Dwell-based hopping with 2-second timer
-                _logger.LogDebug($"FrequencyHop mode: Center={bank.CenterFrequency:F3} MHz, Dwell={bank.DwellTimeMs}ms");
-                
-                // Only use dwell-hopping if we have multiple banks to cycle through
-                if (banks.Count > 1)
+                // Single bank: run continuously until signal lock or manual stop
+                try
                 {
-                    using var dwellCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-                    dwellCts.CancelAfter(bank.DwellTimeMs);
-
-                    try 
-                    {
-                        await RunSingleScanSegment(bank.CenterFrequency, sampleRate, dwellCts.Token);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // Expected when dwell time expires or main token cancelled
-                    }
-                }
-                else
-                {
-                    // Single bank: Run until token is cancelled
                     await RunSingleScanSegment(bank.CenterFrequency, sampleRate, token);
                 }
+                catch (OperationCanceledException) { }
             }
             
             if (token.IsCancellationRequested) break;
@@ -533,9 +517,10 @@ public class RtlDevice : BackgroundService, IRadioSource
     }
 
     /// <summary>
-    /// Calculate optimized scan banks with mixed fast/hop strategy.
-    /// If all channels fit in 2.4 MHz window, uses FastScan mode (continuous).
-    /// Otherwise, breaks into 0.5 MHz clusters with FrequencyHop mode (2-second dwell).
+    /// Calculate optimized scan banks with hybrid scan strategy.
+    /// Channels within a 2.4 MHz window are grouped into a single FastScan bank (simultaneous SDR coverage).
+    /// Channels that exceed 2.4 MHz are split into multiple FastScan sub-banks, which the loop hops between.
+    /// e.g. [155.0, 155.9, 158.4] → FastScan[155.0,155.9] + FastScan[158.4]
     /// </summary>
     private List<ScanBank> CalculateScanBanks(List<Channel> channels)
     {
@@ -587,48 +572,48 @@ public class RtlDevice : BackgroundService, IRadioSource
                     Frequencies = frequencies,
                     SpreadMHz = spread,
                     Mode = ScanMode.FastScan,
-                    DwellTimeMs = 0  // Continuous scanning
+                    DwellTimeMs = 1500
                 });
             }
             else
             {
-                // FrequencyHop mode: break into 0.5 MHz sub-clusters
-                var subClusters = new List<List<Channel>>();
-                var currentCluster = new List<Channel> { group[0] };
-                
+                // Span exceeds 2.4 MHz: greedily split into max-2.4 MHz FastScan sub-banks.
+                // Channels that fit together are scanned simultaneously; the loop hops between sub-banks.
+                // e.g. [155.0, 155.9, 158.4] → FastScan[155.0,155.9] + FastScan[158.4]
+                var subBankChannels = new List<List<Channel>>();
+                var currentSubBank = new List<Channel> { group[0] };
+
                 for (int i = 1; i < group.Count; i++)
                 {
                     var c = group[i];
-                    if (c.Frequency - currentCluster[0].Frequency > 0.5)
+                    if (c.Frequency - currentSubBank[0].Frequency <= 2.4 + 1e-9)
                     {
-                        subClusters.Add(currentCluster);
-                        currentCluster = new List<Channel> { c };
+                        currentSubBank.Add(c);
                     }
                     else
                     {
-                        currentCluster.Add(c);
+                        subBankChannels.Add(currentSubBank);
+                        currentSubBank = new List<Channel> { c };
                     }
                 }
-                if (currentCluster.Any()) subClusters.Add(currentCluster);
-                
-                // Create a ScanBank for each sub-cluster
-                foreach (var subCluster in subClusters)
+                subBankChannels.Add(currentSubBank);
+
+                foreach (var subBank in subBankChannels)
                 {
-                    var subMinFreq = subCluster.Min(x => x.Frequency);
-                    var subMaxFreq = subCluster.Max(x => x.Frequency);
-                    var subSpread = subMaxFreq - subMinFreq;
-                    var subCenter = (subMinFreq + subMaxFreq) / 2.0 + 0.25;  // Offset by 250kHz
-                    var frequencies = subCluster.Select(x => x.Frequency).ToList();
-                    
-                    _logger.LogInformation($"ScanBank FrequencyHop: {subMinFreq:F3}-{subMaxFreq:F3} MHz (spread: {subSpread:F2} MHz)");
-                    
+                    var subMin = subBank.Min(x => x.Frequency);
+                    var subMax = subBank.Max(x => x.Frequency);
+                    var subSpread = subMax - subMin;
+                    var subCenter = (subMin + subMax) / 2.0;
+
+                    _logger.LogInformation($"ScanBank FastScan: {subMin:F3}-{subMax:F3} MHz (spread: {subSpread:F2} MHz)");
+
                     banks.Add(new ScanBank
                     {
                         CenterFrequency = subCenter,
-                        Frequencies = frequencies,
+                        Frequencies = subBank.Select(x => x.Frequency).ToList(),
                         SpreadMHz = subSpread,
-                        Mode = ScanMode.FrequencyHop,
-                        DwellTimeMs = 2000
+                        Mode = ScanMode.FastScan,
+                        DwellTimeMs = 1500
                     });
                 }
             }

@@ -57,11 +57,11 @@ public class MixedScanTests
         Assert.Equal(ScanMode.FastScan, banks[0].Mode);
         Assert.Equal(2.0, banks[0].SpreadMHz);
         Assert.Equal(5, banks[0].Frequencies.Count);
-        Assert.Equal(0, banks[0].DwellTimeMs);
+        Assert.Equal(1500, banks[0].DwellTimeMs);
     }
 
     [Fact]
-    public void CalculateScanBanks_Wide5MHz_ReturnsFrequencyHop()
+    public void CalculateScanBanks_Wide5MHz_ReturnsMultipleFastScanBanks()
     {
         var device = CreateRtlDevice();
         var channels = new List<Channel>
@@ -77,11 +77,9 @@ public class MixedScanTests
         var banks = device.CalculateScanBanksForTesting(channels);
 
         Assert.True(banks.Count > 1, "5 MHz span should create multiple banks");
-        foreach (var bank in banks)
-        {
-            Assert.Equal(ScanMode.FrequencyHop, bank.Mode);
-            Assert.Equal(2000, bank.DwellTimeMs);
-        }
+        Assert.All(banks, b => Assert.Equal(ScanMode.FastScan, b.Mode));
+        Assert.All(banks, b => Assert.Equal(1500, b.DwellTimeMs));
+        Assert.All(banks, b => Assert.True(b.SpreadMHz <= 2.4 + 1e-9, $"Bank spread {b.SpreadMHz:F2} MHz exceeds 2.4 MHz window"));
     }
 
     [Fact]
@@ -118,7 +116,7 @@ public class MixedScanTests
     }
 
     [Fact]
-    public void CalculateScanBanks_JustOver2_4MHz_ReturnsFrequencyHop()
+    public void CalculateScanBanks_JustOver2_4MHz_ReturnsTwoFastScanBanks()
     {
         var device = CreateRtlDevice();
         var channels = new List<Channel>
@@ -129,8 +127,11 @@ public class MixedScanTests
 
         var banks = device.CalculateScanBanksForTesting(channels);
 
-        Assert.NotEmpty(banks);
-        Assert.Contains(banks, b => b.Mode == ScanMode.FrequencyHop);
+        // 2.5 MHz span exceeds the 2.4 MHz window → two separate FastScan banks
+        Assert.Equal(2, banks.Count);
+        Assert.All(banks, b => Assert.Equal(ScanMode.FastScan, b.Mode));
+        Assert.Equal(155.0, banks[0].Frequencies[0]);
+        Assert.Equal(157.5, banks[1].Frequencies[0]);
     }
 
     [Fact]
@@ -182,10 +183,10 @@ public class MixedScanTests
     }
 
     [Fact]
-    public void CalculateScanBanks_FrequencyHopSubclusters_EachUnder0_5MHz()
+    public void CalculateScanBanks_HybridScan_SubBanksEachWithin2_4MHz()
     {
         var device = CreateRtlDevice();
-        // 5 contiguous channels spanning 5 MHz - will be broken into 0.5 MHz sub-clusters
+        // 9 channels spanning 5.2 MHz — all contiguous, so one group split into sub-banks
         var channels = new List<Channel>
         {
             new() { Frequency = 150.0, AlphaTag = "Ch1", Mode = "NFM" },
@@ -201,14 +202,31 @@ public class MixedScanTests
 
         var banks = device.CalculateScanBanksForTesting(channels);
 
-        Assert.True(banks.Count > 1);
-        foreach (var bank in banks)
+        Assert.True(banks.Count > 1, "5.2 MHz span should produce multiple banks");
+        Assert.All(banks, b => Assert.Equal(ScanMode.FastScan, b.Mode));
+        Assert.All(banks, b => Assert.True(b.SpreadMHz <= 2.4 + 1e-9,
+            $"Sub-bank spread {b.SpreadMHz:F2} MHz exceeds 2.4 MHz window"));
+    }
+
+    [Fact]
+    public void CalculateScanBanks_HybridGroupExample_TwoFastScanPlusOneSingle()
+    {
+        var device = CreateRtlDevice();
+        // Real-world hybrid: 155.0325 + 155.8875 fit in 2.4 MHz window, 158.4 is isolated
+        var channels = new List<Channel>
         {
-            if (bank.Frequencies.Count > 1)
-            {
-                var spread = bank.Frequencies.Max() - bank.Frequencies.Min();
-                Assert.True(spread <= 0.55, $"Sub-cluster spread {spread:F2} MHz exceeds 0.5 MHz threshold");
-            }
-        }
+            new() { Frequency = 155.0325, AlphaTag = "Ch1", Mode = "NFM" },
+            new() { Frequency = 155.8875, AlphaTag = "Ch2", Mode = "NFM" },
+            new() { Frequency = 158.4,    AlphaTag = "Ch3", Mode = "NFM" }
+        };
+
+        var banks = device.CalculateScanBanksForTesting(channels);
+
+        // 155.0325-155.8875 span is 0.855 MHz → one FastScan bank
+        // 158.4 is > 3 MHz away → separate group → second FastScan bank
+        Assert.Equal(2, banks.Count);
+        Assert.All(banks, b => Assert.Equal(ScanMode.FastScan, b.Mode));
+        Assert.Equal(2, banks[0].Frequencies.Count);  // 155.0325 + 155.8875
+        Assert.Single(banks[1].Frequencies);            // 158.4
     }
 }
