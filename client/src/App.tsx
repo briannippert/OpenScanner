@@ -865,6 +865,9 @@ function App() {
                                                         {ch.description}
                                                     </Typography>
                                                 </Box>
+                                                <Typography variant="body2" sx={{ fontFamily: 'monospace', color: 'primary.main' }}>
+                                                    {ch.frequency}
+                                                </Typography>
                                             </Box>
                                             <Box mt={1} display="flex" alignItems="center" gap={1}>
                                                 <Chip 
