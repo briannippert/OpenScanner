@@ -108,19 +108,31 @@ class MDC1200Decoder:
         return unit_id
     
     @staticmethod
+    def find_sync_position(bits, sync_pattern):
+        """Find the position of sync pattern in bits."""
+        if len(bits) < len(sync_pattern):
+            return -1
+        
+        for i in range(len(bits) - len(sync_pattern)):
+            match = all(bits[i + j] == sync_pattern[j] for j in range(len(sync_pattern)))
+            if match:
+                return i
+        return -1
+    
+    @staticmethod
     def validate_message(bits):
-        """Basic validation of MDC1200 message structure."""
-        # Message should be approximately 80-100 bits
-        if len(bits) < 32:
+        """Rigorous validation of MDC1200 message structure."""
+        if len(bits) < 40:
             return False
         
-        # Check for preamble
-        # (simplified - doesn't check for exact preamble)
-        zero_count = sum(1 for bit in bits[:16] if bit == 0)
-        one_count = sum(1 for bit in bits[:16] if bit == 1)
+        # Look for sync pattern (alternating 1010)
+        sync_pattern = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]  # 16-bit preamble
+        sync_pos = MDC1200Decoder.find_sync_position(bits[:32], sync_pattern[:16])
         
-        # Preamble should have reasonable mix
-        return zero_count > 4 and one_count > 4
+        if sync_pos < 0:
+            return False
+        
+        return True
     
     @classmethod
     def decode(cls, bits):
@@ -129,14 +141,20 @@ class MDC1200Decoder:
             return None
         
         try:
+            # Find where the actual data starts (after preamble)
             data_bytes = cls.bits_to_bytes(bits[16:])  # Skip preamble
             if len(data_bytes) < 4:
                 return None
             
             unit_id = cls.extract_unit_id(data_bytes)
             
-            # Validate unit ID is reasonable (non-zero, not all bits set)
+            # Validate unit ID is reasonable (non-zero, not all bits set, in valid range)
+            # Valid unit IDs are typically 1-9999 (0x1 to 0x270F)
             if unit_id is None or unit_id == 0 or unit_id == 0xFFFFFF:
+                return None
+            
+            # Reject suspiciously high values
+            if unit_id > 0x10000:  # > 65536
                 return None
             
             return unit_id
@@ -168,6 +186,8 @@ def detect_mdc_bursts(sample_rate=48000):
     buffer = []
     burst_detected_at = 0
     last_mdc_time = 0
+    detection_cooldown = 0.5  # 500ms minimum between detections
+    quiet_threshold = 0.15  # RMS must be > 0.15 to process (eliminates low noise)
     
     try:
         while True:
@@ -182,31 +202,27 @@ def detect_mdc_bursts(sample_rate=48000):
             if len(buffer) > sample_rate * 2:  # 2 second buffer
                 buffer = buffer[-sample_rate:]
             
-            # Look for MDC bursts (energy spike)
+            # Calculate RMS for this chunk
             rms = math.sqrt(sum(s * s for s in samples) / len(samples)) if samples else 0
             
-            # Lower threshold for detection and check more frequently
-            # MDC bursts can be as low as 0.05 RMS in some cases
-            if rms > 0.05:  # Lowered threshold
-                # Try to decode recent samples - use more data for better detection
-                if len(buffer) > sample_rate // 24:  # At least ~20ms at 48kHz
+            # Only process if signal is strong enough AND we're not in cooldown
+            # MDC bursts are typically 0.15-0.3 RMS (much louder than background)
+            time_since_last = burst_detected_at - last_mdc_time
+            if rms > quiet_threshold and time_since_last > detection_cooldown:
+                # Try to decode recent samples - MDC burst is ~80ms
+                if len(buffer) > sample_rate // 16:  # At least 62.5ms at 48kHz
                     try:
-                        # Try decoding with different window sizes
-                        for window_size_ms in [80, 100, 120]:
-                            window_samples = int(sample_rate * window_size_ms / 1000)
-                            if len(buffer) >= window_samples:
-                                bits = fsk_detector.decode_bits(buffer[-window_samples:])
-                                unit_id = MDC1200Decoder.decode(bits)
-                                
-                                if unit_id is not None:
-                                    # Avoid duplicate detections within 1 second
-                                    current_time = burst_detected_at
-                                    if current_time - last_mdc_time > 1.0:
-                                        # Output in format expected by DSDBase
-                                        sys.stderr.write(f"MDC1200: {unit_id:06x}\n")
-                                        sys.stderr.flush()
-                                        last_mdc_time = current_time
-                                    break
+                        # Use fixed 80ms window for MDC (standard duration)
+                        window_samples = int(sample_rate * 0.08)  # 80ms
+                        if len(buffer) >= window_samples:
+                            bits = fsk_detector.decode_bits(buffer[-window_samples:])
+                            unit_id = MDC1200Decoder.decode(bits)
+                            
+                            if unit_id is not None:
+                                # Output in format expected by DSDBase
+                                sys.stderr.write(f"MDC1200: {unit_id:06x}\n")
+                                sys.stderr.flush()
+                                last_mdc_time = burst_detected_at
                     except Exception as e:
                         pass
             

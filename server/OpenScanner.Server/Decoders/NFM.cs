@@ -14,13 +14,9 @@ public class NFM : DSDBase
         int captureRate = 48000;
         int outputRate = 48000;
         
-        // NFM with MDC1200 detection using parallel decoder
-        // Uses tee to split audio: one stream for audio, another for MDC1200 decoder
-        // MDC decoder outputs unit IDs to stderr for real-time display and logging
-        string decoderScript = "/home/brian/Documents/OpenScanner/scripts/mdc1200_decoder.py";
-        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -M fm -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 - | " +
-               $"stdbuf -o0 tee >(stdbuf -i0 -o0 python3 {decoderScript}) | " +
-               $"stdbuf -o0 cat";
+        // NFM decoder with optimized squelch and gain settings
+        // Simplified pipeline: no parallel MDC processing to avoid audio artifacts
+        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -M fm -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 -";
     }
 
     protected override Task OnStarted(CancellationToken token)
