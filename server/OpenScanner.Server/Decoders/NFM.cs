@@ -11,13 +11,8 @@ public class NFM : DSDBase
 
     public override string GetCommandLine(Channel channel)
     {
-        int captureRate = 48000;
-        int outputRate = 48000;
-        
-        // NFM with MDC1200 and analog signaling detection via dsd-fme
-        // dsd-fme in analog monitor mode (-fA) detects MDC1200, CTCSS, and other signaling
-        // Metadata output goes to stderr for parsing, audio to stdout
-        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -M fm -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 - | stdbuf -i0 -o0 /usr/local/bin/dsd-fme -fA -i - -s {outputRate} -o -";
+        // NFM with moderate squelch and increased gain for better signal handling
+        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -M fm -s 48000 -r 48000 -g 42 -p 0 -l 50 -t 30 -";
     }
 
     protected override Task OnStarted(CancellationToken token)
