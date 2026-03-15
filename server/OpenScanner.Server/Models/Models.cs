@@ -276,7 +276,7 @@ public class ScanBank
     /// <summary>
     /// Dwell time in milliseconds (for FrequencyHop mode).
     /// </summary>
-    public int DwellTimeMs { get; set; } = 2000;
+    public int DwellTimeMs { get; set; } = 500;
 }
 
 /// <summary>

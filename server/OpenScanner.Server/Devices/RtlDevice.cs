@@ -340,8 +340,8 @@ public class RtlDevice : BackgroundService, IRadioSource
 
     private async Task RunSingleScanSegment(double centerFreqMhz, int sampleRate, CancellationToken token)
     {
-        // 2.5 second delay to ensure hardware is fully reset and ready
-        await Task.Delay(2500, token);
+        // Brief delay to allow the previous rtl_sdr process to fully release the USB device
+        await Task.Delay(250, token);
 
         // Standard stable sample rate for R820T tuner
         int scanRate = 1024000; 
@@ -442,7 +442,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                 lastUpdate = DateTime.UtcNow;
 
                 // Warm-up: Skip first 200ms of data
-                if ((DateTime.UtcNow - segmentStartTime).TotalMilliseconds < 200) continue;
+                if ((DateTime.UtcNow - segmentStartTime).TotalMilliseconds < 50) continue;
 
                 if (_iqDumpStream != null)
                 {
@@ -787,8 +787,8 @@ public class RtlDevice : BackgroundService, IRadioSource
             IsAudioStreaming = true
         });
 
-        // Delay starting the decoder to let hardware settle after scanner stop
-        Task.Delay(2000).ContinueWith(_ => {
+        // Brief delay to let the USB device release after scanner stop before decoder claims it
+        Task.Delay(300).ContinueWith(_ => {
             if (_decodeCts != null && _decodeCts.IsCancellationRequested) return;
             StartDecoding(channel);
         });
