@@ -788,8 +788,10 @@ public class RtlDevice : BackgroundService, IRadioSource
         });
 
         // Brief delay to let the USB device release after scanner stop before decoder claims it
-        Task.Delay(300).ContinueWith(_ => {
-            if (_decodeCts != null && _decodeCts.IsCancellationRequested) return;
+        Task.Delay(150).ContinueWith(_ => {
+            // Guard: only start if we're still locked to this channel
+            if (_state.Status != "RECEIVING" && _state.Status != "MONITORING") return;
+            if (_state.CurrentChannel?.Frequency != channel.Frequency) return;
             StartDecoding(channel);
         });
 
