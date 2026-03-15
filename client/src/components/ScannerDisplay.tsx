@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Box, Typography, Paper, LinearProgress, Chip } from '@mui/material';
 import type { ScannerState, Channel } from '../types';
 import RadioIcon from '@mui/icons-material/Radio';
@@ -14,40 +14,12 @@ interface Props {
     channels?: Channel[];
 }
 
-const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [] }) => {
+const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan }) => {
     const isReceiving = state.status === 'RECEIVING';
     const activeColor = isReceiving ? '#00ff00' : '#555';
-    
-    // Virtual display state for scanning animation
-    const [scanIndex, setScanIndex] = useState(0);
 
-    useEffect(() => {
-        if (state.status === 'SCANNING' && channels.length > 0) {
-            const interval = setInterval(() => {
-                setScanIndex(prev => (prev + 1) % channels.length);
-            }, 500); // Half-second cycle
-            return () => clearInterval(interval);
-        }
-    }, [state.status, channels]);
-
-    // Determine what to show
-    let displayFreq = state.currentFrequency;
-    let displayAlpha = state.currentChannel?.alphaTag;
-
-    // If we are scanning OR if we have a frequency that isn't in our channel list (like the center freq)
-    const isProgrammed = channels.some(c => Math.abs(c.frequency - (state.currentFrequency || 0)) < 0.001);
-    
-    if ((state.status === 'SCANNING' || !isProgrammed) && channels.length > 0) {
-        // Show cycling channels
-        const nonAvoidedChannels = channels.filter(c => !c.avoid);
-        if (nonAvoidedChannels.length > 0) {
-            const currentDisplayChannel = nonAvoidedChannels[scanIndex % nonAvoidedChannels.length];
-            displayFreq = currentDisplayChannel.frequency;
-            displayAlpha = currentDisplayChannel.alphaTag;
-        }
-    }
-
-
+    const displayFreq = state.currentFrequency;
+    const displayAlpha = state.currentChannel?.alphaTag;
     return (
         <Paper 
             elevation={6} 

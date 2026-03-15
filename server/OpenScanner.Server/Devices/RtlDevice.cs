@@ -284,6 +284,13 @@ public class RtlDevice : BackgroundService, IRadioSource
             if (banks.Count == 0) break;
 
             var bank = banks[bankIndex];
+
+            // Broadcast the current scan bank so the frontend shows real-time channel hopping
+            var bankDisplayFreq = bank.Frequencies.Count == 1 ? bank.Frequencies[0] : bank.CenterFrequency;
+            var bankDisplayChannel = bank.Frequencies.Count == 1
+                ? _channelService.Channels.FirstOrDefault(c => Math.Abs(c.Frequency - bank.Frequencies[0]) < 0.001)
+                : null;
+            UpdateState(_state with { CurrentFrequency = bankDisplayFreq, CurrentChannel = bankDisplayChannel });
             
             if (bank.Mode == ScanMode.FastScan)
             {
