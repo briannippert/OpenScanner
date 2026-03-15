@@ -109,6 +109,19 @@ public interface IDatabase
     Task<IEnumerable<CallLog>> SearchTransmissionsAsync(string query);
 
     /// <summary>
+    /// Retrieves all favorited transmission logs.
+    /// </summary>
+    /// <returns>A collection of favorited call logs.</returns>
+    Task<IEnumerable<CallLog>> GetFavoritesAsync();
+
+    /// <summary>
+    /// Sets or clears the favorite flag on a transmission.
+    /// </summary>
+    /// <param name="id">The transmission ID.</param>
+    /// <param name="isFavorite">True to favorite, false to unfavorite.</param>
+    Task SetFavoriteAsync(string id, bool isFavorite);
+
+    /// <summary>
     /// Deletes a specific transmission log.
     /// </summary>
     /// <param name="id">The ID of the transmission.</param>

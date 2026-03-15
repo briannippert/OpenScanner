@@ -164,6 +164,11 @@ public class CallLog
     /// </summary>
     public string? DetectedTone { get; set; }
 
+    /// <summary>
+    /// Whether this recording has been marked as a favorite.
+    /// </summary>
+    public bool IsFavorite { get; set; }
+
     public CallLog() { }
 
     public CallLog(string id, string timestamp, double frequency, string alphaTag, string description, double? lat, double? lon, string? audioPath, double? duration, string? transcription = null, int? sourceID = null, int? targetID = null, string? detectedTone = null)

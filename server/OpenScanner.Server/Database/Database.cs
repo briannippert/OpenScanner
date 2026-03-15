@@ -75,6 +75,7 @@ public class Database : IDatabase
         try { conn.Execute("ALTER TABLE channels ADD COLUMN lon REAL;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: lon column already exists or failed"); }
         try { conn.Execute("ALTER TABLE channels ADD COLUMN range REAL;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: range column already exists or failed"); }
         try { conn.Execute("ALTER TABLE channels ADD COLUMN avoid INTEGER DEFAULT 0;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: avoid column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN isFavorite INTEGER DEFAULT 0;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: isFavorite column already exists or failed"); }
 
         conn.Execute(@"
             CREATE TABLE IF NOT EXISTS fire_tones (
@@ -244,6 +245,20 @@ public class Database : IDatabase
             }
         }
         await conn.ExecuteAsync(SqlLoader.GetSql("Transmissions/Delete.sql"), new { Id = id });
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<CallLog>> GetFavoritesAsync()
+    {
+        using var conn = GetConnection();
+        return await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetFavorites.sql"));
+    }
+
+    /// <inheritdoc />
+    public async Task SetFavoriteAsync(string id, bool isFavorite)
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync("UPDATE transmissions SET isFavorite = @IsFavorite WHERE id = @Id", new { IsFavorite = isFavorite ? 1 : 0, Id = id });
     }
 
     /// <inheritdoc />
