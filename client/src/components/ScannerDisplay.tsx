@@ -21,7 +21,26 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
 
     const displayFreq = state.currentFrequency;
     const displayAlpha = state.currentChannel?.alphaTag;
+    const displayMode = state.currentChannel?.mode;
     const fastScanChannels = isFastScan ? channels.filter(c => !c.avoid) : [];
+
+    const getModeLabel = (mode: string): string => {
+        const upper = mode.toUpperCase();
+        if (upper === 'NFM' || upper === 'FM') return 'ANALOG';
+        return upper; // P25, AM, WFM, etc.
+    };
+
+    const getModeBgColor = (mode: string): string => {
+        const upper = mode.toUpperCase();
+        if (upper === 'P25') return 'rgba(0, 150, 255, 0.2)';
+        return 'rgba(255,255,255,0.07)';
+    };
+
+    const getModeTextColor = (mode: string): string => {
+        const upper = mode.toUpperCase();
+        if (upper === 'P25') return '#4da6ff';
+        return '#666';
+    };
     return (
         <Paper 
             elevation={6} 
@@ -145,7 +164,22 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                     }} 
                                 />
                             )}
-                            {state.currentTone && (
+                            {displayMode && (
+                                <Chip
+                                    label={getModeLabel(displayMode)}
+                                    size="small"
+                                    sx={{
+                                        height: 20,
+                                        fontSize: '0.7rem',
+                                        bgcolor: getModeBgColor(displayMode),
+                                        color: getModeTextColor(displayMode),
+                                        fontFamily: 'monospace',
+                                        fontWeight: 'bold',
+                                        letterSpacing: 1
+                                    }}
+                                />
+                            )}
+                            {state.currentTone && state.currentTone !== 'ANALOG' && (
                                 <Chip 
                                     label={state.currentTone} 
                                     size="small" 

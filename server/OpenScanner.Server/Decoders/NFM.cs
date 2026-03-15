@@ -23,7 +23,7 @@ public class NFM : DSDBase
     {
         // For analog modes, we assume activity is present since the scanner locked on.
         // This starts the recording and keep-alive mechanisms immediately.
-        RaiseActivity(null, null, "ANALOG");
+        RaiseActivity(null, null, null);
         return Task.CompletedTask;
     }
 }
