@@ -517,10 +517,9 @@ public class RtlDevice : BackgroundService, IRadioSource
     }
 
     /// <summary>
-    /// Calculate optimized scan banks with hybrid scan strategy.
-    /// Channels within a 2.4 MHz window are grouped into a single FastScan bank (simultaneous SDR coverage).
-    /// Channels that exceed 2.4 MHz are split into multiple FastScan sub-banks, which the loop hops between.
-    /// e.g. [155.0, 155.9, 158.4] → FastScan[155.0,155.9] + FastScan[158.4]
+    /// Calculate scan banks using a simple two-mode strategy:
+    /// - FastScan: all channels span ≤ 2.4 MHz → single bank, SDR covers all simultaneously, runs continuously
+    /// - FrequencyHop: channels span > 2.4 MHz → one bank per channel at its exact frequency, dwell-hop through each
     /// </summary>
     private List<ScanBank> CalculateScanBanks(List<Channel> channels)
     {
@@ -528,94 +527,39 @@ public class RtlDevice : BackgroundService, IRadioSource
         
         var sorted = channels.OrderBy(c => c.Frequency).ToList();
         var banks = new List<ScanBank>();
-        
-        // First pass: group contiguous frequencies (allowing larger gaps than 0.5 MHz initially)
-        var groups = new List<List<Channel>>();
-        var currentGroup = new List<Channel> { sorted[0] };
-        
-        for (int i = 1; i < sorted.Count; i++)
+
+        var minFreq = sorted.Min(c => c.Frequency);
+        var maxFreq = sorted.Max(c => c.Frequency);
+        var spread = maxFreq - minFreq;
+
+        if (spread <= 2.4 + 1e-9)
         {
-            var c = sorted[i];
-            // Check if there's a significant gap (> 2 MHz)
-            // 3.0 MHz gap threshold: keeps 2.5 MHz spans grouped (→ FrequencyHop)
-            // while still splitting truly disjoint bands (e.g. 3.5 MHz apart → separate FastScan)
-            if (c.Frequency - currentGroup.Last().Frequency > 3.0)
+            // FastScan: all channels fit in a single 2.4 MHz SDR window — no hopping needed
+            var center = (minFreq + maxFreq) / 2.0;
+            _logger.LogInformation($"ScanBank FastScan: {minFreq:F3}-{maxFreq:F3} MHz (spread: {spread:F2} MHz)");
+            banks.Add(new ScanBank
             {
-                groups.Add(currentGroup);
-                currentGroup = new List<Channel> { c };
-            }
-            else
-            {
-                currentGroup.Add(c);
-            }
+                CenterFrequency = center,
+                Frequencies = sorted.Select(c => c.Frequency).ToList(),
+                SpreadMHz = spread,
+                Mode = ScanMode.FastScan,
+                DwellTimeMs = 0
+            });
         }
-        if (currentGroup.Any()) groups.Add(currentGroup);
-        
-        // Second pass: for each contiguous group, decide FastScan vs FrequencyHop
-        foreach (var group in groups)
+        else
         {
-            var minFreq = group.Min(x => x.Frequency);
-            var maxFreq = group.Max(x => x.Frequency);
-            var spread = maxFreq - minFreq;
-            
-            if (spread <= 2.4 + 1e-9)  // Small epsilon for floating point safety
+            // FrequencyHop: channels too spread for a single window — one bank per channel, cycle through each
+            foreach (var ch in sorted)
             {
-                // FastScan mode: all frequencies fit in 2.4 MHz window
-                var center = (minFreq + maxFreq) / 2.0;
-                var frequencies = group.Select(x => x.Frequency).ToList();
-                
-                _logger.LogInformation($"ScanBank FastScan: {minFreq:F3}-{maxFreq:F3} MHz (spread: {spread:F2} MHz)");
-                
+                _logger.LogInformation($"ScanBank FrequencyHop: {ch.Frequency:F3} MHz");
                 banks.Add(new ScanBank
                 {
-                    CenterFrequency = center,
-                    Frequencies = frequencies,
-                    SpreadMHz = spread,
-                    Mode = ScanMode.FastScan,
+                    CenterFrequency = ch.Frequency,
+                    Frequencies = new List<double> { ch.Frequency },
+                    SpreadMHz = 0,
+                    Mode = ScanMode.FrequencyHop,
                     DwellTimeMs = 1500
                 });
-            }
-            else
-            {
-                // Span exceeds 2.4 MHz: greedily split into max-2.4 MHz FastScan sub-banks.
-                // Channels that fit together are scanned simultaneously; the loop hops between sub-banks.
-                // e.g. [155.0, 155.9, 158.4] → FastScan[155.0,155.9] + FastScan[158.4]
-                var subBankChannels = new List<List<Channel>>();
-                var currentSubBank = new List<Channel> { group[0] };
-
-                for (int i = 1; i < group.Count; i++)
-                {
-                    var c = group[i];
-                    if (c.Frequency - currentSubBank[0].Frequency <= 2.4 + 1e-9)
-                    {
-                        currentSubBank.Add(c);
-                    }
-                    else
-                    {
-                        subBankChannels.Add(currentSubBank);
-                        currentSubBank = new List<Channel> { c };
-                    }
-                }
-                subBankChannels.Add(currentSubBank);
-
-                foreach (var subBank in subBankChannels)
-                {
-                    var subMin = subBank.Min(x => x.Frequency);
-                    var subMax = subBank.Max(x => x.Frequency);
-                    var subSpread = subMax - subMin;
-                    var subCenter = (subMin + subMax) / 2.0;
-
-                    _logger.LogInformation($"ScanBank FastScan: {subMin:F3}-{subMax:F3} MHz (spread: {subSpread:F2} MHz)");
-
-                    banks.Add(new ScanBank
-                    {
-                        CenterFrequency = subCenter,
-                        Frequencies = subBank.Select(x => x.Frequency).ToList(),
-                        SpreadMHz = subSpread,
-                        Mode = ScanMode.FastScan,
-                        DwellTimeMs = 1500
-                    });
-                }
             }
         }
         
