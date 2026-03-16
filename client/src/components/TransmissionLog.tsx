@@ -426,13 +426,14 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                 <ListItemText 
                     sx={{ pr: 20 }}
                     primary={
-                        <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
-                            <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#aaa' }}>
+                        <Box display="flex" alignItems="center" gap={0.75} flexWrap="wrap">
+                            <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#666', fontSize: '0.72rem' }}>
                                 {(() => {
                                     const d = new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z');
                                     return `${d.toLocaleDateString([], { year: 'numeric', month: '2-digit', day: '2-digit' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
                                 })()}
                             </Typography>
+                            <Typography variant="caption" sx={{ color: '#444', fontSize: '0.65rem' }}>|</Typography>
                             <Typography variant="caption" sx={{ color: '#fff', fontWeight: 'bold', fontSize: '0.8rem' }}>
                                 {log.alphaTag}
                             </Typography>
@@ -442,9 +443,12 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                                 </Typography>
                             )}
                             {log.duration && (
-                                <Typography variant="caption" sx={{ color: '#555', fontSize: '9px' }}>
-                                    {log.duration.toFixed(1)}s
-                                </Typography>
+                                <>
+                                    <Typography variant="caption" sx={{ color: '#444', fontSize: '0.65rem' }}>|</Typography>
+                                    <Typography variant="caption" sx={{ color: '#555', fontSize: '0.72rem', fontFamily: 'monospace' }}>
+                                        {log.duration.toFixed(1)}s
+                                    </Typography>
+                                </>
                             )}
                         </Box>
                     }
