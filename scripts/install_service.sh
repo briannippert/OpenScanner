@@ -342,23 +342,19 @@ if ! command -v jq &> /dev/null; then
 fi
 
 if [ "${SKIP_POWERDMS:-false}" = false ]; then
-    echo ""
-    read -r -p "$(echo -e "${BLUE}[INFO]${NC} Enable PowerDMS daily log integration? [y/N] ")" POWERDMS_ENABLE
-    if [[ "$POWERDMS_ENABLE" =~ ^[Yy]$ ]]; then
+    CURRENT_DEPT=$(jq -r '.PowerDMS.Department // ""' "$APPSETTINGS" 2>/dev/null || echo "")
+    if [ -z "$CURRENT_DEPT" ]; then
         echo ""
-        read -r -p "$(echo -e "${BLUE}[INFO]${NC} Enter your PowerDMS department slug: ")" POWERDMS_DEPT
+        read -r -p "$(echo -e "${BLUE}[INFO]${NC} Enter your PowerDMS department slug (leave empty to skip): ")" POWERDMS_DEPT
         if [ -n "$POWERDMS_DEPT" ]; then
             UPDATED=$(jq --arg dept "$POWERDMS_DEPT" '.PowerDMS.Department = $dept' "$APPSETTINGS")
             echo "$UPDATED" > "$APPSETTINGS"
             log_success "PowerDMS integration enabled for department: $POWERDMS_DEPT"
         else
-            log_warn "No department entered. Skipping PowerDMS configuration."
+            log_info "No PowerDMS department entered. Skipping PowerDMS configuration."
         fi
     else
-        # Clear any previously configured department
-        UPDATED=$(jq '.PowerDMS.Department = ""' "$APPSETTINGS")
-        echo "$UPDATED" > "$APPSETTINGS"
-        log_info "PowerDMS integration disabled."
+        log_info "PowerDMS integration already configured for department: $CURRENT_DEPT"
     fi
 fi
 
