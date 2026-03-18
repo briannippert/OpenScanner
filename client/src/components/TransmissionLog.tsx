@@ -11,7 +11,8 @@ import {
     Divider, 
     TextField, 
     CircularProgress,
-    InputAdornment
+    InputAdornment,
+    Tooltip
 } from '@mui/material';
 import { 
     ExpandLess, 
@@ -27,7 +28,8 @@ import {
     CalendarMonth,
     Today,
     Radio,
-    History as HistoryIcon
+    History as HistoryIcon,
+    Article
 } from '@mui/icons-material';
 import type { CallLog, Channel } from '../types';
 
@@ -52,6 +54,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     const [loading, setLoading] = useState(false);
     const [recentOpen, setRecentOpen] = useState(true);
     const [favoritesRefreshKey, setFavoritesRefreshKey] = useState(0);
+    const [powerDmsDept, setPowerDmsDept] = useState<string | null>(null);
 
     const handleFavoriteToggle = () => setFavoritesRefreshKey(k => k + 1);
 
@@ -61,6 +64,14 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
             .then(res => res.json())
             .then(data => setYears(data))
             .catch(err => console.error("Failed to fetch years:", err));
+    }, []);
+
+    // Fetch PowerDMS config once on mount
+    useEffect(() => {
+        fetch('/api/powerdms/config')
+            .then(res => res.json())
+            .then(data => setPowerDmsDept(data.department ?? null))
+            .catch(() => setPowerDmsDept(null));
     }, []);
 
     // Search handler
@@ -158,7 +169,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
 
                         {/* Historical Tree */}
                         {years.map(year => (
-                            <YearNode key={year} year={year} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
+                            <YearNode key={year} year={year} powerDmsDept={powerDmsDept} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
                         ))}
                     </List>
                 )}
@@ -202,7 +213,7 @@ const FavoritesNode = ({ refreshKey, playingId, onPlay, onDelete, onFavoriteTogg
     );
 };
 
-const YearNode = ({ year, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string } & LogNodeProps) => {
+const YearNode = ({ year, powerDmsDept, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string; powerDmsDept: string | null } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
     const [months, setMonths] = useState<string[]>([]);
     const [loaded, setLoaded] = useState(false);
@@ -230,7 +241,7 @@ const YearNode = ({ year, playingId, onPlay, onDelete, onFavoriteToggle }: { yea
             <Collapse in={open} timeout="auto" unmountOnExit>
                 <List component="div" disablePadding>
                     {months.map(month => (
-                        <MonthNode key={month} year={year} month={month} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle} />
+                        <MonthNode key={month} year={year} month={month} powerDmsDept={powerDmsDept} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle} />
                     ))}
                 </List>
             </Collapse>
@@ -238,7 +249,7 @@ const YearNode = ({ year, playingId, onPlay, onDelete, onFavoriteToggle }: { yea
     );
 };
 
-const MonthNode = ({ year, month, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string; month: string } & LogNodeProps) => {
+const MonthNode = ({ year, month, powerDmsDept, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string; month: string; powerDmsDept: string | null } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
     const [days, setDays] = useState<string[]>([]);
     const [loaded, setLoaded] = useState(false);
@@ -269,7 +280,7 @@ const MonthNode = ({ year, month, playingId, onPlay, onDelete, onFavoriteToggle 
             <Collapse in={open} timeout="auto" unmountOnExit>
                 <List component="div" disablePadding>
                     {days.map(day => (
-                        <DayNode key={day} year={year} month={month} day={day} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle} />
+                        <DayNode key={day} year={year} month={month} day={day} powerDmsDept={powerDmsDept} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle} />
                     ))}
                 </List>
             </Collapse>
@@ -277,10 +288,20 @@ const MonthNode = ({ year, month, playingId, onPlay, onDelete, onFavoriteToggle 
     );
 };
 
-const DayNode = ({ year, month, day, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string; month: string; day: string } & LogNodeProps) => {
+const DayNode = ({ year, month, day, powerDmsDept, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string; month: string; day: string; powerDmsDept: string | null } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
     const [channels, setChannels] = useState<Channel[]>([]);
     const [loaded, setLoaded] = useState(false);
+    const [logExists, setLogExists] = useState<boolean | null>(null);
+
+    // Check whether a PowerDMS daily log exists for this date
+    useEffect(() => {
+        if (!powerDmsDept) return;
+        fetch(`/api/powerdms/check/${year}/${month}/${day}`)
+            .then(res => res.json())
+            .then(data => setLogExists(data.exists ?? false))
+            .catch(() => setLogExists(false));
+    }, [powerDmsDept, year, month, day]);
 
     const handleToggle = () => {
         if (!open && !loaded) {
@@ -295,11 +316,30 @@ const DayNode = ({ year, month, day, playingId, onPlay, onDelete, onFavoriteTogg
         setOpen(!open);
     };
 
+    const handleOpenDailyLog = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        window.open(`/api/powerdms/daily-log/${year}/${month}/${day}`, '_blank');
+    };
+
     return (
         <>
             <ListItemButton onClick={handleToggle} sx={{ pl: 6, borderBottom: '1px solid #1a1a1a' }}>
                 <Today sx={{ mr: 2, color: '#444', fontSize: 18 }} />
                 <ListItemText primary={`Day ${day}`} />
+                {powerDmsDept && logExists !== null && (
+                    <Tooltip title={logExists ? 'Open PowerDMS Daily Log' : 'No daily log available for this date'} arrow>
+                        <span>
+                            <IconButton
+                                size="small"
+                                onClick={handleOpenDailyLog}
+                                disabled={!logExists}
+                                sx={{ mr: 0.5 }}
+                            >
+                                <Article sx={{ color: logExists ? '#4a90d9' : '#444', fontSize: 18 }} />
+                            </IconButton>
+                        </span>
+                    </Tooltip>
+                )}
                 {open ? <ExpandLess /> : <ExpandMore />}
             </ListItemButton>
             <Collapse in={open} timeout="auto" unmountOnExit>

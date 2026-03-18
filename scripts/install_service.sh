@@ -323,8 +323,46 @@ else
 fi
 
 # ----------------------------------------------------------------
-# 6. Service Installation
+# 5a. PowerDMS Integration (Optional)
 # ----------------------------------------------------------------
+log_step "PowerDMS Integration..."
+
+APPSETTINGS="$PROJECT_ROOT/server/OpenScanner.Server/appsettings.json"
+
+# Ensure jq is available for JSON editing
+if ! command -v jq &> /dev/null; then
+    log_info "Installing jq for JSON configuration..."
+    if command -v apt-get &> /dev/null; then
+        sudo apt-get install -y -qq jq
+        log_success "jq installed."
+    else
+        log_warn "Could not install jq automatically. Skipping PowerDMS configuration."
+        SKIP_POWERDMS=true
+    fi
+fi
+
+if [ "${SKIP_POWERDMS:-false}" = false ]; then
+    echo ""
+    read -r -p "$(echo -e "${BLUE}[INFO]${NC} Enable PowerDMS daily log integration? [y/N] ")" POWERDMS_ENABLE
+    if [[ "$POWERDMS_ENABLE" =~ ^[Yy]$ ]]; then
+        echo ""
+        read -r -p "$(echo -e "${BLUE}[INFO]${NC} Enter your PowerDMS department slug: ")" POWERDMS_DEPT
+        if [ -n "$POWERDMS_DEPT" ]; then
+            UPDATED=$(jq --arg dept "$POWERDMS_DEPT" '.PowerDMS.Department = $dept' "$APPSETTINGS")
+            echo "$UPDATED" > "$APPSETTINGS"
+            log_success "PowerDMS integration enabled for department: $POWERDMS_DEPT"
+        else
+            log_warn "No department entered. Skipping PowerDMS configuration."
+        fi
+    else
+        # Clear any previously configured department
+        UPDATED=$(jq '.PowerDMS.Department = ""' "$APPSETTINGS")
+        echo "$UPDATED" > "$APPSETTINGS"
+        log_info "PowerDMS integration disabled."
+    fi
+fi
+
+
 log_step "Configuring Systemd Service..."
 SERVICE_FILE="/etc/systemd/system/openscanner.service"
 NET_EXEC="$PROJECT_ROOT/server/OpenScanner.Server/bin/Release/net10.0/publish/OpenScanner.Server"
