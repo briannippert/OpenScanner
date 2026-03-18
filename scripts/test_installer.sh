@@ -61,8 +61,8 @@ rm -rf server/OpenScanner.Server/bin server/OpenScanner.Server/obj
 
 # 1. Run Installer
 log_info "Step 1: Running install_service.sh..."
-# Run as current user!
-if "$SCRIPT_DIR/install_service.sh"; then
+# Pipe "n" to skip the PowerDMS integration prompt so the test runs non-interactively
+if echo "n" | "$SCRIPT_DIR/install_service.sh"; then
     log_success "Installer script finished successfully."
 else
     log_error "Installer script failed."
