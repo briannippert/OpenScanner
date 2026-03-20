@@ -793,8 +793,12 @@ public class RtlDevice : BackgroundService, IRadioSource
             _currentDecoder = null;
         }
         
-        // Don't clear pre-roll buffer here - we want to maintain history
-        // across decoder switches and transmission starts. It will self-regulate by max size.
+        // Clear the pre-roll buffer when leaving a channel so that stale audio from
+        // the outgoing frequency cannot bleed into the next transmission's recording.
+        lock (_preRollBuffer)
+        {
+            _preRollBuffer.Clear();
+        }
     }
 
     private void StartDecoding(Channel channel)
@@ -910,6 +914,12 @@ public class RtlDevice : BackgroundService, IRadioSource
         if (!_recordingService.IsRecording)
         {
             _recordingService.StartRecording(originChannel, src, tgt, _preRollBuffer);
+            // Clear the pre-roll buffer after flushing it into the recording so that
+            // subsequent transmissions do not inherit audio from this one.
+            lock (_preRollBuffer)
+            {
+                _preRollBuffer.Clear();
+            }
         }
 
         ResetActivityTimeout();

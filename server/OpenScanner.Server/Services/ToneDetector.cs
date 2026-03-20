@@ -25,6 +25,11 @@ public class ToneDetector
     public event Action<FireToneSet>? OnToneDetected;
 
     /// <summary>
+    /// Number of tone sets currently loaded. Useful for test synchronization after ReloadTones.
+    /// </summary>
+    public int ToneCount => _activeToneSets.Count;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="ToneDetector"/> class.
     /// </summary>
     /// <param name="db">Database interface.</param>
