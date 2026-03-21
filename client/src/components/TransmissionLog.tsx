@@ -58,6 +58,11 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
 
     const handleFavoriteToggle = () => setFavoritesRefreshKey(k => k + 1);
 
+    const handleDelete = (id: string) => {
+        setSearchResults(prev => prev ? prev.filter(log => log.id !== id) : null);
+        onDelete(id);
+    };
+
     // Initial load of years
     useEffect(() => {
         fetch('/api/history/years')
@@ -140,7 +145,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                             </Typography>
                         )}
                         {searchResults.map(log => (
-                            <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
+                            <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={handleFavoriteToggle} />
                         ))}
                     </List>
                 ) : (
@@ -190,6 +195,11 @@ const FavoritesNode = ({ refreshKey, playingId, onPlay, onDelete, onFavoriteTogg
             .catch(err => console.error('Failed to fetch favorites:', err));
     }, [open, refreshKey]);
 
+    const handleDelete = (id: string) => {
+        setLogs(prev => prev.filter(log => log.id !== id));
+        onDelete(id);
+    };
+
     return (
         <>
             <ListItemButton onClick={() => setOpen(!open)} sx={{ borderBottom: '1px solid #1a1a1a', bgcolor: 'rgba(255, 204, 0, 0.05)' }}>
@@ -205,7 +215,7 @@ const FavoritesNode = ({ refreshKey, playingId, onPlay, onDelete, onFavoriteTogg
                         </Typography>
                     )}
                     {logs.map(log => (
-                        <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle} />
+                        <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={onFavoriteToggle} />
                     ))}
                 </List>
             </Collapse>
@@ -376,6 +386,11 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete, o
         setOpen(!open);
     };
 
+    const handleDelete = (id: string) => {
+        setLogs(prev => prev.filter(log => log.id !== id));
+        onDelete(id);
+    };
+
     return (
         <>
             <ListItemButton onClick={handleToggle} sx={{ pl: { xs: 4, sm: 8 }, borderBottom: '1px solid #1a1a1a', bgcolor: open ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
@@ -391,7 +406,7 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete, o
             <Collapse in={open} timeout="auto" unmountOnExit>
                 <List component="div" disablePadding>
                     {logs.map(log => (
-                        <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle} />
+                        <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={onFavoriteToggle} />
                     ))}
                 </List>
             </Collapse>

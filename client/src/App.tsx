@@ -365,8 +365,12 @@ function App() {
 
   const deleteEntry = async (id: string) => {
     try {
-        await fetch(`/api/history/${id}`, { method: 'DELETE' });
-        setCallLog(prev => prev.filter(log => log.id !== id));
+        const response = await fetch(`/api/history/${id}`, { method: 'DELETE' });
+        if (response.ok) {
+            setCallLog(prev => prev.filter(log => log.id !== id));
+        } else {
+            console.error("Delete failed with status:", response.status);
+        }
     } catch (e) {
         console.error("Delete failed:", e);
     }
