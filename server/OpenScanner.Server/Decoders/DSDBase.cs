@@ -170,6 +170,9 @@ public abstract class DSDBase : IDecoder
             line.Contains("TDU") || // P25 Terminator
             (line.Contains("P25") && !line.Contains("TSBK")) || 
             line.Contains("CTCSS") || line.Contains("DCS") || line.Contains("ANALOG") ||
+            line.Contains("Slot 1") || line.Contains("Slot 2") || // DMR time slots
+            line.Contains("CACH") || // DMR Common Announcement Channel Header
+            (line.Contains("DMR") && !line.Contains("SYNC")) || // DMR voice/data frames
             line.Contains("MDC1200");
 
         if (isActivity)
@@ -206,6 +209,11 @@ public abstract class DSDBase : IDecoder
             else if (line.Contains("Tgt:"))
             {
                 var parts = line.Split("Tgt:");
+                if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var t)) tgt = t;
+            }
+            else if (line.Contains("Dst:")) // DMR destination talkgroup
+            {
+                var parts = line.Split("Dst:");
                 if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var t)) tgt = t;
             }
 

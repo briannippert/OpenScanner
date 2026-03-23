@@ -16,6 +16,7 @@ public class DecoderFactory : IDecoderFactory
         return (mode?.ToUpper()) switch
         {
             "P25" => _serviceProvider.GetRequiredService<P25>(),
+            "DMR" => _serviceProvider.GetRequiredService<DMR>(),
             "NFM" => _serviceProvider.GetRequiredService<NFM>(),
             "FM" => _serviceProvider.GetRequiredService<NFM>(),
             "AM" => _serviceProvider.GetRequiredService<AM>(),

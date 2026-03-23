@@ -9,6 +9,9 @@ export interface Channel {
     mode: string;
     tag: string;
     avoid: boolean;
+    dmrSlot?: number;
+    dmrColorCode?: number;
+    dmrTalkgroup?: number;
 }
 
 export interface ScannerState {
@@ -37,6 +40,7 @@ export interface ScannerState {
     lastTranscription?: string;
     sourceID?: number;
     targetID?: number;
+    speakerChain?: string;
     currentTone?: string;
     lastDetectedTone?: string;
 }
@@ -54,6 +58,7 @@ export interface CallLog {
     transcription?: string;
     sourceID?: number;
     targetID?: number;
+    speakerChain?: string;
     detectedTone?: string;
     isFavorite?: boolean;
 }

@@ -36,5 +36,8 @@ CREATE TABLE IF NOT EXISTS channels (
     lat REAL,
     lon REAL,
     range REAL,
-    avoid INTEGER DEFAULT 0
+    avoid INTEGER DEFAULT 0,
+    dmrSlot INTEGER,
+    dmrColorCode INTEGER,
+    dmrTalkgroup INTEGER
 );

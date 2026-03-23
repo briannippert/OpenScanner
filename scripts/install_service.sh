@@ -68,6 +68,18 @@ fi
 # ----------------------------------------------------------------
 log_step "Updating Repository..."
 if git remote get-url origin &> /dev/null; then
+    # npm install (run by the .NET build) may modify package-lock.json.
+    # If the only locally modified files are package.json / package-lock.json,
+    # restore them so git pull can apply upstream changes cleanly.
+    CHANGED_FILES=$(git diff --name-only 2>/dev/null)
+    if [ -n "$CHANGED_FILES" ]; then
+        NON_PKG=$(echo "$CHANGED_FILES" | grep -v "^client/package\.json$" | grep -v "^client/package-lock\.json$")
+        if [ -z "$NON_PKG" ]; then
+            log_info "Resetting auto-modified package files before update..."
+            git checkout -- client/package.json client/package-lock.json 2>/dev/null || true
+        fi
+    fi
+
     if git pull origin main; then
         log_success "Code pulled successfully."
     else
@@ -78,7 +90,7 @@ else
 fi
 
 # ----------------------------------------------------------------
-# 3. Dependency Checks (Node.js for Client, .NET for Server)
+# 3. Dependency Checks (Node.js for .NET build, .NET SDK)
 # ----------------------------------------------------------------
 log_step "Checking Environment..."
 
@@ -126,7 +138,7 @@ if ! command -v nbgv &> /dev/null; then
     dotnet tool install -g nbgv
 fi
 
-# --- Check Node.js (For Client Build) ---
+# --- Check Node.js (Required for .NET client build step) ---
 NODE_PATH=$(which node || true)
 
 if [ -z "$NODE_PATH" ]; then
@@ -281,38 +293,7 @@ fi
 # ----------------------------------------------------------------
 log_step "Building Application..."
 
-# Build Client
-log_info "Building Client..."
-cd "$PROJECT_ROOT/client"
-if [ -f "package-lock.json" ] && [ -n "$NODE_PATH" ]; then
-    # Sync version if nbgv is available
-    if command -v nbgv &> /dev/null; then
-        if NPM_VER=$(nbgv get-version -v NpmPackageVersion 2>/dev/null); then
-            npm version "$NPM_VER" --no-git-tag-version --silent || true
-            log_info "Synced package.json to version $NPM_VER"
-        fi
-    fi
-
-    # Try npm ci, fallback to npm install if it fails
-    if ! npm ci --silent; then
-        log_warn "npm ci failed, falling back to npm install..."
-        npm install --silent
-    fi
-    
-    # Fix permissions for binaries
-    chmod +x node_modules/.bin/* || true
-
-    if npm run build; then
-        log_success "Client built."
-    else
-        log_error "Client build failed."
-        exit 1
-    fi
-else
-    log_warn "Skipping Client build (Node missing or no package.json)"
-fi
-
-# Build Server (.NET)
+# Build Server (.NET) — the .NET build also compiles the React client
 log_info "Building Server (.NET)..."
 cd "$PROJECT_ROOT/server/OpenScanner.Server"
 if dotnet build -c Release -o bin/Release/net10.0/publish; then

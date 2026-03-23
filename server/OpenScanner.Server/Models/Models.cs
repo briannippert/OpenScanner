@@ -72,9 +72,24 @@ public class Channel
     /// </summary>
     public bool Avoid { get; set; }
 
+    /// <summary>
+    /// DMR time slot (1 or 2). Only applicable when Mode is "DMR".
+    /// </summary>
+    public int? DmrSlot { get; set; }
+
+    /// <summary>
+    /// DMR color code (0–15). Only applicable when Mode is "DMR".
+    /// </summary>
+    public int? DmrColorCode { get; set; }
+
+    /// <summary>
+    /// DMR talkgroup ID to monitor. Only applicable when Mode is "DMR".
+    /// </summary>
+    public int? DmrTalkgroup { get; set; }
+
     public Channel() { }
 
-    public Channel(double frequency, string alphaTag, string description, string mode = "P25", string type = "RM", string tone = "", string tag = "", string license = "", bool avoid = false)
+    public Channel(double frequency, string alphaTag, string description, string mode = "P25", string type = "RM", string tone = "", string tag = "", string license = "", bool avoid = false, int? dmrSlot = null, int? dmrColorCode = null, int? dmrTalkgroup = null)
     {
         Frequency = frequency;
         AlphaTag = alphaTag;
@@ -85,6 +100,9 @@ public class Channel
         Tag = tag;
         License = license;
         Avoid = avoid;
+        DmrSlot = dmrSlot;
+        DmrColorCode = dmrColorCode;
+        DmrTalkgroup = dmrTalkgroup;
     }
 }
 
@@ -142,6 +160,11 @@ public class CallLog
     /// P25 Talkgroup ID.
     /// </summary>
     public int? TargetID { get; set; }
+
+    /// <summary>
+    /// Ordered chain of speaker IDs for the call, e.g. "12345 → 67890 → 12345".
+    /// </summary>
+    public string? SpeakerChain { get; set; }
     
     /// <summary>
     /// Filename of the audio recording (relative to /audio).
@@ -171,7 +194,7 @@ public class CallLog
 
     public CallLog() { }
 
-    public CallLog(string id, string timestamp, double frequency, string alphaTag, string description, double? lat, double? lon, string? audioPath, double? duration, string? transcription = null, int? sourceID = null, int? targetID = null, string? detectedTone = null)
+    public CallLog(string id, string timestamp, double frequency, string alphaTag, string description, double? lat, double? lon, string? audioPath, double? duration, string? transcription = null, int? sourceID = null, int? targetID = null, string? detectedTone = null, string? speakerChain = null)
     {
         Id = id;
         Timestamp = timestamp;
@@ -186,6 +209,7 @@ public class CallLog
         SourceID = sourceID;
         TargetID = targetID;
         DetectedTone = detectedTone;
+        SpeakerChain = speakerChain;
     }
 }
 
@@ -309,6 +333,7 @@ public record ScannerState(
     string? LastTranscription = null,
     int? SourceID = null,
     int? TargetID = null,
+    string? SpeakerChain = null,
     string? CurrentTone = null,
     string? LastDetectedTone = null
 );

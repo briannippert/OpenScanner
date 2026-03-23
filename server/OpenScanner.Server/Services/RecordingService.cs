@@ -17,6 +17,7 @@ public class RecordingService : IRecordingService
     private long _recordingStartTime;
     private int? _currentSourceID;
     private int? _currentTargetID;
+    private readonly List<int> _speakerList = new();
 
     public event Action<CallLog>? OnNewLog;
 
@@ -40,9 +41,22 @@ public class RecordingService : IRecordingService
         _gpsService = gpsService;
     }
 
+    public void UpdateSourceTarget(int? src, int? tgt)
+    {
+        if (src.HasValue) _currentSourceID = src;
+        if (tgt.HasValue) _currentTargetID = tgt;
+    }
+
+    public void AppendSpeaker(int src)
+    {
+        if (_speakerList.Count == 0 || _speakerList[^1] != src)
+            _speakerList.Add(src);
+    }
+
     public void StartRecording(Channel channel, int? src, int? tgt, LinkedList<byte[]> preRollBuffer)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
         var filename = $"rec_{now}_{channel.Frequency}.raw";
         
         // Ensure data dir exists
@@ -59,6 +73,8 @@ public class RecordingService : IRecordingService
             _recordingStartTime = now;
             _currentSourceID = src;
             _currentTargetID = tgt;
+            _speakerList.Clear();
+            if (src.HasValue) _speakerList.Add(src.Value);
 
             try 
             {
@@ -106,6 +122,7 @@ public class RecordingService : IRecordingService
     {
         string? recordingPath;
         long startTime;
+        string? speakerChain;
         
         lock (_audioLock)
         {
@@ -114,6 +131,9 @@ public class RecordingService : IRecordingService
             _recordingStream = null;
             recordingPath = _currentRecordingPath;
             startTime = _recordingStartTime;
+            speakerChain = _speakerList.Count > 1
+                ? string.Join(" → ", _speakerList)
+                : null;
         }
 
         var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
@@ -193,8 +213,8 @@ public class RecordingService : IRecordingService
                  var lon = gps?.Lon ?? 0;
 
                  var log = new CallLog(
-                      $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
-                      DateTime.UtcNow.ToString("o"),
+                      $"log_{startTime}",
+                      DateTimeOffset.FromUnixTimeMilliseconds(startTime).UtcDateTime.ToString("o"),
                       channel.Frequency,
                       channel.AlphaTag,
                       channel.Description,
@@ -205,7 +225,8 @@ public class RecordingService : IRecordingService
                       transcription,
                       _currentSourceID,
                       _currentTargetID,
-                      lastDetectedTone
+                      lastDetectedTone,
+                      speakerChain
                   );
                  
                   

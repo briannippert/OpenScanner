@@ -179,7 +179,7 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                     }}
                                 />
                             )}
-                            {state.currentTone && state.currentTone !== 'ANALOG' && (
+                            {state.currentTone && state.currentTone !== 'ANALOG' && state.currentTone !== 'EMRG' && (
                                 <Chip 
                                     label={state.currentTone} 
                                     size="small" 
@@ -190,6 +190,23 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                         color: '#00ffff', 
                                         fontFamily: 'monospace' 
                                     }} 
+                                />
+                            )}
+                            {state.currentTone === 'EMRG' && (
+                                <Chip
+                                    label="! EMERGENCY"
+                                    size="small"
+                                    sx={{
+                                        height: 22,
+                                        fontSize: '0.75rem',
+                                        fontWeight: 'bold',
+                                        fontFamily: 'monospace',
+                                        letterSpacing: 1,
+                                        bgcolor: '#ff0000',
+                                        color: '#ffffff',
+                                        animation: 'pulse 0.6s infinite alternate',
+                                        border: '1px solid #ff6666',
+                                    }}
                                 />
                             )}
                             {state.lastDetectedTone && (
@@ -208,15 +225,18 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                 />
                             )}
                         </Box>
-                        {isReceiving && state.sourceID && (
+                        {isReceiving && (state.speakerChain || state.sourceID || state.targetID) && (
                             <Typography variant="caption" sx={{ 
-                                color: state.sourceID < 100 ? '#00ffff' : '#ffaa00', 
+                                color: '#ffaa00', 
                                 fontWeight: 'bold',
                                 mt: 0.5,
                                 display: 'block',
+                                fontFamily: 'monospace',
                                 letterSpacing: 1
                             }}>
-                                {state.sourceID < 100 ? `[BASE]` : `[UNIT ${state.sourceID}]`}
+                                {state.speakerChain
+                                    ? `${state.speakerChain} → TG ${state.targetID ?? '?'}`
+                                    : `${state.sourceID ?? '?'} → TG ${state.targetID ?? '?'}`}
                             </Typography>
                         )}
                             </>

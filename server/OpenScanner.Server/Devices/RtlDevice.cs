@@ -751,10 +751,11 @@ public class RtlDevice : BackgroundService, IRadioSource
             StartDecoding(channel);
         });
 
-        // Safety timeout
+        // Safety timeout — DMR needs more time to sync (TDMA framing + AMBE vocoder)
         if (!_manualOverride)
         {
-            RestartSessionTimeout(10000); // 10s to hear something (sync up)
+            int initialTimeout = channel.Mode == "DMR" ? 20000 : 10000;
+            RestartSessionTimeout(initialTimeout);
         }
     }
 
@@ -804,6 +805,9 @@ public class RtlDevice : BackgroundService, IRadioSource
     private void StartDecoding(Channel channel)
     {
         StopDecoding();
+
+        // Reset per-call state for the new channel.
+        UpdateState(_state with { SourceID = null, TargetID = null, SpeakerChain = null });
         
         _decodeCts = new CancellationTokenSource();
         var token = _decodeCts.Token;
@@ -840,7 +844,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             };
 
             _currentDecoder.OnActivity += (src, tgt, tone) => HandleActivity(channel, src, tgt, tone);
-            _currentDecoder.OnMetadata += (line) => _logger.LogDebug($"Decoder: {line}");
+            _currentDecoder.OnMetadata += (line) => _logger.LogInformation($"Decoder: {line}");
 
             // Start safely
             Task.Run(async () => 
@@ -896,6 +900,18 @@ public class RtlDevice : BackgroundService, IRadioSource
         // STRICT ATTRIBUTION: Ignore activity if we have moved to a different channel
         if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - originChannel.Frequency) > 0.001) return;
 
+        // Capture the previous source ID before UpdateState overwrites it.
+        var prevSourceID = _state.SourceID;
+
+        // Build the live speaker chain for the UI: append when the talker changes.
+        string? updatedChain = _state.SpeakerChain;
+        if (src.HasValue && src != prevSourceID)
+        {
+            updatedChain = updatedChain == null
+                ? src.Value.ToString()
+                : $"{updatedChain} → {src.Value}";
+        }
+
         // Valid Activity detected
         if (_state.Status != "RECEIVING" || 
             (src.HasValue && _state.SourceID != src) || 
@@ -904,11 +920,17 @@ public class RtlDevice : BackgroundService, IRadioSource
             UpdateState(_state with { 
                 Status = "RECEIVING", 
                 SourceID = src ?? _state.SourceID, 
-                TargetID = tgt ?? _state.TargetID, 
+                TargetID = tgt ?? _state.TargetID,
+                SpeakerChain = updatedChain,
                 CurrentTone = tone ?? _state.CurrentTone,
                 LastTranscription = null 
             });
         }
+
+        // Emergency calls route the tone to _lastDetectedTone so it is persisted
+        // to the DB (normally only fire tones flow through that path).
+        if (tone == "EMRG")
+            _lastDetectedTone = "EMRG";
         
         // Start recording if not already started
         if (!_recordingService.IsRecording)
@@ -920,6 +942,23 @@ public class RtlDevice : BackgroundService, IRadioSource
             {
                 _preRollBuffer.Clear();
             }
+        }
+        else if (src.HasValue)
+        {
+            if (!prevSourceID.HasValue)
+            {
+                // Late-arriving IDs — first activity event fired before dsd-fme emitted TGT/SRC.
+                _recordingService.UpdateSourceTarget(src, tgt);
+            }
+            else if (src != prevSourceID)
+            {
+                // Talker changed — append to the speaker chain within the same recording.
+                _recordingService.AppendSpeaker(src.Value);
+            }
+        }
+        else if (tgt.HasValue && !prevSourceID.HasValue)
+        {
+            _recordingService.UpdateSourceTarget(null, tgt);
         }
 
         ResetActivityTimeout();
