@@ -897,6 +897,10 @@ public class RtlDevice : BackgroundService, IRadioSource
         // STRICT ATTRIBUTION: Ignore activity if we have moved to a different channel
         if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - originChannel.Frequency) > 0.001) return;
 
+        // Capture IDs BEFORE UpdateState overwrites them — needed for split detection below.
+        var prevSourceID = _state.SourceID;
+        var prevTargetID = _state.TargetID;
+
         // Valid Activity detected
         if (_state.Status != "RECEIVING" || 
             (src.HasValue && _state.SourceID != src) || 
@@ -927,19 +931,20 @@ public class RtlDevice : BackgroundService, IRadioSource
                 _preRollBuffer.Clear();
             }
         }
-        else if (src.HasValue && tgt.HasValue && _state.SourceID.HasValue && _state.TargetID.HasValue
-                 && (src != _state.SourceID || tgt != _state.TargetID))
+        else if (src.HasValue && tgt.HasValue && prevSourceID.HasValue && prevTargetID.HasValue
+                 && (src != prevSourceID || tgt != prevTargetID))
         {
             // SRC/TG changed while recording — a new talker or talkgroup is active.
             // Close the current transmission and open a fresh one so each gets its own log entry.
+            // Use prevSourceID/prevTargetID for the comparison: _state was already updated above.
             _recordingService.StopRecording(originChannel, _lastDetectedTone);
             _lastDetectedTone = null;
             _recordingService.StartRecording(originChannel, src, tgt, new LinkedList<byte[]>());
         }
-        else if (src.HasValue || tgt.HasValue)
+        else if ((src.HasValue || tgt.HasValue) && !prevSourceID.HasValue)
         {
-            // Update IDs mid-recording — the first activity event (sync line) often
-            // fires before dsd-fme emits the TGT/SRC line, so the IDs arrive late.
+            // Late-arriving IDs — the first activity event (sync line) fired before dsd-fme
+            // emitted the TGT/SRC line. Only update when the recording has no confirmed IDs yet.
             _recordingService.UpdateSourceTarget(src, tgt);
         }
 
