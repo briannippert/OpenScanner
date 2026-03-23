@@ -34,10 +34,11 @@ public class DMR : DSDBase
 
     protected override void ParseMetadata(string line)
     {
-        // Detect which DMR slot this line belongs to
+        // Detect which DMR slot this line belongs to.
+        // dsd-fme emits "SLOT 1" / "SLOT 2" (all caps).
         int? lineSlot = null;
-        if (line.Contains("Slot 1")) lineSlot = 1;
-        else if (line.Contains("Slot 2")) lineSlot = 2;
+        if (line.Contains("SLOT 1")) lineSlot = 1;
+        else if (line.Contains("SLOT 2")) lineSlot = 2;
 
         // Filter by configured slot — skip lines from the wrong slot
         if (_channel?.DmrSlot.HasValue == true && lineSlot.HasValue && lineSlot != _channel.DmrSlot)
@@ -47,20 +48,27 @@ public class DMR : DSDBase
         // early and the session timeout gets reset while dsd-fme is still syncing.
         bool isActivity =
             line.Contains("Voice") ||
-            line.Contains("Slot 1") || line.Contains("Slot 2") ||
+            line.Contains("SLOT 1") || line.Contains("SLOT 2") ||
             line.Contains("CACH") ||
-            line.Contains("LC:") ||       // Link Control — present during sync lock
-            line.Contains("MFID:") ||     // Manufacturer ID — present in voice header
-            line.Contains("Sync:") ||     // dsd-fme sync lock line
-            line.Contains("SYNC") ||      // alternate sync format
-            (line.Contains("DMR") && !line.Contains("dsd-fme")); // avoid matching our own log lines
+            line.Contains("LC:") ||
+            line.Contains("MFID:") ||
+            line.Contains("Sync:") ||
+            line.Contains("Group Call") ||
+            line.Contains("Private Call") ||
+            (line.Contains("DMR") && !line.Contains("dsd-fme"));
 
         if (!isActivity) return;
 
         int? src = null;
         int? tgt = null;
 
-        if (line.Contains("Src:"))
+        // dsd-fme DMR output: "SLOT 1 TGT=763901 SRC=12345678 Group Call"
+        if (line.Contains("SRC="))
+        {
+            var parts = line.Split("SRC=");
+            if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var s)) src = s;
+        }
+        else if (line.Contains("Src:"))
         {
             var parts = line.Split("Src:");
             if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var s)) src = s;
@@ -71,7 +79,12 @@ public class DMR : DSDBase
             if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var s)) src = s;
         }
 
-        if (line.Contains("Dst:"))
+        if (line.Contains("TGT="))
+        {
+            var parts = line.Split("TGT=");
+            if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var t)) tgt = t;
+        }
+        else if (line.Contains("Dst:"))
         {
             var parts = line.Split("Dst:");
             if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var t)) tgt = t;
