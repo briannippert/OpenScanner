@@ -927,6 +927,15 @@ public class RtlDevice : BackgroundService, IRadioSource
                 _preRollBuffer.Clear();
             }
         }
+        else if (src.HasValue && tgt.HasValue && _state.SourceID.HasValue && _state.TargetID.HasValue
+                 && (src != _state.SourceID || tgt != _state.TargetID))
+        {
+            // SRC/TG changed while recording — a new talker or talkgroup is active.
+            // Close the current transmission and open a fresh one so each gets its own log entry.
+            _recordingService.StopRecording(originChannel, _lastDetectedTone);
+            _lastDetectedTone = null;
+            _recordingService.StartRecording(originChannel, src, tgt, new LinkedList<byte[]>());
+        }
         else if (src.HasValue || tgt.HasValue)
         {
             // Update IDs mid-recording — the first activity event (sync line) often
