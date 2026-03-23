@@ -15,14 +15,15 @@ public class DMR : DSDBase
     {
         _channel = channel;
 
-        // 24000 Hz: better-tested rate for DMR via dsd-fme stdin pipe from rtl_fm.
-        // -fd: generic DMR decode — more stable than -fs for piped stdout output.
+        // 48000 Hz: required — dsd-fme -s only accepts 48000 or 96000; 24000 causes SIGFPE.
+        // -fs: DMR TDMA BS and MS Simplex — correct flag for direct DMR channels.
+        //      (-fd is D-STAR, not DMR!)
         // -V 3: explicit TDMA voice synthesis on both slots (default, but be explicit).
-        int captureRate = 24000;
-        int outputRate = 24000;
+        int captureRate = 48000;
+        int outputRate = 48000;
         int dsdOutputRate = 8000;
         string rtlMode = "fm";
-        string dsdArgs = "-fd -V 3"; // DMR decode, both TDMA slots
+        string dsdArgs = "-fs -V 3"; // DMR TDMA Simplex, both slots
 
         string source = InputSource ?? $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
 
