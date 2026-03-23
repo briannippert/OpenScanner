@@ -1,4 +1,4 @@
-SELECT id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path as AudioPath, duration, transcription, sourceID, targetID, isFavorite 
+SELECT id, timestamp, frequency, alphaTag, description, lat, lon, alt, audio_path as AudioPath, duration, transcription, sourceID, targetID, detectedTone, speakerChain, isFavorite 
 FROM transmissions 
 WHERE strftime('%Y', timestamp, 'localtime') = @Year 
   AND strftime('%m', timestamp, 'localtime') = @Month 

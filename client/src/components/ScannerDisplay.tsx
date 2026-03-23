@@ -225,7 +225,7 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                 />
                             )}
                         </Box>
-                        {isReceiving && (state.sourceID || state.targetID) && (
+                        {isReceiving && (state.speakerChain || state.sourceID || state.targetID) && (
                             <Typography variant="caption" sx={{ 
                                 color: '#ffaa00', 
                                 fontWeight: 'bold',
