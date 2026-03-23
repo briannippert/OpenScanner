@@ -81,6 +81,7 @@ public class P25 : DSDBase
             }
         }
 
-        RaiseActivity(src, tgt, null);
+        string? tone = line.Contains("Emergency") ? "EMRG" : null;
+        RaiseActivity(src, tgt, tone);
     }
 }

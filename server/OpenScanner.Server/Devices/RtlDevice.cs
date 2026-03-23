@@ -910,6 +910,11 @@ public class RtlDevice : BackgroundService, IRadioSource
                 LastTranscription = null 
             });
         }
+
+        // Emergency calls route the tone to _lastDetectedTone so it is persisted
+        // to the DB (normally only fire tones flow through that path).
+        if (tone == "EMRG")
+            _lastDetectedTone = "EMRG";
         
         // Start recording if not already started
         if (!_recordingService.IsRecording)

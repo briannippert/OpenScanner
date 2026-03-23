@@ -179,7 +179,7 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                     }}
                                 />
                             )}
-                            {state.currentTone && state.currentTone !== 'ANALOG' && (
+                            {state.currentTone && state.currentTone !== 'ANALOG' && state.currentTone !== 'EMRG' && (
                                 <Chip 
                                     label={state.currentTone} 
                                     size="small" 
@@ -190,6 +190,23 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                         color: '#00ffff', 
                                         fontFamily: 'monospace' 
                                     }} 
+                                />
+                            )}
+                            {state.currentTone === 'EMRG' && (
+                                <Chip
+                                    label="! EMERGENCY"
+                                    size="small"
+                                    sx={{
+                                        height: 22,
+                                        fontSize: '0.75rem',
+                                        fontWeight: 'bold',
+                                        fontFamily: 'monospace',
+                                        letterSpacing: 1,
+                                        bgcolor: '#ff0000',
+                                        color: '#ffffff',
+                                        animation: 'pulse 0.6s infinite alternate',
+                                        border: '1px solid #ff6666',
+                                    }}
                                 />
                             )}
                             {state.lastDetectedTone && (

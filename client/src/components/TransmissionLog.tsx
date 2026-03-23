@@ -487,9 +487,25 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                             </Typography>
                             <Box display="flex" alignItems="center" gap={0.75} flexShrink={0}>
                                 {log.detectedTone && (
-                                    <Typography variant="caption" sx={{ color: '#ff0000', fontWeight: 'bold', fontSize: '9px', border: '1px solid #ff0000', px: 0.5, borderRadius: 0.5 }}>
-                                        {log.detectedTone}
-                                    </Typography>
+                                    log.detectedTone === 'EMRG' ? (
+                                        <Typography variant="caption" sx={{
+                                            color: '#ffffff',
+                                            fontWeight: 'bold',
+                                            fontSize: '9px',
+                                            bgcolor: '#cc0000',
+                                            border: '1px solid #ff4444',
+                                            px: 0.6,
+                                            py: 0.1,
+                                            borderRadius: 0.5,
+                                            letterSpacing: 0.5,
+                                        }}>
+                                            ! EMRG
+                                        </Typography>
+                                    ) : (
+                                        <Typography variant="caption" sx={{ color: '#ff0000', fontWeight: 'bold', fontSize: '9px', border: '1px solid #ff0000', px: 0.5, borderRadius: 0.5 }}>
+                                            {log.detectedTone}
+                                        </Typography>
+                                    )
                                 )}
                                 {log.duration && (
                                     <Typography variant="caption" sx={{ color: '#555', fontSize: '0.7rem', fontFamily: 'monospace' }}>
