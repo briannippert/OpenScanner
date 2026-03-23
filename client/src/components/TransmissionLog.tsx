@@ -481,51 +481,71 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                 <ListItemText 
                     sx={{ pr: 20 }}
                     primary={
-                        <Box display="flex" alignItems="center" gap={0.75} flexWrap="wrap">
-                            <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#666', fontSize: '0.72rem' }}>
-                                {(() => {
-                                    const d = new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z');
-                                    return `${d.toLocaleDateString([], { year: 'numeric', month: '2-digit', day: '2-digit' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
-                                })()}
-                            </Typography>
-                            <Typography variant="caption" sx={{ color: '#444', fontSize: '0.65rem' }}>|</Typography>
-                            <Typography variant="caption" sx={{ color: '#fff', fontWeight: 'bold', fontSize: '0.8rem' }}>
+                        <Box display="flex" alignItems="center" justifyContent="space-between" gap={1}>
+                            <Typography sx={{ color: '#eee', fontWeight: 'bold', fontSize: '0.85rem', lineHeight: 1.2 }}>
                                 {log.alphaTag}
                             </Typography>
-                            {log.detectedTone && (
-                                <Typography variant="caption" sx={{ color: '#ff0000', fontWeight: 'bold', fontSize: '9px', border: '1px solid #ff0000', px: 0.5, borderRadius: 0.5 }}>
-                                    {log.detectedTone}
-                                </Typography>
-                            )}
-                            {log.duration && (
-                                <>
-                                    <Typography variant="caption" sx={{ color: '#444', fontSize: '0.65rem' }}>|</Typography>
-                                    <Typography variant="caption" sx={{ color: '#555', fontSize: '0.72rem', fontFamily: 'monospace' }}>
+                            <Box display="flex" alignItems="center" gap={0.75} flexShrink={0}>
+                                {log.detectedTone && (
+                                    <Typography variant="caption" sx={{ color: '#ff0000', fontWeight: 'bold', fontSize: '9px', border: '1px solid #ff0000', px: 0.5, borderRadius: 0.5 }}>
+                                        {log.detectedTone}
+                                    </Typography>
+                                )}
+                                {log.duration && (
+                                    <Typography variant="caption" sx={{ color: '#555', fontSize: '0.7rem', fontFamily: 'monospace' }}>
                                         {log.duration.toFixed(1)}s
                                     </Typography>
-                                </>
-                            )}
+                                )}
+                            </Box>
                         </Box>
                     }
                     secondary={
                         <Box component="span" display="block">
+                            <Box display="flex" alignItems="center" gap={0.75} mt={0.3} flexWrap="wrap">
+                                <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#555', fontSize: '0.68rem' }}>
+                                    {(() => {
+                                        const d = new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z');
+                                        const now = new Date();
+                                        const isToday = d.toDateString() === now.toDateString();
+                                        return isToday
+                                            ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                                            : `${d.toLocaleDateString([], { month: '2-digit', day: '2-digit' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                                    })()}
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: '#333', fontSize: '0.65rem' }}>·</Typography>
+                                <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#444', fontSize: '0.68rem' }}>
+                                    {log.frequency.toFixed(3)} MHz
+                                </Typography>
+                                {(log.sourceID || log.targetID) && (
+                                    <>
+                                        <Typography variant="caption" sx={{ color: '#333', fontSize: '0.65rem' }}>·</Typography>
+                                        <Box display="flex" alignItems="center" gap={0.4}>
+                                            <Typography variant="caption" sx={{ color: '#555', fontSize: '0.65rem', fontFamily: 'monospace' }}>SRC</Typography>
+                                            <Typography variant="caption" sx={{ color: '#ffaa00', fontSize: '0.7rem', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                                                {log.sourceID ?? '?'}
+                                            </Typography>
+                                            <Typography variant="caption" sx={{ color: '#444', fontSize: '0.65rem' }}>→</Typography>
+                                            <Typography variant="caption" sx={{ color: '#555', fontSize: '0.65rem', fontFamily: 'monospace' }}>TG</Typography>
+                                            <Typography variant="caption" sx={{ color: '#00bfff', fontSize: '0.7rem', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                                                {log.targetID ?? '?'}
+                                            </Typography>
+                                        </Box>
+                                    </>
+                                )}
+                                {log.lat && log.lat !== 0 && (
+                                    <>
+                                        <Typography variant="caption" sx={{ color: '#333', fontSize: '0.65rem' }}>·</Typography>
+                                        <Typography variant="caption" sx={{ color: '#444', fontSize: '0.68rem', fontFamily: 'monospace' }}>
+                                            {log.lat.toFixed(3)}, {log.lon?.toFixed(3)}
+                                        </Typography>
+                                    </>
+                                )}
+                            </Box>
                             {log.transcription && (
-                                <Typography variant="body2" sx={{ color: '#ccc', fontStyle: 'italic', fontSize: '11px', mt: 0.5 }}>
+                                <Typography variant="body2" sx={{ color: '#999', fontStyle: 'italic', fontSize: '0.72rem', mt: 0.4, lineHeight: 1.3 }}>
                                     "{log.transcription}"
                                 </Typography>
                             )}
-                            <Box display="flex" gap={1} mt={0.5} flexWrap="wrap">
-                                {(log.sourceID || log.targetID) && (
-                                    <Typography variant="caption" sx={{ color: '#ffaa00', fontSize: '10px', fontFamily: 'monospace' }}>
-                                        {log.sourceID ?? '?'} → {log.targetID ?? '?'}
-                                    </Typography>
-                                )}
-                                {log.lat && log.lat !== 0 && (
-                                    <Typography variant="caption" sx={{ color: '#444', fontSize: '10px' }}>
-                                        {log.lat.toFixed(3)}, {log.lon?.toFixed(3)}
-                                    </Typography>
-                                )}
-                            </Box>
                         </Box>
                     }
                     secondaryTypographyProps={{ component: 'div' }}
