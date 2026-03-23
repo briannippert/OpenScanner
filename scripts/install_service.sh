@@ -68,6 +68,18 @@ fi
 # ----------------------------------------------------------------
 log_step "Updating Repository..."
 if git remote get-url origin &> /dev/null; then
+    # The installer modifies client/package.json (via `npm version`).
+    # If the only locally modified files are package.json / package-lock.json,
+    # restore them so git pull can apply upstream changes cleanly.
+    CHANGED_FILES=$(git diff --name-only 2>/dev/null)
+    if [ -n "$CHANGED_FILES" ]; then
+        NON_PKG=$(echo "$CHANGED_FILES" | grep -v "^client/package\.json$" | grep -v "^client/package-lock\.json$")
+        if [ -z "$NON_PKG" ]; then
+            log_info "Resetting auto-modified package files before update..."
+            git checkout -- client/package.json client/package-lock.json 2>/dev/null || true
+        fi
+    fi
+
     if git pull origin main; then
         log_success "Code pulled successfully."
     else
