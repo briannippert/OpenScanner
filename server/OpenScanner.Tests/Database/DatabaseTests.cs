@@ -31,6 +31,13 @@ public class DatabaseTests : IDisposable
     }
 
     [Fact]
+    public async Task FreshInstall_ShouldHaveNoDefaultChannels()
+    {
+        var channels = await _db.GetAllChannelsAsync();
+        Assert.Empty(channels);
+    }
+
+    [Fact]
     public async Task AddChannel_ShouldReturnIdAndBePersisted()
     {
         var channel = new Channel(162.400, "NOAA Weather", "Weather radio");
