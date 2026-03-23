@@ -37,7 +37,10 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
             tone: '',
             mode: 'P25',
             tag: '',
-            avoid: false
+            avoid: false,
+            dmrSlot: undefined,
+            dmrColorCode: undefined,
+            dmrTalkgroup: undefined
         } as Channel);
         setIsFormOpen(true);
     };
@@ -57,7 +60,8 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
 
     const handleChange = (field: keyof Channel, value: string | number | boolean) => {
         if (!editing) return;
-        setEditing({ ...editing, [field]: value });
+        const coerced = value === '' ? undefined : value;
+        setEditing({ ...editing, [field]: coerced });
     };
 
     if (isFormOpen && editing) {
@@ -110,6 +114,40 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                                     placeholder="e.g. 100.0"
                                 />
                             </Box>
+                            {editing.mode === 'DMR' && (
+                                <Box display="flex" gap={2}>
+                                    <FormControl sx={{ flex: 1 }}>
+                                        <InputLabel>Slot</InputLabel>
+                                        <Select
+                                            value={editing.dmrSlot?.toString() ?? ''}
+                                            label="Slot"
+                                            onChange={e => handleChange('dmrSlot', e.target.value === '' ? '' : Number(e.target.value))}
+                                        >
+                                            <MenuItem value="">Any</MenuItem>
+                                            <MenuItem value="1">Slot 1</MenuItem>
+                                            <MenuItem value="2">Slot 2</MenuItem>
+                                        </Select>
+                                    </FormControl>
+                                    <TextField
+                                        label="Color Code (0–15)"
+                                        type="number"
+                                        inputProps={{ min: 0, max: 15 }}
+                                        value={editing.dmrColorCode ?? ''}
+                                        onChange={e => handleChange('dmrColorCode', e.target.value === '' ? '' : Number(e.target.value))}
+                                        sx={{ flex: 1 }}
+                                        placeholder="0–15"
+                                    />
+                                    <TextField
+                                        label="Talkgroup ID"
+                                        type="number"
+                                        inputProps={{ min: 0 }}
+                                        value={editing.dmrTalkgroup ?? ''}
+                                        onChange={e => handleChange('dmrTalkgroup', e.target.value === '' ? '' : Number(e.target.value))}
+                                        sx={{ flex: 1 }}
+                                        placeholder="e.g. 1234"
+                                    />
+                                </Box>
+                            )}
                             <Box display="flex" gap={2}>
                                 <TextField 
                                     label="License" 

@@ -9,6 +9,9 @@ export interface Channel {
     mode: string;
     tag: string;
     avoid: boolean;
+    dmrSlot?: number;
+    dmrColorCode?: number;
+    dmrTalkgroup?: number;
 }
 
 export interface ScannerState {

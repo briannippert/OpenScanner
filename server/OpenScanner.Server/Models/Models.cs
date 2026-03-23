@@ -72,9 +72,24 @@ public class Channel
     /// </summary>
     public bool Avoid { get; set; }
 
+    /// <summary>
+    /// DMR time slot (1 or 2). Only applicable when Mode is "DMR".
+    /// </summary>
+    public int? DmrSlot { get; set; }
+
+    /// <summary>
+    /// DMR color code (0–15). Only applicable when Mode is "DMR".
+    /// </summary>
+    public int? DmrColorCode { get; set; }
+
+    /// <summary>
+    /// DMR talkgroup ID to monitor. Only applicable when Mode is "DMR".
+    /// </summary>
+    public int? DmrTalkgroup { get; set; }
+
     public Channel() { }
 
-    public Channel(double frequency, string alphaTag, string description, string mode = "P25", string type = "RM", string tone = "", string tag = "", string license = "", bool avoid = false)
+    public Channel(double frequency, string alphaTag, string description, string mode = "P25", string type = "RM", string tone = "", string tag = "", string license = "", bool avoid = false, int? dmrSlot = null, int? dmrColorCode = null, int? dmrTalkgroup = null)
     {
         Frequency = frequency;
         AlphaTag = alphaTag;
@@ -85,6 +100,9 @@ public class Channel
         Tag = tag;
         License = license;
         Avoid = avoid;
+        DmrSlot = dmrSlot;
+        DmrColorCode = dmrColorCode;
+        DmrTalkgroup = dmrTalkgroup;
     }
 }
 
