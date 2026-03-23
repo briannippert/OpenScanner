@@ -20,6 +20,12 @@ public class DMR : DSDBase
         // -ma: auto-select modulation optimizer — more robust than forcing -mg (GFSK).
         // -V 1: synthesize voice for slot 1 only. -V 3 (both slots) doubles the PCM
         //       output data on a single-slot call, making audio play at half speed.
+        //
+        // IMPORTANT: -fs hardcodes pulse_digi_out_channels=2 in dsd-fme source (dmr_bs.c).
+        // dsd-fme always writes STEREO (interleaved L=slot1, R=slot2) to stdout when
+        // using any DMR simplex mode, regardless of -V. With -V 1, R channel is silence.
+        // ffmpeg must read with -ac 2; volume=2.0 compensates for the L+R downmix
+        // halving the volume (out = (L+0)/2 = L/2 without compensation).
         int captureRate = 48000;
         int outputRate = 48000;
         int dsdOutputRate = 8000;
@@ -28,7 +34,7 @@ public class DMR : DSDBase
 
         string source = InputSource ?? $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
 
-        return $"stdbuf -o0 {source} | stdbuf -i0 -o0 /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | stdbuf -o0 /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -probesize 32 -analyzeduration 0 -i - -f s16le -ar 48000 -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
+        return $"stdbuf -o0 {source} | stdbuf -i0 -o0 /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | stdbuf -o0 /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 2 -probesize 32 -analyzeduration 0 -i - -af volume=2.0 -f s16le -ar 48000 -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
     }
 
     protected override void ParseMetadata(string line)
