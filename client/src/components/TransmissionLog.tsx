@@ -514,10 +514,15 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                                     "{log.transcription}"
                                 </Typography>
                             )}
-                            <Box display="flex" gap={1} mt={0.5}>
+                            <Box display="flex" gap={1} mt={0.5} flexWrap="wrap">
                                 {log.sourceID && (
-                                    <Typography variant="caption" sx={{ color: log.sourceID < 100 ? '#00ffff' : '#ffaa00', fontSize: '10px' }}>
-                                        {log.sourceID < 100 ? `BASE` : `UNIT ${log.sourceID}`}
+                                    <Typography variant="caption" sx={{ color: '#ffaa00', fontSize: '10px', fontFamily: 'monospace' }}>
+                                        From: {log.sourceID}
+                                    </Typography>
+                                )}
+                                {log.targetID && (
+                                    <Typography variant="caption" sx={{ color: '#00bfff', fontSize: '10px', fontFamily: 'monospace' }}>
+                                        To: {log.targetID}
                                     </Typography>
                                 )}
                                 {log.lat && log.lat !== 0 && (

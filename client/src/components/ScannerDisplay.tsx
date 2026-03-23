@@ -208,16 +208,29 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                 />
                             )}
                         </Box>
-                        {isReceiving && state.sourceID && (
-                            <Typography variant="caption" sx={{ 
-                                color: state.sourceID < 100 ? '#00ffff' : '#ffaa00', 
-                                fontWeight: 'bold',
-                                mt: 0.5,
-                                display: 'block',
-                                letterSpacing: 1
-                            }}>
-                                {state.sourceID < 100 ? `[BASE]` : `[UNIT ${state.sourceID}]`}
-                            </Typography>
+                        {isReceiving && (state.sourceID || state.targetID) && (
+                            <Box sx={{ mt: 0.5, display: 'flex', gap: 1.5 }}>
+                                {state.sourceID && (
+                                    <Typography variant="caption" sx={{ 
+                                        color: '#ffaa00', 
+                                        fontWeight: 'bold',
+                                        fontFamily: 'monospace',
+                                        letterSpacing: 1
+                                    }}>
+                                        From: {state.sourceID}
+                                    </Typography>
+                                )}
+                                {state.targetID && (
+                                    <Typography variant="caption" sx={{ 
+                                        color: '#00bfff', 
+                                        fontWeight: 'bold',
+                                        fontFamily: 'monospace',
+                                        letterSpacing: 1
+                                    }}>
+                                        To: {state.targetID}
+                                    </Typography>
+                                )}
+                            </Box>
                         )}
                             </>
                         )}
