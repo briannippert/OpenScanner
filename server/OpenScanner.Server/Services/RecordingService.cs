@@ -201,8 +201,8 @@ public class RecordingService : IRecordingService
                  var lon = gps?.Lon ?? 0;
 
                  var log = new CallLog(
-                      $"log_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
-                      DateTime.UtcNow.ToString("o"),
+                      $"log_{startTime}",
+                      DateTimeOffset.FromUnixTimeMilliseconds(startTime).UtcDateTime.ToString("o"),
                       channel.Frequency,
                       channel.AlphaTag,
                       channel.Description,
