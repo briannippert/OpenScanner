@@ -18,12 +18,14 @@ public class DMR : DSDBase
         // 48000 Hz: required — dsd-fme -s only accepts 48000 or 96000; 24000 causes SIGFPE.
         // -fs: DMR TDMA BS and MS Simplex — correct flag for direct DMR channels.
         //      (-fd is D-STAR, not DMR!)
+        // -mg: GFSK modulation optimization — DMR uses GFSK, not C4FM (dsd-fme default -mc).
+        //      Without this, every AMBE frame gets FEC errors → robot/garbled audio.
         // -V 3: explicit TDMA voice synthesis on both slots (default, but be explicit).
         int captureRate = 48000;
         int outputRate = 48000;
         int dsdOutputRate = 8000;
         string rtlMode = "fm";
-        string dsdArgs = "-fs -V 3"; // DMR TDMA Simplex, both slots
+        string dsdArgs = "-fs -mg -V 3"; // DMR TDMA Simplex, GFSK modulation, both slots
 
         string source = InputSource ?? $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
 
