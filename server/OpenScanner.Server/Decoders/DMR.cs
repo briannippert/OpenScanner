@@ -15,15 +15,18 @@ public class DMR : DSDBase
     {
         _channel = channel;
 
-        int captureRate = 48000;
-        int outputRate = 48000;
+        // 24000 Hz: well-tested rate for DMR via dsd-fme stdin pipe from rtl_fm.
+        // -fs: DMR TDMA BS and MS Simplex — correct flag for direct DMR channels.
+        // -V 3: explicit TDMA voice synthesis on both slots (default, but be explicit).
+        int captureRate = 24000;
+        int outputRate = 24000;
         int dsdOutputRate = 8000;
         string rtlMode = "fm";
-        string dsdArgs = "-fd"; // DMR
+        string dsdArgs = "-fs -V 3"; // DMR TDMA Simplex, both slots
 
         string source = InputSource ?? $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
 
-        return $"stdbuf -o0 {source} | stdbuf -i0 -o0 /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | stdbuf -o0 /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -probesize 32 -analyzeduration 0 -i - -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
+        return $"stdbuf -o0 {source} | stdbuf -i0 -o0 /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | stdbuf -o0 /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 1 -probesize 32 -analyzeduration 0 -i - -f s16le -ar 48000 -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
     }
 
     protected override void ParseMetadata(string line)
@@ -37,11 +40,17 @@ public class DMR : DSDBase
         if (_channel?.DmrSlot.HasValue == true && lineSlot.HasValue && lineSlot != _channel.DmrSlot)
             return;
 
+        // Broad activity detection: includes lock/sync lines so HandleActivity fires
+        // early and the session timeout gets reset while dsd-fme is still syncing.
         bool isActivity =
             line.Contains("Voice") ||
             line.Contains("Slot 1") || line.Contains("Slot 2") ||
             line.Contains("CACH") ||
-            (line.Contains("DMR") && !line.Contains("SYNC"));
+            line.Contains("LC:") ||       // Link Control — present during sync lock
+            line.Contains("MFID:") ||     // Manufacturer ID — present in voice header
+            line.Contains("Sync:") ||     // dsd-fme sync lock line
+            line.Contains("SYNC") ||      // alternate sync format
+            (line.Contains("DMR") && !line.Contains("dsd-fme")); // avoid matching our own log lines
 
         if (!isActivity) return;
 

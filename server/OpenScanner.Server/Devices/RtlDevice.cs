@@ -751,10 +751,11 @@ public class RtlDevice : BackgroundService, IRadioSource
             StartDecoding(channel);
         });
 
-        // Safety timeout
+        // Safety timeout — DMR needs more time to sync (TDMA framing + AMBE vocoder)
         if (!_manualOverride)
         {
-            RestartSessionTimeout(10000); // 10s to hear something (sync up)
+            int initialTimeout = channel.Mode == "DMR" ? 20000 : 10000;
+            RestartSessionTimeout(initialTimeout);
         }
     }
 
@@ -840,7 +841,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             };
 
             _currentDecoder.OnActivity += (src, tgt, tone) => HandleActivity(channel, src, tgt, tone);
-            _currentDecoder.OnMetadata += (line) => _logger.LogDebug($"Decoder: {line}");
+            _currentDecoder.OnMetadata += (line) => _logger.LogInformation($"Decoder: {line}");
 
             // Start safely
             Task.Run(async () => 
