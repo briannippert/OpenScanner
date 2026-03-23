@@ -31,6 +31,13 @@ public class DatabaseTests : IDisposable
     }
 
     [Fact]
+    public async Task FreshInstall_ShouldHaveNoDefaultChannels()
+    {
+        var channels = await _db.GetAllChannelsAsync();
+        Assert.Empty(channels);
+    }
+
+    [Fact]
     public async Task AddChannel_ShouldReturnIdAndBePersisted()
     {
         var channel = new Channel(162.400, "NOAA Weather", "Weather radio");
@@ -136,6 +143,33 @@ public class DatabaseTests : IDisposable
         var freq = (await _db.SearchTransmissionsAsync("157")).ToList();
         Assert.Single(freq);
         Assert.Equal("3", freq[0].Id);
+    }
+
+    [Fact]
+    public async Task DeleteTransmission_ShouldRemoveFromDatabase()
+    {
+        var log = new CallLog("delete_test_id", DateTime.UtcNow.ToString("o"), 155.0, "Tag", "Desc", null, null, null, 5.0);
+        await _db.SaveTransmissionAsync(log);
+
+        var before = await _db.GetHistoryAsync(100);
+        Assert.Contains(before, l => l.Id == "delete_test_id");
+
+        await _db.DeleteTransmissionAsync("delete_test_id");
+
+        var after = await _db.GetHistoryAsync(100);
+        Assert.DoesNotContain(after, l => l.Id == "delete_test_id");
+    }
+
+    [Fact]
+    public async Task DeleteTransmission_WithUnknownId_ShouldNotThrow()
+    {
+        // Deleting a non-existent ID should complete without throwing an exception.
+        // If an exception is thrown, this test will fail.
+        await _db.DeleteTransmissionAsync("nonexistent_id");
+
+        // Database should remain empty - the no-op delete did not affect any records.
+        var history = await _db.GetHistoryAsync(100);
+        Assert.Empty(history);
     }
 
     public void Dispose()

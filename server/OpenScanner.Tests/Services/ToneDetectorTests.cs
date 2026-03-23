@@ -21,8 +21,10 @@ public class ToneDetectorTests
         _dbMock.Setup(db => db.GetAllFireTonesAsync()).ReturnsAsync(new[] { toneSet });
 
         var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object);
-        // Wait for async reload
-        await Task.Delay(50); 
+        // Wait for async reload — poll to avoid a fixed delay that can be too short in CI
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (detector.ToneCount == 0 && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
 
         FireToneSet? detected = null;
         detector.OnToneDetected += (t) => detected = t;
@@ -49,7 +51,9 @@ public class ToneDetectorTests
         _dbMock.Setup(db => db.GetAllFireTonesAsync()).ReturnsAsync(new[] { toneSet });
 
         var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object);
-        await Task.Delay(50);
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (detector.ToneCount == 0 && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
 
         bool fired = false;
         detector.OnToneDetected += (_) => fired = true;
@@ -71,7 +75,9 @@ public class ToneDetectorTests
         _dbMock.Setup(db => db.GetAllFireTonesAsync()).ReturnsAsync(new[] { toneSet });
 
         var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object);
-        await Task.Delay(50);
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (detector.ToneCount == 0 && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
 
         bool fired = false;
         detector.OnToneDetected += (_) => fired = true;

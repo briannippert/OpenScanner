@@ -178,7 +178,7 @@ sudo apt-get update -qq || log_warn "apt-get update encountered errors. Attempti
 sudo apt-get install -y -qq git cmake build-essential \
     libitpp-dev libsndfile1-dev libusb-1.0-0-dev libncurses-dev \
     rtl-sdr librtlsdr-dev libcodec2-dev libpulse-dev libasound2-dev \
-    gpsd gpsd-clients ffmpeg > /dev/null
+    gpsd gpsd-clients ffmpeg multimon-ng > /dev/null
 log_success "Libraries installed."
 
 # --- Whisper.cpp Setup ---
@@ -323,8 +323,42 @@ else
 fi
 
 # ----------------------------------------------------------------
-# 6. Service Installation
+# 5a. PowerDMS Integration (Optional)
 # ----------------------------------------------------------------
+log_step "PowerDMS Integration..."
+
+APPSETTINGS="$PROJECT_ROOT/server/OpenScanner.Server/appsettings.json"
+
+# Ensure jq is available for JSON editing
+if ! command -v jq &> /dev/null; then
+    log_info "Installing jq for JSON configuration..."
+    if command -v apt-get &> /dev/null; then
+        sudo apt-get install -y -qq jq
+        log_success "jq installed."
+    else
+        log_warn "Could not install jq automatically. Skipping PowerDMS configuration."
+        SKIP_POWERDMS=true
+    fi
+fi
+
+if [ "${SKIP_POWERDMS:-false}" = false ]; then
+    CURRENT_DEPT=$(jq -r '.PowerDMS.Department // ""' "$APPSETTINGS" 2>/dev/null || echo "")
+    if [ -z "$CURRENT_DEPT" ]; then
+        echo ""
+        read -r -p "$(echo -e "${BLUE}[INFO]${NC} Enter your PowerDMS department slug (leave empty to skip): ")" POWERDMS_DEPT
+        if [ -n "$POWERDMS_DEPT" ]; then
+            UPDATED=$(jq --arg dept "$POWERDMS_DEPT" '.PowerDMS.Department = $dept' "$APPSETTINGS")
+            echo "$UPDATED" > "$APPSETTINGS"
+            log_success "PowerDMS integration enabled for department: $POWERDMS_DEPT"
+        else
+            log_info "No PowerDMS department entered. Skipping PowerDMS configuration."
+        fi
+    else
+        log_info "PowerDMS integration already configured for department: $CURRENT_DEPT"
+    fi
+fi
+
+
 log_step "Configuring Systemd Service..."
 SERVICE_FILE="/etc/systemd/system/openscanner.service"
 NET_EXEC="$PROJECT_ROOT/server/OpenScanner.Server/bin/Release/net10.0/publish/OpenScanner.Server"

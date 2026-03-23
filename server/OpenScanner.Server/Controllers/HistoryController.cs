@@ -109,6 +109,31 @@ public class HistoryController : ControllerBase
     }
 
     /// <summary>
+    /// Retrieves all favorited transmission logs.
+    /// </summary>
+    /// <returns>List of favorited call logs.</returns>
+    [HttpGet("favorites")]
+    [ProducesResponseType(typeof(IEnumerable<CallLog>), StatusCodes.Status200OK)]
+    public async Task<IEnumerable<CallLog>> GetFavorites()
+    {
+        return await _db.GetFavoritesAsync();
+    }
+
+    /// <summary>
+    /// Sets or clears the favorite flag on a transmission.
+    /// </summary>
+    /// <param name="id">Transmission ID.</param>
+    /// <param name="request">Body containing the new favorite state.</param>
+    [HttpPut("{id}/favorite")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> SetFavorite(string id, [FromBody] SetFavoriteRequest request)
+    {
+        await _db.SetFavoriteAsync(id, request.IsFavorite);
+        return Ok();
+    }
+
+    /// <summary>
     /// Deletes a specific transmission log and its audio file.
     /// </summary>
     /// <param name="id">Transmission ID.</param>
@@ -131,3 +156,8 @@ public class HistoryController : ControllerBase
         return Ok();
     }
 }
+
+/// <summary>
+/// Request body for setting a transmission's favorite status.
+/// </summary>
+public record SetFavoriteRequest(bool IsFavorite);

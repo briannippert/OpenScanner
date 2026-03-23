@@ -139,6 +139,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
 
     public void StartDumping(string label) { }
     public void StopDumping() { }
+    public byte[][] GetPreRollBuffer() => Array.Empty<byte[]>();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

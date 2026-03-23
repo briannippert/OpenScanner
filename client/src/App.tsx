@@ -365,8 +365,12 @@ function App() {
 
   const deleteEntry = async (id: string) => {
     try {
-        await fetch(`/api/history/${id}`, { method: 'DELETE' });
-        setCallLog(prev => prev.filter(log => log.id !== id));
+        const response = await fetch(`/api/history/${id}`, { method: 'DELETE' });
+        if (response.ok) {
+            setCallLog(prev => prev.filter(log => log.id !== id));
+        } else {
+            console.error("Delete failed with status:", response.status);
+        }
     } catch (e) {
         console.error("Delete failed:", e);
     }
@@ -850,7 +854,7 @@ function App() {
                                     <Card 
                                         sx={{ 
                                             border: manualHold === ch.frequency ? '1px solid #ff9800' : '1px solid #333',
-                                            bgcolor: scannerState.currentChannel?.frequency === ch.frequency ? 'rgba(0, 255, 0, 0.05)' : '#151515',
+                                        bgcolor: '#151515',
                                             transition: 'all 0.2s',
                                             '&:hover': { bgcolor: '#222' }
                                         }}

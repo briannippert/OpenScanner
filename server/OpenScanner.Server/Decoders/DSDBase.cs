@@ -37,7 +37,7 @@ public abstract class DSDBase : IDecoder
 
         var cmd = GetCommandLine(channel);
         
-        var psi = new ProcessStartInfo("sh", $"-c \"{cmd}\"")
+        var psi = new ProcessStartInfo("bash", $"-c \"{cmd}\"")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -76,12 +76,19 @@ public abstract class DSDBase : IDecoder
         }
     }
 
+    // Software pre-amp for decoded audio. FM decoders (NFM/WFM) override this
+    // to 3.0f to compensate for the low output level of rtl_fm analog audio.
+    // Digital decoders (P25) and AM (which uses an ffmpeg volume filter) leave
+    // this at 1.0f so their already-normalized audio is not over-amplified.
+    protected virtual float AudioGain => 1.0f;
+
     private async Task ProcessAudioStream(Stream stream, CancellationToken token)
     {
         var readBuffer = new byte[4096];
         var sendBuffer = new List<byte>(8192);
         var lastSend = DateTime.UtcNow;
         bool hadData = false;
+        float gain = AudioGain;
 
         try
         {
@@ -92,10 +99,24 @@ public abstract class DSDBase : IDecoder
 
                 if (!hadData) { _logger.LogInformation("Decoder: Received first audio bytes"); hadData = true; }
 
-                for (int i = 0; i < read; i++) sendBuffer.Add(readBuffer[i]);
+                // Apply software gain to raw s16le PCM samples with hard clipping.
+                // Process only complete 2-byte samples; carry any odd trailing byte forward.
+                int sampleCount = read / 2;
+                for (int i = 0; i < sampleCount; i++)
+                {
+                    int offset = i * 2;
+                    short sample = (short)(readBuffer[offset] | (readBuffer[offset + 1] << 8));
+                    int amplified = (int)(sample * gain);
+                    if (amplified > 32767) amplified = 32767;
+                    else if (amplified < -32768) amplified = -32768;
+                    short result = (short)amplified;
+                    sendBuffer.Add((byte)(result & 0xFF));
+                    sendBuffer.Add((byte)((result >> 8) & 0xFF));
+                }
+                // Pass through any trailing odd byte unchanged (avoids sample boundary misalignment).
+                if (read % 2 != 0) sendBuffer.Add(readBuffer[read - 1]);
 
-                bool shouldSend = (sendBuffer.Count > 0 && !hadData) || 
-                                  sendBuffer.Count >= 4096 || 
+                bool shouldSend = sendBuffer.Count >= 4096 || 
                                   (sendBuffer.Count > 0 && (DateTime.UtcNow - lastSend).TotalMilliseconds > 40);
 
                 if (shouldSend)
@@ -151,7 +172,8 @@ public abstract class DSDBase : IDecoder
             line.Contains("CTCSS") || line.Contains("DCS") || line.Contains("ANALOG") ||
             line.Contains("Slot 1") || line.Contains("Slot 2") || // DMR time slots
             line.Contains("CACH") || // DMR Common Announcement Channel Header
-            (line.Contains("DMR") && !line.Contains("SYNC")); // DMR voice/data frames
+            (line.Contains("DMR") && !line.Contains("SYNC")) || // DMR voice/data frames
+            line.Contains("MDC1200");
 
         if (isActivity)
         {
@@ -159,7 +181,16 @@ public abstract class DSDBase : IDecoder
             int? tgt = null;
             string? tone = null;
 
-            if (line.Contains("Source:"))
+            if (line.Contains("MDC1200:"))
+            {
+                var parts = line.Split("MDC1200:");
+                if (parts.Length > 1)
+                {
+                    var idStr = parts[1].Trim().Split(' ').Last();
+                    if (int.TryParse(idStr, System.Globalization.NumberStyles.HexNumber, null, out var s)) src = s;
+                }
+            }
+            else if (line.Contains("Source:"))
             {
                 var parts = line.Split("Source:");
                 if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var s)) src = s;

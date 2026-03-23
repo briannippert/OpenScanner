@@ -78,6 +78,7 @@ public class Database : IDatabase
         try { conn.Execute("ALTER TABLE channels ADD COLUMN dmrSlot INTEGER;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: dmrSlot column already exists or failed"); }
         try { conn.Execute("ALTER TABLE channels ADD COLUMN dmrColorCode INTEGER;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: dmrColorCode column already exists or failed"); }
         try { conn.Execute("ALTER TABLE channels ADD COLUMN dmrTalkgroup INTEGER;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: dmrTalkgroup column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN isFavorite INTEGER DEFAULT 0;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: isFavorite column already exists or failed"); }
 
         conn.Execute(@"
             CREATE TABLE IF NOT EXISTS fire_tones (
@@ -100,17 +101,6 @@ public class Database : IDatabase
         if (settingsCount == 0)
         {
             conn.Execute("INSERT INTO settings (key, value) VALUES ('EnableTranscription', 'true')");
-        }
-
-        var count = conn.ExecuteScalar<int>("SELECT count(*) FROM channels");
-        if (count == 0)
-        {
-            var channels = _configuration.GetSection("Channels").Get<List<Channel>>();
-            if (channels != null && channels.Any())
-            {
-                var seedSql = SqlLoader.GetSql("Channels/Seed.sql");
-                conn.Execute(seedSql, channels);
-            }
         }
     }
 
@@ -247,6 +237,20 @@ public class Database : IDatabase
             }
         }
         await conn.ExecuteAsync(SqlLoader.GetSql("Transmissions/Delete.sql"), new { Id = id });
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<CallLog>> GetFavoritesAsync()
+    {
+        using var conn = GetConnection();
+        return await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetFavorites.sql"));
+    }
+
+    /// <inheritdoc />
+    public async Task SetFavoriteAsync(string id, bool isFavorite)
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync("UPDATE transmissions SET isFavorite = @IsFavorite WHERE id = @Id", new { IsFavorite = isFavorite ? 1 : 0, Id = id });
     }
 
     /// <inheritdoc />

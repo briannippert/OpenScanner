@@ -58,6 +58,7 @@ export interface CallLog {
     sourceID?: number;
     targetID?: number;
     detectedTone?: string;
+    isFavorite?: boolean;
 }
 
 export interface FireToneSet {

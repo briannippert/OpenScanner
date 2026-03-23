@@ -90,9 +90,9 @@ describe('TransmissionLog Component', () => {
         
         if (row) {
              const buttonsInRow = row.querySelectorAll('button');
-             // 0: Play, 1: Delete
-             fireEvent.click(buttonsInRow[0]);
-             expect(mockOnPlay).toHaveBeenCalledWith('1', '/audio/audio1.wav', 5.5);
+             // 0: Star, 1: Play, 2: Delete
+             fireEvent.click(buttonsInRow[1]);
+             expect(mockOnPlay).toHaveBeenCalledWith('1', 'audio1.wav', 5.5);
         }
     });
 
@@ -103,8 +103,8 @@ describe('TransmissionLog Component', () => {
          const row = screen.getByText('Fire Dispatch').closest('li');
          if (row) {
              const buttonsInRow = row.querySelectorAll('button');
-             // 0: Play, 1: Delete
-             fireEvent.click(buttonsInRow[1]);
+             // 0: Star, 1: Play, 2: Delete
+             fireEvent.click(buttonsInRow[2]);
              expect(mockOnDelete).toHaveBeenCalledWith('2');
          }
     });
