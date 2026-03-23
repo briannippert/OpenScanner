@@ -35,6 +35,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<GpsService>());
 builder.Services.AddSingleton<ToneDetector>();
 
 builder.Services.AddTransient<OpenScanner.Server.Decoders.P25>();
+builder.Services.AddTransient<OpenScanner.Server.Decoders.DMR>();
 builder.Services.AddTransient<OpenScanner.Server.Decoders.NFM>();
 builder.Services.AddTransient<OpenScanner.Server.Decoders.AM>();
 builder.Services.AddTransient<OpenScanner.Server.Decoders.WFM>();
