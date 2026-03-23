@@ -40,9 +40,16 @@ public class RecordingService : IRecordingService
         _gpsService = gpsService;
     }
 
+    public void UpdateSourceTarget(int? src, int? tgt)
+    {
+        if (src.HasValue) _currentSourceID = src;
+        if (tgt.HasValue) _currentTargetID = tgt;
+    }
+
     public void StartRecording(Channel channel, int? src, int? tgt, LinkedList<byte[]> preRollBuffer)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
         var filename = $"rec_{now}_{channel.Frequency}.raw";
         
         // Ensure data dir exists
@@ -59,6 +66,7 @@ public class RecordingService : IRecordingService
             _recordingStartTime = now;
             _currentSourceID = src;
             _currentTargetID = tgt;
+
 
             try 
             {

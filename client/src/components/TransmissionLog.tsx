@@ -515,14 +515,9 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                                 </Typography>
                             )}
                             <Box display="flex" gap={1} mt={0.5} flexWrap="wrap">
-                                {log.sourceID && (
+                                {(log.sourceID || log.targetID) && (
                                     <Typography variant="caption" sx={{ color: '#ffaa00', fontSize: '10px', fontFamily: 'monospace' }}>
-                                        From: {log.sourceID}
-                                    </Typography>
-                                )}
-                                {log.targetID && (
-                                    <Typography variant="caption" sx={{ color: '#00bfff', fontSize: '10px', fontFamily: 'monospace' }}>
-                                        To: {log.targetID}
+                                        {log.sourceID ?? '?'} → {log.targetID ?? '?'}
                                     </Typography>
                                 )}
                                 {log.lat && log.lat !== 0 && (

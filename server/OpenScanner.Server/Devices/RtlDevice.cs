@@ -922,6 +922,12 @@ public class RtlDevice : BackgroundService, IRadioSource
                 _preRollBuffer.Clear();
             }
         }
+        else if (src.HasValue || tgt.HasValue)
+        {
+            // Update IDs mid-recording — the first activity event (sync line) often
+            // fires before dsd-fme emits the TGT/SRC line, so the IDs arrive late.
+            _recordingService.UpdateSourceTarget(src, tgt);
+        }
 
         ResetActivityTimeout();
     }
