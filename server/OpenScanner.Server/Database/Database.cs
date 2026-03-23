@@ -79,6 +79,7 @@ public class Database : IDatabase
         try { conn.Execute("ALTER TABLE channels ADD COLUMN dmrColorCode INTEGER;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: dmrColorCode column already exists or failed"); }
         try { conn.Execute("ALTER TABLE channels ADD COLUMN dmrTalkgroup INTEGER;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: dmrTalkgroup column already exists or failed"); }
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN isFavorite INTEGER DEFAULT 0;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: isFavorite column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE transmissions ADD COLUMN speakerChain TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: speakerChain column already exists or failed"); }
 
         conn.Execute(@"
             CREATE TABLE IF NOT EXISTS fire_tones (

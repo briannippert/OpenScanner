@@ -532,19 +532,40 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                                 <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#444', fontSize: '0.68rem' }}>
                                     {log.frequency.toFixed(3)} MHz
                                 </Typography>
-                                {(log.sourceID || log.targetID) && (
+                                {(log.speakerChain || log.sourceID || log.targetID) && (
                                     <>
                                         <Typography variant="caption" sx={{ color: '#333', fontSize: '0.65rem' }}>·</Typography>
                                         <Box display="flex" alignItems="center" gap={0.4}>
-                                            <Typography variant="caption" sx={{ color: '#555', fontSize: '0.65rem', fontFamily: 'monospace' }}>SRC</Typography>
-                                            <Typography variant="caption" sx={{ color: '#ffaa00', fontSize: '0.7rem', fontFamily: 'monospace', fontWeight: 'bold' }}>
-                                                {log.sourceID ?? '?'}
-                                            </Typography>
-                                            <Typography variant="caption" sx={{ color: '#444', fontSize: '0.65rem' }}>→</Typography>
-                                            <Typography variant="caption" sx={{ color: '#555', fontSize: '0.65rem', fontFamily: 'monospace' }}>TG</Typography>
-                                            <Typography variant="caption" sx={{ color: '#00bfff', fontSize: '0.7rem', fontFamily: 'monospace', fontWeight: 'bold' }}>
-                                                {log.targetID ?? '?'}
-                                            </Typography>
+                                            {log.speakerChain ? (
+                                                // Multi-speaker chain: "12345 → 67890 → 12345 → TG 763901"
+                                                <>
+                                                    <Typography variant="caption" sx={{ color: '#ffaa00', fontSize: '0.7rem', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                                                        {log.speakerChain}
+                                                    </Typography>
+                                                    {log.targetID && (
+                                                        <>
+                                                            <Typography variant="caption" sx={{ color: '#444', fontSize: '0.65rem' }}>→</Typography>
+                                                            <Typography variant="caption" sx={{ color: '#555', fontSize: '0.65rem', fontFamily: 'monospace' }}>TG</Typography>
+                                                            <Typography variant="caption" sx={{ color: '#00bfff', fontSize: '0.7rem', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                                                                {log.targetID}
+                                                            </Typography>
+                                                        </>
+                                                    )}
+                                                </>
+                                            ) : (
+                                                // Single speaker: "SRC 12345 → TG 763901"
+                                                <>
+                                                    <Typography variant="caption" sx={{ color: '#555', fontSize: '0.65rem', fontFamily: 'monospace' }}>SRC</Typography>
+                                                    <Typography variant="caption" sx={{ color: '#ffaa00', fontSize: '0.7rem', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                                                        {log.sourceID ?? '?'}
+                                                    </Typography>
+                                                    <Typography variant="caption" sx={{ color: '#444', fontSize: '0.65rem' }}>→</Typography>
+                                                    <Typography variant="caption" sx={{ color: '#555', fontSize: '0.65rem', fontFamily: 'monospace' }}>TG</Typography>
+                                                    <Typography variant="caption" sx={{ color: '#00bfff', fontSize: '0.7rem', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                                                        {log.targetID ?? '?'}
+                                                    </Typography>
+                                                </>
+                                            )}
                                         </Box>
                                     </>
                                 )}

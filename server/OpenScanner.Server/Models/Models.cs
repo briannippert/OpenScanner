@@ -160,6 +160,11 @@ public class CallLog
     /// P25 Talkgroup ID.
     /// </summary>
     public int? TargetID { get; set; }
+
+    /// <summary>
+    /// Ordered chain of speaker IDs for the call, e.g. "12345 → 67890 → 12345".
+    /// </summary>
+    public string? SpeakerChain { get; set; }
     
     /// <summary>
     /// Filename of the audio recording (relative to /audio).
@@ -189,7 +194,7 @@ public class CallLog
 
     public CallLog() { }
 
-    public CallLog(string id, string timestamp, double frequency, string alphaTag, string description, double? lat, double? lon, string? audioPath, double? duration, string? transcription = null, int? sourceID = null, int? targetID = null, string? detectedTone = null)
+    public CallLog(string id, string timestamp, double frequency, string alphaTag, string description, double? lat, double? lon, string? audioPath, double? duration, string? transcription = null, int? sourceID = null, int? targetID = null, string? detectedTone = null, string? speakerChain = null)
     {
         Id = id;
         Timestamp = timestamp;
@@ -204,6 +209,7 @@ public class CallLog
         SourceID = sourceID;
         TargetID = targetID;
         DetectedTone = detectedTone;
+        SpeakerChain = speakerChain;
     }
 }
 
@@ -327,6 +333,7 @@ public record ScannerState(
     string? LastTranscription = null,
     int? SourceID = null,
     int? TargetID = null,
+    string? SpeakerChain = null,
     string? CurrentTone = null,
     string? LastDetectedTone = null
 );

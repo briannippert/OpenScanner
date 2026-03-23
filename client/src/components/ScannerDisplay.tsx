@@ -234,7 +234,9 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                 fontFamily: 'monospace',
                                 letterSpacing: 1
                             }}>
-                                {state.sourceID ?? '?'} → {state.targetID ?? '?'}
+                                {state.speakerChain
+                                    ? `${state.speakerChain} → TG ${state.targetID ?? '?'}`
+                                    : `${state.sourceID ?? '?'} → TG ${state.targetID ?? '?'}`}
                             </Typography>
                         )}
                             </>

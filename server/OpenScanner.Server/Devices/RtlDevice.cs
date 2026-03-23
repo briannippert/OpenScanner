@@ -805,6 +805,9 @@ public class RtlDevice : BackgroundService, IRadioSource
     private void StartDecoding(Channel channel)
     {
         StopDecoding();
+
+        // Reset per-call state for the new channel.
+        UpdateState(_state with { SourceID = null, TargetID = null, SpeakerChain = null });
         
         _decodeCts = new CancellationTokenSource();
         var token = _decodeCts.Token;
@@ -897,9 +900,17 @@ public class RtlDevice : BackgroundService, IRadioSource
         // STRICT ATTRIBUTION: Ignore activity if we have moved to a different channel
         if (_state.CurrentChannel == null || Math.Abs(_state.CurrentChannel.Frequency - originChannel.Frequency) > 0.001) return;
 
-        // Capture IDs BEFORE UpdateState overwrites them — needed for split detection below.
+        // Capture the previous source ID before UpdateState overwrites it.
         var prevSourceID = _state.SourceID;
-        var prevTargetID = _state.TargetID;
+
+        // Build the live speaker chain for the UI: append when the talker changes.
+        string? updatedChain = _state.SpeakerChain;
+        if (src.HasValue && src != prevSourceID)
+        {
+            updatedChain = updatedChain == null
+                ? src.Value.ToString()
+                : $"{updatedChain} → {src.Value}";
+        }
 
         // Valid Activity detected
         if (_state.Status != "RECEIVING" || 
@@ -909,7 +920,8 @@ public class RtlDevice : BackgroundService, IRadioSource
             UpdateState(_state with { 
                 Status = "RECEIVING", 
                 SourceID = src ?? _state.SourceID, 
-                TargetID = tgt ?? _state.TargetID, 
+                TargetID = tgt ?? _state.TargetID,
+                SpeakerChain = updatedChain,
                 CurrentTone = tone ?? _state.CurrentTone,
                 LastTranscription = null 
             });
@@ -931,21 +943,22 @@ public class RtlDevice : BackgroundService, IRadioSource
                 _preRollBuffer.Clear();
             }
         }
-        else if (src.HasValue && tgt.HasValue && prevSourceID.HasValue && prevTargetID.HasValue
-                 && (src != prevSourceID || tgt != prevTargetID))
+        else if (src.HasValue)
         {
-            // SRC/TG changed while recording — a new talker or talkgroup is active.
-            // Close the current transmission and open a fresh one so each gets its own log entry.
-            // Use prevSourceID/prevTargetID for the comparison: _state was already updated above.
-            _recordingService.StopRecording(originChannel, _lastDetectedTone);
-            _lastDetectedTone = null;
-            _recordingService.StartRecording(originChannel, src, tgt, new LinkedList<byte[]>());
+            if (!prevSourceID.HasValue)
+            {
+                // Late-arriving IDs — first activity event fired before dsd-fme emitted TGT/SRC.
+                _recordingService.UpdateSourceTarget(src, tgt);
+            }
+            else if (src != prevSourceID)
+            {
+                // Talker changed — append to the speaker chain within the same recording.
+                _recordingService.AppendSpeaker(src.Value);
+            }
         }
-        else if ((src.HasValue || tgt.HasValue) && !prevSourceID.HasValue)
+        else if (tgt.HasValue && !prevSourceID.HasValue)
         {
-            // Late-arriving IDs — the first activity event (sync line) fired before dsd-fme
-            // emitted the TGT/SRC line. Only update when the recording has no confirmed IDs yet.
-            _recordingService.UpdateSourceTarget(src, tgt);
+            _recordingService.UpdateSourceTarget(null, tgt);
         }
 
         ResetActivityTimeout();

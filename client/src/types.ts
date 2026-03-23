@@ -40,6 +40,7 @@ export interface ScannerState {
     lastTranscription?: string;
     sourceID?: number;
     targetID?: number;
+    speakerChain?: string;
     currentTone?: string;
     lastDetectedTone?: string;
 }
@@ -57,6 +58,7 @@ export interface CallLog {
     transcription?: string;
     sourceID?: number;
     targetID?: number;
+    speakerChain?: string;
     detectedTone?: string;
     isFavorite?: boolean;
 }
