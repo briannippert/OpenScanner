@@ -99,17 +99,6 @@ public class Database : IDatabase
         {
             conn.Execute("INSERT INTO settings (key, value) VALUES ('EnableTranscription', 'true')");
         }
-
-        var count = conn.ExecuteScalar<int>("SELECT count(*) FROM channels");
-        if (count == 0)
-        {
-            var channels = _configuration.GetSection("Channels").Get<List<Channel>>();
-            if (channels != null && channels.Any())
-            {
-                var seedSql = SqlLoader.GetSql("Channels/Seed.sql");
-                conn.Execute(seedSql, channels);
-            }
-        }
     }
 
     /// <inheritdoc />
