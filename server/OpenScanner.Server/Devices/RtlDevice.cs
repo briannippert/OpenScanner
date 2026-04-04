@@ -146,7 +146,8 @@ public class RtlDevice : BackgroundService, IRadioSource
             CurrentFrequency = null, 
             CurrentChannel = null, 
             SignalStrength = 0,
-            ManualHoldFrequency = null
+            ManualHoldFrequency = null,
+            ParallelChannels = null
         });
     }
 
@@ -199,7 +200,8 @@ public class RtlDevice : BackgroundService, IRadioSource
             CurrentFrequency = null, 
             CurrentChannel = null, 
             SignalStrength = 0,
-            ManualHoldFrequency = null
+            ManualHoldFrequency = null,
+            ParallelChannels = null
         });
         
         // Small delay to let hardware settle before restarting the scan
@@ -297,7 +299,7 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         _channelHits.Clear();
         _scanStartTime = DateTime.UtcNow;
-        UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0, ManualHoldFrequency = null });
+        UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0, ManualHoldFrequency = null, ParallelChannels = null });
 
         var activeChannels = _channelService.Channels.Where(c => !c.Avoid).ToList();
         if (activeChannels.Count == 0) return;
@@ -1156,7 +1158,8 @@ public class RtlDevice : BackgroundService, IRadioSource
             Status = _manualOverride ? "MONITORING" : "RECEIVING",
             CurrentFrequency = channel.Frequency,
             CurrentChannel = channel,
-            IsAudioStreaming = true
+            IsAudioStreaming = true,
+            ParallelChannels = null
         });
 
         // Brief delay to let the USB device release after scanner stop before decoder claims it
