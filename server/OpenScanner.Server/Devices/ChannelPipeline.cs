@@ -30,11 +30,10 @@ public class ChannelPipeline : IDisposable
     private bool _isActive;
     private DateTime _lastActivityTime = DateTime.MinValue;
 
-    // Audio energy detection for analog modes (NFM/AM)
-    private const double AnalogSilenceThresholdDb = -38.0;
-    private const int AnalogEnergyWindowSamples = 2400; // 50ms at 48kHz
-    private long _energyAccumulator;
-    private int _energySampleCount;
+    // Analog squelch uses pre-demod IQ power from the channelizer.
+    // The threshold is calibrated against the IQ magnitude dB scale where
+    // noise floor sits around -35 to -45 dB and a carrier reads -5 to -15 dB.
+    private const double AnalogSquelchThresholdDb = -28.0;
 
     // Signal level metering (read from channelizer's pre-demod IQ power)
 
@@ -144,10 +143,10 @@ public class ChannelPipeline : IDisposable
         else
         {
             // Analog mode: channelizer output IS the audio.
-            // Check audio energy for activity detection.
-            bool hasEnergy = CheckAudioEnergy(_audioBuffer, audioBytes);
+            // Use pre-demod IQ power for squelch (post-demod FM noise is always loud).
+            bool hasSignal = _channelizer.SignalPowerDb > AnalogSquelchThresholdDb;
 
-            if (hasEnergy)
+            if (hasSignal)
             {
                 if (!_isActive)
                 {
@@ -156,7 +155,7 @@ public class ChannelPipeline : IDisposable
                 }
                 _lastActivityTime = DateTime.UtcNow;
 
-                // Emit audio only when there's energy (squelch gate)
+                // Emit audio only when carrier is present (squelch gate)
                 var chunk = new byte[audioBytes];
                 Buffer.BlockCopy(_audioBuffer, 0, chunk, 0, audioBytes);
                 OnAudio?.Invoke(_channel, chunk);
@@ -247,34 +246,6 @@ public class ChannelPipeline : IDisposable
                 _logger.LogError(ex, $"Decoder error for {_channel.AlphaTag}");
             }
         }, token);
-    }
-
-    /// <summary>
-    /// Check audio energy level for analog squelch detection.
-    /// Returns true if the audio has sufficient energy (transmission present).
-    /// </summary>
-    private bool CheckAudioEnergy(byte[] audio, int length)
-    {
-        int samples = length / 2;
-        for (int i = 0; i < samples; i++)
-        {
-            short sample = (short)(audio[i * 2] | (audio[i * 2 + 1] << 8));
-            _energyAccumulator += (long)sample * sample;
-            _energySampleCount++;
-
-            if (_energySampleCount >= AnalogEnergyWindowSamples)
-            {
-                double rms = Math.Sqrt((double)_energyAccumulator / _energySampleCount);
-                double rmsDb = 20.0 * Math.Log10(rms / 32768.0 + 1e-9);
-                _energyAccumulator = 0;
-                _energySampleCount = 0;
-
-                return rmsDb > AnalogSilenceThresholdDb;
-            }
-        }
-
-        // Not enough samples yet; keep previous state
-        return _isActive;
     }
 
 }
