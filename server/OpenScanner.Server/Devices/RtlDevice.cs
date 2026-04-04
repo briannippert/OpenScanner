@@ -499,6 +499,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         var buffer = new byte[bufferSize];
         var baseStream = _scannerProcess.StandardOutput.BaseStream;
         var lastFftUpdate = DateTime.MinValue;
+        var lastMeterUpdate = DateTime.MinValue;
         var segmentStartTime = DateTime.UtcNow;
 
         // FFT parameters for spectrum display (reuse existing logic)
@@ -554,6 +555,13 @@ public class RtlDevice : BackgroundService, IRadioSource
                         ProcessSamplesForSpectrum(buffer, bytesRead, bank.CenterFrequency, fftScanRate);
                     }
                     catch (Exception ex) { _logger.LogError(ex, "Error processing spectrum"); }
+                }
+
+                // Rate-limited signal meter update (~5 Hz)
+                if ((DateTime.UtcNow - lastMeterUpdate).TotalMilliseconds >= 200)
+                {
+                    lastMeterUpdate = DateTime.UtcNow;
+                    UpdateParallelState();
                 }
             }
         }

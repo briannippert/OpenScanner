@@ -43,6 +43,19 @@ public class Channelizer
     // FM scaling: convert phase-diff to normalized audio
     private readonly double _fmScale;
 
+    // Signal power metering (IQ magnitude before demodulation)
+    private double _iqPowerAccum;
+    private int _iqPowerCount;
+    private double _signalPowerDb = -90.0;
+    private const int IqPowerWindow = 4800; // ~100ms at 48kHz output rate
+
+    /// <summary>
+    /// Latest measured RF signal power in dB (IQ magnitude before demodulation).
+    /// Updated every ~100ms. Useful for signal strength metering.
+    /// Noise floor is typically around -30 to -40 dB; a carrier reads -5 to 0 dB.
+    /// </summary>
+    public double SignalPowerDb => _signalPowerDb;
+
     /// <summary>
     /// Maximum output bytes for a given input length (for buffer pre-allocation).
     /// </summary>
@@ -205,6 +218,18 @@ public class Channelizer
                 fQ = fQ1;
             }
 
+            // Measure IQ power before demodulation (true RF signal strength)
+            double mag2 = fI * fI + fQ * fQ;
+            _iqPowerAccum += mag2;
+            _iqPowerCount++;
+            if (_iqPowerCount >= IqPowerWindow)
+            {
+                double rmsMag = Math.Sqrt(_iqPowerAccum / _iqPowerCount);
+                _signalPowerDb = 20.0 * Math.Log10(rmsMag + 1e-12);
+                _iqPowerAccum = 0;
+                _iqPowerCount = 0;
+            }
+
             // Demodulate
             double sample;
             if (_amMode)
@@ -247,6 +272,7 @@ public class Channelizer
         Array.Clear(_delayI2); Array.Clear(_delayQ2); _writePtr2 = 0; _decimCount2 = 0;
         _prevI = 0; _prevQ = 0;
         _amDcEstimate = 0;
+        _iqPowerAccum = 0; _iqPowerCount = 0; _signalPowerDb = -90.0;
     }
 
     /// <summary>

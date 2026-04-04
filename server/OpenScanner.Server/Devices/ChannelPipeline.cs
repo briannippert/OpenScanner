@@ -36,11 +36,7 @@ public class ChannelPipeline : IDisposable
     private long _energyAccumulator;
     private int _energySampleCount;
 
-    // Signal level metering (always active, for UI dB display)
-    private double _signalLevelDb = -90.0;
-    private long _meterAccumulator;
-    private int _meterSampleCount;
-    private const int MeterWindowSamples = 4800; // 100ms at 48kHz
+    // Signal level metering (read from channelizer's pre-demod IQ power)
 
     /// <summary>Fires when decoded audio is available.</summary>
     public event Action<Channel, byte[]>? OnAudio;
@@ -57,8 +53,8 @@ public class ChannelPipeline : IDisposable
     /// <summary>Whether this channel currently has active audio/voice.</summary>
     public bool IsActive => _isActive;
 
-    /// <summary>Latest measured signal level in dB (updated every ~100ms).</summary>
-    public double SignalLevelDb => _signalLevelDb;
+    /// <summary>Latest measured signal level in dB (IQ power before demod, updated every ~100ms).</summary>
+    public double SignalLevelDb => _channelizer.SignalPowerDb;
 
     /// <summary>The channel this pipeline is assigned to.</summary>
     public Channel Channel => _channel;
@@ -134,9 +130,6 @@ public class ChannelPipeline : IDisposable
 
         int audioBytes = _channelizer.ProcessIQ(iq, length, _audioBuffer);
         if (audioBytes <= 0) return;
-
-        // Update signal level meter (runs for all modes)
-        UpdateSignalMeter(_audioBuffer, audioBytes);
 
         bool needsDecoder = NeedsDecoderProcess(_channel.Mode);
 
@@ -284,26 +277,4 @@ public class ChannelPipeline : IDisposable
         return _isActive;
     }
 
-    /// <summary>
-    /// Update the signal level meter from channelizer output audio.
-    /// Computes RMS dB over a sliding window, always active regardless of mode.
-    /// </summary>
-    private void UpdateSignalMeter(byte[] audio, int length)
-    {
-        int samples = length / 2;
-        for (int i = 0; i < samples; i++)
-        {
-            short sample = (short)(audio[i * 2] | (audio[i * 2 + 1] << 8));
-            _meterAccumulator += (long)sample * sample;
-            _meterSampleCount++;
-
-            if (_meterSampleCount >= MeterWindowSamples)
-            {
-                double rms = Math.Sqrt((double)_meterAccumulator / _meterSampleCount);
-                _signalLevelDb = 20.0 * Math.Log10(rms / 32768.0 + 1e-9);
-                _meterAccumulator = 0;
-                _meterSampleCount = 0;
-            }
-        }
-    }
 }
