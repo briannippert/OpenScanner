@@ -128,31 +128,58 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                 }}>
                                     PARALLEL SCAN
                                 </Typography>
-                                <Box display="flex" justifyContent="center" flexWrap="wrap" gap={0.5}>
-                                    {state.parallelChannels!.map(pc => (
-                                        <Chip
-                                            key={pc.channel.frequency}
-                                            label={
-                                                pc.isActive
-                                                    ? `${pc.channel.alphaTag || pc.channel.frequency}${pc.isRecording ? ' [REC]' : ''}`
-                                                    : pc.channel.alphaTag || pc.channel.frequency.toString()
-                                            }
-                                            size="small"
-                                            onClick={onScan ? () => onScan(pc.channel.frequency) : undefined}
-                                            sx={{
-                                                height: 22,
-                                                fontSize: '0.65rem',
-                                                fontFamily: 'monospace',
-                                                cursor: onScan ? 'pointer' : 'default',
-                                                bgcolor: pc.isActive ? 'rgba(0, 255, 0, 0.15)' : '#1a1a1a',
-                                                color: pc.isActive ? '#00ff00' : '#666',
-                                                border: pc.isActive ? '1px solid #00ff00' : '1px solid transparent',
-                                                boxShadow: pc.isActive ? '0 0 8px rgba(0, 255, 0, 0.3)' : 'none',
-                                                transition: 'all 0.3s ease',
-                                                fontWeight: pc.isActive ? 'bold' : 'normal',
-                                            }}
-                                        />
-                                    ))}
+                                <Box display="flex" flexDirection="column" gap={1} width="100%">
+                                    {state.parallelChannels!.map(pc => {
+                                        const dbMin = -60;
+                                        const dbMax = -10;
+                                        const clampedDb = Math.max(dbMin, Math.min(dbMax, pc.signalStrength));
+                                        const meterPct = ((clampedDb - dbMin) / (dbMax - dbMin)) * 100;
+                                        const meterColor = pc.isActive ? '#00ff00' : (meterPct > 30 ? '#ffaa00' : '#333');
+                                        return (
+                                            <Box key={pc.channel.frequency} display="flex" alignItems="center" gap={1}>
+                                                <Typography sx={{
+                                                    fontFamily: 'monospace',
+                                                    fontSize: '0.7rem',
+                                                    color: pc.isActive ? '#00ff00' : '#888',
+                                                    fontWeight: pc.isActive ? 'bold' : 'normal',
+                                                    minWidth: { xs: 60, sm: 90 },
+                                                    whiteSpace: 'nowrap',
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis',
+                                                    transition: 'color 0.3s ease',
+                                                }}>
+                                                    {pc.channel.alphaTag || pc.channel.frequency}
+                                                    {pc.isRecording ? ' [REC]' : ''}
+                                                </Typography>
+                                                <Box sx={{
+                                                    flex: 1,
+                                                    height: 6,
+                                                    bgcolor: '#111',
+                                                    borderRadius: 1,
+                                                    overflow: 'hidden',
+                                                    border: '1px solid #222',
+                                                }}>
+                                                    <Box sx={{
+                                                        width: `${meterPct}%`,
+                                                        height: '100%',
+                                                        bgcolor: meterColor,
+                                                        borderRadius: 1,
+                                                        transition: 'width 0.15s linear, background-color 0.3s ease',
+                                                        boxShadow: pc.isActive ? `0 0 6px ${meterColor}` : 'none',
+                                                    }} />
+                                                </Box>
+                                                <Typography sx={{
+                                                    fontFamily: 'monospace',
+                                                    fontSize: '0.6rem',
+                                                    color: '#555',
+                                                    minWidth: 36,
+                                                    textAlign: 'right',
+                                                }}>
+                                                    {pc.signalStrength > -90 ? `${pc.signalStrength.toFixed(0)}dB` : '---'}
+                                                </Typography>
+                                            </Box>
+                                        );
+                                    })}
                                 </Box>
                                 {state.parallelChannels!.filter(pc => pc.isActive && pc.sourceID).map(pc => (
                                     <Typography key={pc.channel.frequency} variant="caption" sx={{

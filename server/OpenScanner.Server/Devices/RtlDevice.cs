@@ -738,7 +738,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         var states = _parallelPipelines.Select(p => new ParallelChannelState(
             Channel: p.Channel,
             IsActive: p.IsActive,
-            SignalStrength: 0, // Could be computed from channelizer output energy
+            SignalStrength: p.SignalLevelDb,
             IsRecording: rs?.IsChannelRecording(p.Channel.Frequency) ?? false,
             SourceID: null,
             TargetID: null,
