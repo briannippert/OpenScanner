@@ -14,6 +14,17 @@ export interface Channel {
     dmrTalkgroup?: number;
 }
 
+export interface ParallelChannelState {
+    channel: Channel;
+    isActive: boolean;
+    signalStrength: number;
+    isRecording: boolean;
+    sourceID?: number;
+    targetID?: number;
+    speakerChain?: string;
+    currentTone?: string;
+}
+
 export interface ScannerState {
     status: 'SCANNING' | 'RECEIVING' | 'MONITORING' | 'IDLE';
     isHardwareConnected?: boolean;
@@ -43,6 +54,7 @@ export interface ScannerState {
     speakerChain?: string;
     currentTone?: string;
     lastDetectedTone?: string;
+    parallelChannels?: ParallelChannelState[];
 }
 
 export interface CallLog {

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
+using OpenScanner.Server.DSP;
 using OpenScanner.Server.Models;
 using OpenScanner.Server.Interfaces;
 using OpenScanner.Server.Services;
@@ -54,6 +55,13 @@ public class RtlDevice : BackgroundService, IRadioSource
     private const int PreRollMaxBytes = 96000 * 5; // ~5 seconds at 48kHz 16-bit to capture full transmission start
 
     private readonly ConcurrentDictionary<double, DateTime> _channelLockouts = new();
+
+    // Parallel FastScan mode
+    private List<ChannelPipeline>? _parallelPipelines;
+    private readonly ConcurrentDictionary<double, CancellationTokenSource> _parallelActivityTimeouts = new();
+    private readonly ConcurrentDictionary<double, string?> _parallelLastTones = new();
+    // Stereo pan positions for parallel channels: maps frequency -> (leftGain, rightGain)
+    private Dictionary<double, (double Left, double Right)> _parallelPanMap = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RtlDevice"/> class.
@@ -138,7 +146,8 @@ public class RtlDevice : BackgroundService, IRadioSource
             CurrentFrequency = null, 
             CurrentChannel = null, 
             SignalStrength = 0,
-            ManualHoldFrequency = null
+            ManualHoldFrequency = null,
+            ParallelChannels = null
         });
     }
 
@@ -191,7 +200,8 @@ public class RtlDevice : BackgroundService, IRadioSource
             CurrentFrequency = null, 
             CurrentChannel = null, 
             SignalStrength = 0,
-            ManualHoldFrequency = null
+            ManualHoldFrequency = null,
+            ParallelChannels = null
         });
         
         // Small delay to let hardware settle before restarting the scan
@@ -258,6 +268,29 @@ public class RtlDevice : BackgroundService, IRadioSource
         _scanCts?.Cancel();
         try { _scannerProcess?.Kill(true); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to kill scanner process"); }
         _scannerProcess = null;
+
+        // Clean up parallel pipelines
+        StopParallelPipelines();
+    }
+
+    private void StopParallelPipelines()
+    {
+        if (_parallelPipelines != null)
+        {
+            foreach (var pipeline in _parallelPipelines)
+            {
+                try { pipeline.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing channel pipeline"); }
+            }
+            _parallelPipelines = null;
+        }
+
+        // Cancel all per-channel activity timeouts
+        foreach (var kvp in _parallelActivityTimeouts)
+        {
+            kvp.Value.Cancel();
+        }
+        _parallelActivityTimeouts.Clear();
+        _parallelLastTones.Clear();
     }
 
     private void StartScanning()
@@ -266,18 +299,26 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         _channelHits.Clear();
         _scanStartTime = DateTime.UtcNow;
-        UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0, ManualHoldFrequency = null });
+        UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0, ManualHoldFrequency = null, ParallelChannels = null });
 
         var activeChannels = _channelService.Channels.Where(c => !c.Avoid).ToList();
         if (activeChannels.Count == 0) return;
 
         var banks = CalculateScanBanks(activeChannels);
-        var rate = 2048000;
 
         _scanCts = new CancellationTokenSource();
         var token = _scanCts.Token;
 
-        Task.Run(() => RunScannerLoop(banks, rate, token), token);
+        // Use parallel mode for single-bank FastScan with multiple channels
+        if (banks.Count == 1 && banks[0].Mode == ScanMode.FastScan && banks[0].Frequencies.Count > 0)
+        {
+            Task.Run(() => RunParallelScan(banks[0], activeChannels, token), token);
+        }
+        else
+        {
+            var rate = 2048000;
+            Task.Run(() => RunScannerLoop(banks, rate, token), token);
+        }
     }
 
     /// <summary>
@@ -339,6 +380,383 @@ public class RtlDevice : BackgroundService, IRadioSource
         {
             UpdateState(_state with { Status = "IDLE" });
         }
+    }
+
+    /// <summary>
+    /// Parallel FastScan: runs all channel decoders simultaneously using a single rtl_sdr
+    /// wideband capture. Each channel is isolated via a C# DSP channelizer and fed to its
+    /// own decoder. Activity is detected by actual decoder output, never missing transmission starts.
+    /// </summary>
+    private async Task RunParallelScan(ScanBank bank, List<Channel> channels, CancellationToken token)
+    {
+        // Select a sample rate that covers all channels and gives integer decimation to 48 kHz
+        double spreadHz = bank.SpreadMHz * 1e6;
+        int sampleRate = Channelizer.SelectSampleRate(spreadHz);
+        int outputRate = 48000;
+
+        _logger.LogInformation(
+            $"Parallel FastScan: {channels.Count} channels, spread {bank.SpreadMHz:F2} MHz, " +
+            $"sample rate {sampleRate / 1e6:F3} MHz, center {bank.CenterFrequency:F3} MHz");
+
+        // Create a ChannelPipeline for each active channel
+        var pipelines = new List<ChannelPipeline>();
+        foreach (var ch in channels)
+        {
+            if (ch.Avoid) continue;
+
+            var pipeline = new ChannelPipeline(
+                ch, sampleRate, outputRate, bank.CenterFrequency,
+                _decoderFactory, _logger, _state.Squelch ?? -55.0);
+
+            // Wire up events
+            pipeline.OnAudio += HandleParallelAudio;
+            pipeline.OnActivity += HandleParallelActivity;
+            pipeline.OnActivityEnded += HandleParallelActivityEnded;
+            pipeline.OnMetadata += (channel, line) => _logger.LogInformation($"[{channel.AlphaTag}] {line}");
+
+            pipeline.Start(token);
+            pipelines.Add(pipeline);
+        }
+        _parallelPipelines = pipelines;
+
+        // Compute stereo pan positions: channels sorted by frequency get distributed L to R
+        _parallelPanMap.Clear();
+        var sortedFreqs = pipelines.Select(p => p.Channel.Frequency).OrderBy(f => f).ToList();
+        for (int i = 0; i < sortedFreqs.Count; i++)
+        {
+            double pan; // 0.0 = full left, 1.0 = full right
+            if (sortedFreqs.Count == 1)
+                pan = 0.5; // center
+            else
+                pan = (double)i / (sortedFreqs.Count - 1);
+
+            // Equal-power panning: left = cos(pan * pi/2), right = sin(pan * pi/2)
+            double leftGain = Math.Cos(pan * Math.PI / 2.0);
+            double rightGain = Math.Sin(pan * Math.PI / 2.0);
+            _parallelPanMap[sortedFreqs[i]] = (leftGain, rightGain);
+
+            _logger.LogInformation(
+                $"Parallel pan: {pipelines.First(p => p.Channel.Frequency == sortedFreqs[i]).Channel.AlphaTag} " +
+                $"({sortedFreqs[i]} MHz) -> L={leftGain:F2} R={rightGain:F2}");
+        }
+
+        // Build initial parallel channel states for the UI
+        UpdateParallelState();
+
+        // Start rtl_sdr wideband capture and distribute IQ to all pipelines
+        await Task.Delay(250, token); // USB settle time
+
+        var binPath = "/usr/bin/rtl_sdr";
+        var args = $"-f {bank.CenterFrequency:F3}M -s {sampleRate} -g 20 -b 1 -";
+        _logger.LogInformation($"Parallel Scanner: {binPath} {args}");
+
+        var psi = new ProcessStartInfo(binPath, args)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        try
+        {
+            _scannerProcess = Process.Start(psi);
+            UpdateState(_state with { IsHardwareConnected = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to start rtl_sdr for parallel scan");
+            UpdateState(_state with { IsHardwareConnected = false });
+            return;
+        }
+
+        if (_scannerProcess == null) return;
+
+        // Monitor stderr for hardware messages
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!token.IsCancellationRequested && !_scannerProcess.HasExited)
+                {
+                    var line = await _scannerProcess.StandardError.ReadLineAsync(token);
+                    if (string.IsNullOrEmpty(line)) continue;
+                    _logger.LogInformation($"Scanner HW: {line}");
+
+                    if (line.Contains("Found") || line.Contains("Using device"))
+                        UpdateState(_state with { IsHardwareConnected = true });
+                    if (line.Contains("No supported devices") || line.Contains("Failed to open"))
+                    {
+                        UpdateState(_state with { IsHardwareConnected = false });
+                        _scanCts?.Cancel();
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { _logger.LogDebug(ex, "Error monitoring scanner stderr"); }
+        }, token);
+
+        // Main IQ distribution loop
+        var bufferSize = 16384 * 4;
+        var buffer = new byte[bufferSize];
+        var baseStream = _scannerProcess.StandardOutput.BaseStream;
+        var lastFftUpdate = DateTime.MinValue;
+        var lastMeterUpdate = DateTime.MinValue;
+        var segmentStartTime = DateTime.UtcNow;
+
+        // FFT parameters for spectrum display (reuse existing logic)
+        int fftScanRate = sampleRate; // Use actual sample rate for FFT calculations
+
+        try
+        {
+            long totalBytesRead = 0;
+            while (!token.IsCancellationRequested)
+            {
+                // Watchdog
+                using var watchdogCts = new CancellationTokenSource();
+                var readTask = baseStream.ReadAsync(buffer, 0, buffer.Length, token);
+                var timeoutTask = Task.Delay(5000, watchdogCts.Token);
+
+                var completedTask = await Task.WhenAny(readTask, timeoutTask);
+                if (completedTask == timeoutTask)
+                {
+                    bool isAlive = _scannerProcess != null && !_scannerProcess.HasExited;
+                    _logger.LogWarning($"Parallel scanner stalled. Process alive: {isAlive}. Restarting...");
+                    break;
+                }
+
+                watchdogCts.Cancel();
+                var bytesRead = await readTask;
+                if (bytesRead <= 0) break;
+
+                totalBytesRead += bytesRead;
+
+                // Warm-up: skip first 50ms
+                if ((DateTime.UtcNow - segmentStartTime).TotalMilliseconds < 50) continue;
+
+                // IQ dump support
+                if (_iqDumpStream != null)
+                    await _iqDumpStream.WriteAsync(buffer, 0, bytesRead, token);
+
+                // Distribute IQ to ALL channel pipelines (never skip - audio data must be continuous)
+                if (_parallelPipelines != null)
+                {
+                    foreach (var pipeline in _parallelPipelines)
+                    {
+                        try { pipeline.ProcessIQ(buffer, bytesRead); }
+                        catch (Exception ex) { _logger.LogError(ex, $"Error in pipeline for {pipeline.Channel.AlphaTag}"); }
+                    }
+                }
+
+                // Rate-limited FFT for spectrum display (~50 Hz)
+                if ((DateTime.UtcNow - lastFftUpdate).TotalMilliseconds >= 20)
+                {
+                    lastFftUpdate = DateTime.UtcNow;
+                    try
+                    {
+                        ProcessSamplesForSpectrum(buffer, bytesRead, bank.CenterFrequency, fftScanRate);
+                    }
+                    catch (Exception ex) { _logger.LogError(ex, "Error processing spectrum"); }
+                }
+
+                // Rate-limited signal meter update (~5 Hz)
+                if ((DateTime.UtcNow - lastMeterUpdate).TotalMilliseconds >= 200)
+                {
+                    lastMeterUpdate = DateTime.UtcNow;
+                    UpdateParallelState();
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { _logger.LogError(ex, "Error in parallel scan loop"); }
+        finally
+        {
+            try { _scannerProcess?.Kill(true); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to kill scanner process"); }
+            _scannerProcess = null;
+            StopParallelPipelines();
+        }
+
+        if (!token.IsCancellationRequested && _state.Status == "SCANNING")
+            UpdateState(_state with { Status = "IDLE", ParallelChannels = null });
+    }
+
+    /// <summary>
+    /// FFT spectrum calculation for UI display only (no carrier detection in parallel mode).
+    /// </summary>
+    private void ProcessSamplesForSpectrum(byte[] buffer, int length, double centerFreq, int sampleRate)
+    {
+        if (length < 1024) return;
+
+        int fftSize = 256;
+        int bytesNeeded = fftSize * 2;
+        int offset = length - bytesNeeded;
+        if (offset < 0) return;
+
+        var complexSamples = new Complex[fftSize];
+        for (int i = 0; i < fftSize; i++)
+        {
+            double iSample = (buffer[offset + i * 2] - 127.5) / 127.5;
+            double qSample = (buffer[offset + i * 2 + 1] - 127.5) / 127.5;
+            double window = 0.5 * (1 - Math.Cos(2 * Math.PI * i / (fftSize - 1)));
+            complexSamples[i] = new Complex(iSample * window, qSample * window);
+        }
+
+        FftSharp.FFT.Forward(complexSamples);
+
+        var fftDb = new double[fftSize];
+        for (int i = 0; i < fftSize; i++)
+        {
+            var power = complexSamples[i].Magnitude * complexSamples[i].Magnitude;
+            fftDb[i] = 10 * Math.Log10(power + 1e-9);
+        }
+
+        var shiftedDb = new double[fftSize];
+        Array.Copy(fftDb, fftSize / 2, shiftedDb, 0, fftSize / 2);
+        Array.Copy(fftDb, 0, shiftedDb, fftSize / 2, fftSize / 2);
+
+        for (int i = 0; i < fftSize; i++) shiftedDb[i] -= 20;
+
+        var spectrumPoints = new SpectrumPoint[fftSize];
+        for (int i = 0; i < fftSize; i++)
+        {
+            double freqOffset = (i - fftSize / 2.0) * (sampleRate / (double)fftSize);
+            spectrumPoints[i] = new SpectrumPoint((centerFreq * 1000000 + freqOffset) / 1000000, shiftedDb[i]);
+        }
+
+        UpdateState(_state with { RfSpectrum = spectrumPoints });
+    }
+
+    /// <summary>
+    /// Handle audio from a parallel channel pipeline. Pan to stereo L/R and send to browser.
+    /// </summary>
+    private void HandleParallelAudio(Channel channel, byte[] audio)
+    {
+        _toneDetector.ProcessAudio(audio);
+
+        // Convert mono s16le to stereo s16le with per-channel panning
+        var (leftGain, rightGain) = _parallelPanMap.GetValueOrDefault(channel.Frequency, (0.5, 0.5));
+        int monoSamples = audio.Length / 2;
+        var stereo = new byte[monoSamples * 4]; // 2 channels * 2 bytes per sample
+
+        for (int i = 0; i < monoSamples; i++)
+        {
+            short mono = (short)(audio[i * 2] | (audio[i * 2 + 1] << 8));
+            short left = (short)(mono * leftGain);
+            short right = (short)(mono * rightGain);
+
+            int outIdx = i * 4;
+            stereo[outIdx] = (byte)(left & 0xFF);
+            stereo[outIdx + 1] = (byte)((left >> 8) & 0xFF);
+            stereo[outIdx + 2] = (byte)(right & 0xFF);
+            stereo[outIdx + 3] = (byte)((right >> 8) & 0xFF);
+        }
+
+        OnAudio?.Invoke(stereo);
+
+        // Route mono to multi-channel recording (recordings stay mono per channel)
+        var rs = _recordingService as RecordingService;
+        if (rs != null && rs.IsChannelRecording(channel.Frequency))
+        {
+            _recordingService.ProcessAudio(channel.Frequency, audio);
+        }
+
+        UpdateParallelState();
+    }
+
+    /// <summary>
+    /// Handle activity detection from a parallel channel pipeline.
+    /// </summary>
+    private void HandleParallelActivity(Channel channel, int? src, int? tgt, string? tone)
+    {
+        _logger.LogInformation($"[Parallel] Activity on {channel.AlphaTag}: src={src} tgt={tgt} tone={tone}");
+
+        // Track per-channel tones
+        if (tone != null)
+        {
+            _parallelLastTones[channel.Frequency] = tone;
+            if (tone == "EMRG")
+                UpdateState(_state with { LastDetectedTone = "EMRG" });
+        }
+
+        // Start recording if not already
+        var rs = _recordingService as RecordingService;
+        if (rs != null && !rs.IsChannelRecording(channel.Frequency))
+        {
+            rs.StartParallelRecording(channel, src, tgt, null);
+        }
+        else if (rs != null && src.HasValue)
+        {
+            rs.UpdateSourceTarget(channel.Frequency, src, tgt);
+        }
+
+        // Reset per-channel activity timeout
+        ResetParallelActivityTimeout(channel);
+
+        UpdateParallelState();
+    }
+
+    /// <summary>
+    /// Handle activity ending on a parallel channel (analog modes).
+    /// </summary>
+    private void HandleParallelActivityEnded(Channel channel)
+    {
+        _logger.LogInformation($"[Parallel] Activity ended on {channel.AlphaTag}");
+
+        var rs = _recordingService as RecordingService;
+        _parallelLastTones.TryRemove(channel.Frequency, out var lastTone);
+        rs?.StopParallelRecording(channel.Frequency, lastTone);
+
+        UpdateParallelState();
+    }
+
+    /// <summary>
+    /// Reset the per-channel activity timeout. After 2s of no new activity events,
+    /// stop recording for that channel.
+    /// </summary>
+    private void ResetParallelActivityTimeout(Channel channel)
+    {
+        // Cancel existing timeout for this channel
+        if (_parallelActivityTimeouts.TryRemove(channel.Frequency, out var oldCts))
+            oldCts.Cancel();
+
+        var cts = new CancellationTokenSource();
+        _parallelActivityTimeouts[channel.Frequency] = cts;
+
+        Task.Delay(2000, cts.Token).ContinueWith(t =>
+        {
+            if (!t.IsCanceled)
+            {
+                _logger.LogInformation($"[Parallel] Activity timeout on {channel.AlphaTag}");
+                var rs = _recordingService as RecordingService;
+                _parallelLastTones.TryRemove(channel.Frequency, out var lastTone);
+                rs?.StopParallelRecording(channel.Frequency, lastTone);
+                _parallelActivityTimeouts.TryRemove(channel.Frequency, out _);
+
+                UpdateParallelState();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Build and broadcast the ParallelChannelState array to the UI.
+    /// </summary>
+    private void UpdateParallelState()
+    {
+        if (_parallelPipelines == null) return;
+
+        var rs = _recordingService as RecordingService;
+        var states = _parallelPipelines.Select(p => new ParallelChannelState(
+            Channel: p.Channel,
+            IsActive: p.IsActive,
+            SignalStrength: p.SignalLevelDb,
+            IsRecording: rs?.IsChannelRecording(p.Channel.Frequency) ?? false,
+            SourceID: null,
+            TargetID: null,
+            SpeakerChain: null,
+            CurrentTone: _parallelLastTones.GetValueOrDefault(p.Channel.Frequency)
+        )).ToArray();
+
+        UpdateState(_state with { ParallelChannels = states });
     }
 
     private async Task RunSingleScanSegment(double centerFreqMhz, int sampleRate, CancellationToken token)
@@ -740,7 +1158,8 @@ public class RtlDevice : BackgroundService, IRadioSource
             Status = _manualOverride ? "MONITORING" : "RECEIVING",
             CurrentFrequency = channel.Frequency,
             CurrentChannel = channel,
-            IsAudioStreaming = true
+            IsAudioStreaming = true,
+            ParallelChannels = null
         });
 
         // Brief delay to let the USB device release after scanner stop before decoder claims it
