@@ -26,9 +26,6 @@ public class ChannelPipeline : IDisposable
     // Pre-allocated output buffer for channelizer (avoids per-call allocation)
     private byte[] _audioBuffer;
 
-    // MDC1200 decoder for analog NFM channels
-    private Mdc1200Decoder? _mdcDecoder;
-
     // Activity state
     private bool _isActive;
     private DateTime _lastActivityTime = DateTime.MinValue;
@@ -93,13 +90,6 @@ public class ChannelPipeline : IDisposable
 
         // Pre-allocate audio buffer (generous size for typical IQ chunk of 65536 bytes)
         _audioBuffer = new byte[_channelizer.MaxOutputBytes(65536 * 2)];
-
-        // Create MDC1200 decoder for analog NFM channels
-        if (!NeedsDecoderProcess(channel.Mode) && channel.Mode?.ToUpper() != "AM")
-        {
-            _mdcDecoder = new Mdc1200Decoder();
-            _mdcDecoder.OnPacket += HandleMdc1200Packet;
-        }
     }
 
     /// <summary>
@@ -153,10 +143,6 @@ public class ChannelPipeline : IDisposable
         else
         {
             // Analog mode: channelizer output IS the audio.
-            // Feed MDC1200 decoder before squelch gate so we catch bursts
-            // at the very start/end of transmissions.
-            _mdcDecoder?.Process(_audioBuffer, audioBytes);
-
             // Use pre-demod IQ power for squelch (post-demod FM noise is always loud).
             bool hasSignal = _channelizer.SignalPowerDb > AnalogSquelchThresholdDb;
 
@@ -194,32 +180,9 @@ public class ChannelPipeline : IDisposable
         _decoder?.Stop();
         _decoder = null;
         _decoderCts?.Dispose();
-
-        if (_mdcDecoder != null)
-        {
-            _mdcDecoder.OnPacket -= HandleMdc1200Packet;
-            _mdcDecoder = null;
-        }
     }
 
     // --- Private helpers ---
-
-    /// <summary>
-    /// Handle a decoded MDC1200 packet. Fires OnActivity with the unit ID as source.
-    /// </summary>
-    private void HandleMdc1200Packet(int unitId, byte opcode, byte arg)
-    {
-        if (_disposed) return;
-
-        string tone = opcode == Mdc1200Decoder.OpEmergency ? "EMRG" : "MDC1200";
-        _logger.LogInformation(
-            $"[MDC1200] {_channel.AlphaTag}: Unit {unitId} ({unitId:X4}) " +
-            $"{Mdc1200Decoder.DescribeOpcode(opcode)} arg=0x{arg:X2}");
-
-        _isActive = true;
-        _lastActivityTime = DateTime.UtcNow;
-        OnActivity?.Invoke(_channel, unitId, null, tone);
-    }
 
     /// <summary>
     /// Whether this mode requires a decoder process (dsd-fme).
