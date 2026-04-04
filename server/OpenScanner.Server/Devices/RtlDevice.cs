@@ -60,6 +60,8 @@ public class RtlDevice : BackgroundService, IRadioSource
     private List<ChannelPipeline>? _parallelPipelines;
     private readonly ConcurrentDictionary<double, CancellationTokenSource> _parallelActivityTimeouts = new();
     private readonly ConcurrentDictionary<double, string?> _parallelLastTones = new();
+    // Stereo pan positions for parallel channels: maps frequency -> (leftGain, rightGain)
+    private Dictionary<double, (double Left, double Right)> _parallelPanMap = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RtlDevice"/> class.
@@ -415,6 +417,27 @@ public class RtlDevice : BackgroundService, IRadioSource
         }
         _parallelPipelines = pipelines;
 
+        // Compute stereo pan positions: channels sorted by frequency get distributed L to R
+        _parallelPanMap.Clear();
+        var sortedFreqs = pipelines.Select(p => p.Channel.Frequency).OrderBy(f => f).ToList();
+        for (int i = 0; i < sortedFreqs.Count; i++)
+        {
+            double pan; // 0.0 = full left, 1.0 = full right
+            if (sortedFreqs.Count == 1)
+                pan = 0.5; // center
+            else
+                pan = (double)i / (sortedFreqs.Count - 1);
+
+            // Equal-power panning: left = cos(pan * pi/2), right = sin(pan * pi/2)
+            double leftGain = Math.Cos(pan * Math.PI / 2.0);
+            double rightGain = Math.Sin(pan * Math.PI / 2.0);
+            _parallelPanMap[sortedFreqs[i]] = (leftGain, rightGain);
+
+            _logger.LogInformation(
+                $"Parallel pan: {pipelines.First(p => p.Channel.Frequency == sortedFreqs[i]).Channel.AlphaTag} " +
+                $"({sortedFreqs[i]} MHz) -> L={leftGain:F2} R={rightGain:F2}");
+        }
+
         // Build initial parallel channel states for the UI
         UpdateParallelState();
 
@@ -594,22 +617,39 @@ public class RtlDevice : BackgroundService, IRadioSource
     }
 
     /// <summary>
-    /// Handle audio from a parallel channel pipeline. Mix all active audio to browser.
+    /// Handle audio from a parallel channel pipeline. Pan to stereo L/R and send to browser.
     /// </summary>
     private void HandleParallelAudio(Channel channel, byte[] audio)
     {
-        // Maintain pre-roll buffer per-channel (reuse the shared one for simplicity)
         _toneDetector.ProcessAudio(audio);
-        OnAudio?.Invoke(audio);
 
-        // Route to multi-channel recording
+        // Convert mono s16le to stereo s16le with per-channel panning
+        var (leftGain, rightGain) = _parallelPanMap.GetValueOrDefault(channel.Frequency, (0.5, 0.5));
+        int monoSamples = audio.Length / 2;
+        var stereo = new byte[monoSamples * 4]; // 2 channels * 2 bytes per sample
+
+        for (int i = 0; i < monoSamples; i++)
+        {
+            short mono = (short)(audio[i * 2] | (audio[i * 2 + 1] << 8));
+            short left = (short)(mono * leftGain);
+            short right = (short)(mono * rightGain);
+
+            int outIdx = i * 4;
+            stereo[outIdx] = (byte)(left & 0xFF);
+            stereo[outIdx + 1] = (byte)((left >> 8) & 0xFF);
+            stereo[outIdx + 2] = (byte)(right & 0xFF);
+            stereo[outIdx + 3] = (byte)((right >> 8) & 0xFF);
+        }
+
+        OnAudio?.Invoke(stereo);
+
+        // Route mono to multi-channel recording (recordings stay mono per channel)
         var rs = _recordingService as RecordingService;
         if (rs != null && rs.IsChannelRecording(channel.Frequency))
         {
             _recordingService.ProcessAudio(channel.Frequency, audio);
         }
 
-        // Update parallel channel state
         UpdateParallelState();
     }
 
