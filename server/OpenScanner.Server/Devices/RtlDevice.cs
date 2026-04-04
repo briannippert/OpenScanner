@@ -62,6 +62,8 @@ public class RtlDevice : BackgroundService, IRadioSource
     private readonly ConcurrentDictionary<double, string?> _parallelLastTones = new();
     // Stereo pan positions for parallel channels: maps frequency -> (leftGain, rightGain)
     private Dictionary<double, (double Left, double Right)> _parallelPanMap = new();
+    // Per-channel source/target ID tracking for parallel mode
+    private readonly ConcurrentDictionary<double, (int? Src, int? Tgt)> _parallelLastSourceTarget = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RtlDevice"/> class.
@@ -670,6 +672,16 @@ public class RtlDevice : BackgroundService, IRadioSource
     {
         _logger.LogInformation($"[Parallel] Activity on {channel.AlphaTag}: src={src} tgt={tgt} tone={tone}");
 
+        // Track per-channel source/target IDs
+        if (src.HasValue || tgt.HasValue)
+        {
+            var existing = _parallelLastSourceTarget.GetValueOrDefault(channel.Frequency);
+            _parallelLastSourceTarget[channel.Frequency] = (
+                src ?? existing.Src,
+                tgt ?? existing.Tgt
+            );
+        }
+
         // Track per-channel tones
         if (tone != null)
         {
@@ -704,6 +716,7 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         var rs = _recordingService as RecordingService;
         _parallelLastTones.TryRemove(channel.Frequency, out var lastTone);
+        _parallelLastSourceTarget.TryRemove(channel.Frequency, out _);
         rs?.StopParallelRecording(channel.Frequency, lastTone);
 
         UpdateParallelState();
@@ -729,6 +742,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                 _logger.LogInformation($"[Parallel] Activity timeout on {channel.AlphaTag}");
                 var rs = _recordingService as RecordingService;
                 _parallelLastTones.TryRemove(channel.Frequency, out var lastTone);
+                _parallelLastSourceTarget.TryRemove(channel.Frequency, out _);
                 rs?.StopParallelRecording(channel.Frequency, lastTone);
                 _parallelActivityTimeouts.TryRemove(channel.Frequency, out _);
 
@@ -745,16 +759,19 @@ public class RtlDevice : BackgroundService, IRadioSource
         if (_parallelPipelines == null) return;
 
         var rs = _recordingService as RecordingService;
-        var states = _parallelPipelines.Select(p => new ParallelChannelState(
-            Channel: p.Channel,
-            IsActive: p.IsActive,
-            SignalStrength: p.SignalLevelDb,
-            IsRecording: rs?.IsChannelRecording(p.Channel.Frequency) ?? false,
-            SourceID: null,
-            TargetID: null,
-            SpeakerChain: null,
-            CurrentTone: _parallelLastTones.GetValueOrDefault(p.Channel.Frequency)
-        )).ToArray();
+        var states = _parallelPipelines.Select(p => {
+            var ids = _parallelLastSourceTarget.GetValueOrDefault(p.Channel.Frequency);
+            return new ParallelChannelState(
+                Channel: p.Channel,
+                IsActive: p.IsActive,
+                SignalStrength: p.SignalLevelDb,
+                IsRecording: rs?.IsChannelRecording(p.Channel.Frequency) ?? false,
+                SourceID: ids.Src,
+                TargetID: ids.Tgt,
+                SpeakerChain: null,
+                CurrentTone: _parallelLastTones.GetValueOrDefault(p.Channel.Frequency)
+            );
+        }).ToArray();
 
         UpdateState(_state with { ParallelChannels = states });
     }
