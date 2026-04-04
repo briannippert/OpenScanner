@@ -309,6 +309,20 @@ public class ScanBank
 }
 
 /// <summary>
+/// Per-channel state during parallel FastScan decoding.
+/// </summary>
+public record ParallelChannelState(
+    Channel Channel,
+    bool IsActive,
+    double SignalStrength,
+    bool IsRecording,
+    int? SourceID = null,
+    int? TargetID = null,
+    string? SpeakerChain = null,
+    string? CurrentTone = null
+);
+
+/// <summary>
 /// A single point in the RF spectrum.
 /// </summary>
 public record SpectrumPoint(double Frequency, double Db);
@@ -335,6 +349,7 @@ public record ScannerState(
     int? TargetID = null,
     string? SpeakerChain = null,
     string? CurrentTone = null,
-    string? LastDetectedTone = null
+    string? LastDetectedTone = null,
+    ParallelChannelState[]? ParallelChannels = null
 );
         

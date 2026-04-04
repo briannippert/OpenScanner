@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using OpenScanner.Server.Interfaces;
 using OpenScanner.Server.Models;
@@ -11,6 +12,7 @@ public class RecordingService : IRecordingService
     private readonly ITranscriptionService _transcriptionService;
     private readonly GpsService _gpsService;
 
+    // Legacy single-channel recording state (used by non-parallel mode)
     private readonly object _audioLock = new();
     private FileStream? _recordingStream;
     private string? _currentRecordingPath;
@@ -19,15 +21,22 @@ public class RecordingService : IRecordingService
     private int? _currentTargetID;
     private readonly List<int> _speakerList = new();
 
+    // Multi-channel recording state (used by parallel mode)
+    private readonly ConcurrentDictionary<double, ActiveRecording> _activeRecordings = new();
+
     public event Action<CallLog>? OnNewLog;
 
-    public bool IsRecording 
+    /// <inheritdoc />
+    public bool IsRecording
     {
-        get 
+        get
         {
             lock (_audioLock) return _recordingStream != null;
         }
     }
+
+    /// <inheritdoc />
+    public bool IsChannelRecording(double frequency) => _activeRecordings.ContainsKey(frequency);
 
     public RecordingService(
         IDatabase db, 
@@ -253,4 +262,263 @@ public class RecordingService : IRecordingService
             }
         }
     }
+
+    // --- Multi-channel (parallel mode) methods ---
+
+    /// <inheritdoc />
+    public void UpdateSourceTarget(double frequency, int? src, int? tgt)
+    {
+        if (_activeRecordings.TryGetValue(frequency, out var rec))
+        {
+            lock (rec.Lock)
+            {
+                if (src.HasValue) rec.SourceID = src;
+                if (tgt.HasValue) rec.TargetID = tgt;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public void AppendSpeaker(double frequency, int src)
+    {
+        if (_activeRecordings.TryGetValue(frequency, out var rec))
+        {
+            lock (rec.Lock)
+            {
+                if (rec.SpeakerList.Count == 0 || rec.SpeakerList[^1] != src)
+                    rec.SpeakerList.Add(src);
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public void ProcessAudio(double frequency, byte[] audio)
+    {
+        if (_activeRecordings.TryGetValue(frequency, out var rec))
+        {
+            lock (rec.Lock)
+            {
+                if (rec.Stream != null && rec.Stream.CanWrite)
+                {
+                    try
+                    {
+                        rec.Stream.Write(audio, 0, audio.Length);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, $"Error writing to recording stream for {frequency} MHz");
+                    }
+                }
+            }
+        }
+        else
+        {
+            // Fallback: route to legacy single-channel recording
+            ProcessAudio(audio);
+        }
+    }
+
+    /// <summary>
+    /// Start a multi-channel recording for the given channel (parallel mode).
+    /// Uses the ConcurrentDictionary-based storage keyed by frequency.
+    /// </summary>
+    public void StartParallelRecording(Channel channel, int? src, int? tgt, LinkedList<byte[]>? preRollBuffer)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var filename = $"rec_{now}_{channel.Frequency}.raw";
+        var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../data/recordings");
+        if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
+        var path = Path.Combine(dataDir, filename);
+
+        var rec = new ActiveRecording
+        {
+            Path = path,
+            StartTime = now,
+            SourceID = src,
+            TargetID = tgt,
+            Channel = channel
+        };
+        if (src.HasValue) rec.SpeakerList.Add(src.Value);
+
+        if (!_activeRecordings.TryAdd(channel.Frequency, rec))
+        {
+            _logger.LogWarning($"Recording already active for {channel.Frequency} MHz, skipping");
+            return;
+        }
+
+        try
+        {
+            rec.Stream = new FileStream(path, FileMode.Create);
+            _logger.LogInformation($"Started parallel recording: {filename}");
+
+            if (preRollBuffer != null)
+            {
+                lock (preRollBuffer)
+                {
+                    foreach (var chunk in preRollBuffer)
+                        rec.Stream.Write(chunk, 0, chunk.Length);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to create recording file for {channel.Frequency} MHz");
+            _activeRecordings.TryRemove(channel.Frequency, out _);
+        }
+    }
+
+    /// <summary>
+    /// Stop a multi-channel recording and finalize (convert, transcribe, save to DB).
+    /// </summary>
+    public void StopParallelRecording(double frequency, string? lastDetectedTone)
+    {
+        if (!_activeRecordings.TryRemove(frequency, out var rec))
+            return;
+
+        string? recordingPath;
+        long startTime;
+        string? speakerChain;
+        Channel channel;
+
+        lock (rec.Lock)
+        {
+            rec.Stream?.Close();
+            rec.Stream = null;
+            recordingPath = rec.Path;
+            startTime = rec.StartTime;
+            channel = rec.Channel;
+            speakerChain = rec.SpeakerList.Count > 1
+                ? string.Join(" \u2192 ", rec.SpeakerList)
+                : null;
+        }
+
+        FinalizeRecording(recordingPath, startTime, channel, rec.SourceID, rec.TargetID,
+                          lastDetectedTone, speakerChain);
+    }
+
+    /// <summary>
+    /// Shared finalization logic: convert RAW to WAV, transcribe, save to DB.
+    /// </summary>
+    private void FinalizeRecording(string? recordingPath, long startTime, Channel channel,
+                                    int? sourceID, int? targetID,
+                                    string? lastDetectedTone, string? speakerChain)
+    {
+        var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
+        _logger.LogInformation($"Recording duration: {duration:F1}s. Raw file exists: {File.Exists(recordingPath)}");
+
+        if (duration >= 0.5 && recordingPath != null && File.Exists(recordingPath))
+        {
+            var fileInfo = new FileInfo(recordingPath);
+            if (fileInfo.Length < 4096)
+            {
+                try { File.Delete(recordingPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete small recording file"); }
+                _logger.LogInformation("Deleted small recording file (less than 4KB).");
+                return;
+            }
+
+            // Convert RAW to WAV
+            var wavPath = Path.ChangeExtension(recordingPath, ".wav");
+            try
+            {
+                var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg")
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                convertStart.ArgumentList.Add("-f"); convertStart.ArgumentList.Add("s16le");
+                convertStart.ArgumentList.Add("-ar"); convertStart.ArgumentList.Add("48000");
+                convertStart.ArgumentList.Add("-ac"); convertStart.ArgumentList.Add("1");
+                convertStart.ArgumentList.Add("-i"); convertStart.ArgumentList.Add(recordingPath);
+                convertStart.ArgumentList.Add(wavPath);
+                convertStart.ArgumentList.Add("-y");
+
+                using (var proc = Process.Start(convertStart))
+                {
+                    string output = proc?.StandardOutput.ReadToEnd() ?? string.Empty;
+                    string error = proc?.StandardError.ReadToEnd() ?? string.Empty;
+                    proc?.WaitForExit();
+
+                    if (!string.IsNullOrEmpty(output)) _logger.LogInformation($"FFmpeg Output: {output}");
+                    if (!string.IsNullOrEmpty(error)) _logger.LogError($"FFmpeg Error: {error}");
+                }
+
+                if (File.Exists(wavPath))
+                {
+                    _logger.LogInformation($"WAV file created successfully: {wavPath}");
+                    try { File.Delete(recordingPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete original RAW file after conversion"); }
+                    recordingPath = wavPath;
+                }
+                else
+                {
+                    _logger.LogError($"WAV file was not created by FFmpeg at {wavPath}.");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "WAV conversion failed");
+            }
+
+            // Run Transcription
+            string? transcription = null;
+            try
+            {
+                transcription = _transcriptionService.TranscribeAudio(recordingPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Transcription failed");
+            }
+
+            var gps = _gpsService.GetLastLocation();
+            var lat = gps?.Lat ?? 0;
+            var lon = gps?.Lon ?? 0;
+
+            var log = new CallLog(
+                 $"log_{startTime}",
+                 DateTimeOffset.FromUnixTimeMilliseconds(startTime).UtcDateTime.ToString("o"),
+                 channel.Frequency,
+                 channel.AlphaTag,
+                 channel.Description,
+                 lat != 0 ? lat : null,
+                 lon != 0 ? lon : null,
+                 Path.GetFileName(recordingPath),
+                 duration,
+                 transcription,
+                 sourceID,
+                 targetID,
+                 lastDetectedTone,
+                 speakerChain
+             );
+
+            _logger.LogInformation($"Recording path before saving: {recordingPath}, exists: {File.Exists(recordingPath)}");
+            _db.SaveTransmissionAsync(log).ContinueWith(t => {
+                if (t.IsFaulted) _logger.LogError(t.Exception, "Failed to save transmission");
+            });
+
+            _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {sourceID} | Tone: {lastDetectedTone} | Text: {transcription}");
+            _logger.LogInformation($"Recording saved to: {recordingPath}");
+            OnNewLog?.Invoke(log);
+        }
+        else if (recordingPath != null)
+        {
+            try { File.Delete(recordingPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete aborted recording file"); }
+        }
+    }
+}
+
+/// <summary>
+/// State for a single active recording in parallel mode.
+/// </summary>
+internal class ActiveRecording
+{
+    public readonly object Lock = new();
+    public FileStream? Stream;
+    public string Path = string.Empty;
+    public long StartTime;
+    public int? SourceID;
+    public int? TargetID;
+    public Channel Channel = new();
+    public readonly List<int> SpeakerList = new();
 }

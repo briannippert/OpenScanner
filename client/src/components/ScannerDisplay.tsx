@@ -16,8 +16,10 @@ interface Props {
 
 const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [] }) => {
     const isReceiving = state.status === 'RECEIVING';
-    const isFastScan = state.status === 'SCANNING' && !state.currentFrequency && channels.length > 1;
-    const activeColor = isReceiving ? '#00ff00' : '#555';
+    const isParallel = !!state.parallelChannels && state.parallelChannels.length > 0;
+    const isFastScan = !isParallel && state.status === 'SCANNING' && !state.currentFrequency && channels.length > 1;
+    const hasParallelActivity = isParallel && state.parallelChannels!.some(pc => pc.isActive);
+    const activeColor = isReceiving || hasParallelActivity ? '#00ff00' : '#555';
 
     const displayFreq = state.currentFrequency;
     const displayAlpha = state.currentChannel?.alphaTag;
@@ -113,7 +115,59 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                     gap: 2 
                 }}>
                     <Box textAlign="center">
-                        {isFastScan ? (
+                        {isParallel ? (
+                            <>
+                                <Typography variant="h3" sx={{
+                                    fontFamily: 'monospace',
+                                    fontWeight: 700,
+                                    color: hasParallelActivity ? '#00ff00' : '#555',
+                                    letterSpacing: 3,
+                                    fontSize: { xs: '1.8rem', md: '2.5rem' },
+                                    mb: 1,
+                                    textShadow: hasParallelActivity ? '0 0 10px rgba(0,255,0,0.4)' : 'none'
+                                }}>
+                                    PARALLEL SCAN
+                                </Typography>
+                                <Box display="flex" justifyContent="center" flexWrap="wrap" gap={0.5}>
+                                    {state.parallelChannels!.map(pc => (
+                                        <Chip
+                                            key={pc.channel.frequency}
+                                            label={
+                                                pc.isActive
+                                                    ? `${pc.channel.alphaTag || pc.channel.frequency}${pc.isRecording ? ' [REC]' : ''}`
+                                                    : pc.channel.alphaTag || pc.channel.frequency.toString()
+                                            }
+                                            size="small"
+                                            onClick={onScan ? () => onScan(pc.channel.frequency) : undefined}
+                                            sx={{
+                                                height: 22,
+                                                fontSize: '0.65rem',
+                                                fontFamily: 'monospace',
+                                                cursor: onScan ? 'pointer' : 'default',
+                                                bgcolor: pc.isActive ? 'rgba(0, 255, 0, 0.15)' : '#1a1a1a',
+                                                color: pc.isActive ? '#00ff00' : '#666',
+                                                border: pc.isActive ? '1px solid #00ff00' : '1px solid transparent',
+                                                boxShadow: pc.isActive ? '0 0 8px rgba(0, 255, 0, 0.3)' : 'none',
+                                                transition: 'all 0.3s ease',
+                                                fontWeight: pc.isActive ? 'bold' : 'normal',
+                                            }}
+                                        />
+                                    ))}
+                                </Box>
+                                {state.parallelChannels!.filter(pc => pc.isActive && pc.sourceID).map(pc => (
+                                    <Typography key={pc.channel.frequency} variant="caption" sx={{
+                                        color: '#ffaa00',
+                                        fontWeight: 'bold',
+                                        mt: 0.5,
+                                        display: 'block',
+                                        fontFamily: 'monospace',
+                                        fontSize: '0.65rem'
+                                    }}>
+                                        {pc.channel.alphaTag}: {pc.sourceID ?? '?'} {pc.targetID ? `-> TG ${pc.targetID}` : ''}
+                                    </Typography>
+                                ))}
+                            </>
+                        ) : isFastScan ? (
                             <>
                                 <Typography variant="h3" sx={{
                                     fontFamily: 'monospace',
@@ -243,8 +297,8 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                         )}
                     </Box>
                     
-                    {/* VU Meter (Only when receiving) */}
-                    {isReceiving && analyser && (
+                    {/* VU Meter (When receiving or parallel activity) */}
+                    {(isReceiving || hasParallelActivity) && analyser && (
                         <Box>
                              <VuMeter analyser={analyser} height={60} width={10} />
                         </Box>
@@ -253,8 +307,8 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
 
                 {/* Visualizers */}
                 <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
-                    {/* Audio Waterfall (Heatmap during receive or monitoring) */}
-                    {(state.status === 'RECEIVING' || state.status === 'MONITORING') && analyser && (
+                    {/* Audio Waterfall (Heatmap during receive, monitoring, or active parallel) */}
+                    {(state.status === 'RECEIVING' || state.status === 'MONITORING' || hasParallelActivity) && analyser && (
                         <AudioSpectrogram analyser={analyser} height={60} />
                     )}
 
