@@ -159,6 +159,9 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
                     gpuMemoryMb: data.gpuMemoryMb,
                     diarizationAvailable: data.diarizationAvailable,
                 });
+                if (!data.diarizationAvailable && settings['EnableDiarization'] === 'true') {
+                    updateSetting('EnableDiarization', 'false');
+                }
                 if (data.status !== 'ok') {
                     setConnectionError('Server is reachable but reports an error. Check whisper.cpp installation on the remote machine.');
                 }
@@ -337,15 +340,19 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
 
                                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', mt: 1 }}>
                                         <Box>
-                                            <Typography variant="body2" fontWeight="bold">Speaker Diarization</Typography>
+                                            <Typography variant="body2" fontWeight="bold" sx={{
+                                                color: remoteServerInfo?.diarizationAvailable === false ? 'text.disabled' : undefined
+                                            }}>Speaker Diarization</Typography>
                                             <Typography variant="caption" color="text.secondary">
-                                                Identify different speakers in transmissions using WhisperX.
-                                                Requires WhisperX and a HuggingFace token on the remote server.
+                                                {remoteServerInfo?.diarizationAvailable === false
+                                                    ? 'Not available on this server. Install WhisperX and configure a HuggingFace token.'
+                                                    : 'Identify different speakers in transmissions using WhisperX.'}
                                             </Typography>
                                         </Box>
                                         <Switch
                                             edge="end"
                                             checked={settings['EnableDiarization'] === 'true'}
+                                            disabled={!remoteServerInfo || !remoteServerInfo.diarizationAvailable}
                                             onChange={() => handleToggle('EnableDiarization', settings['EnableDiarization'] || 'false')}
                                         />
                                     </Box>
