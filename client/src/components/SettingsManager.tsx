@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
     Dialog, DialogTitle, DialogContent, DialogActions, 
     Button, List, ListItem, ListItemText, ListItemSecondaryAction, Switch,
     Box, CircularProgress, Alert, AlertTitle, Link,
-    TextField, ToggleButton, ToggleButtonGroup, Typography, Chip
+    TextField, ToggleButton, ToggleButtonGroup, Typography, Chip,
+    Divider, Paper
 } from '@mui/material';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
 
@@ -18,6 +19,12 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
     const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string, url: string, body?: string } | null>(null);
     const [loading, setLoading] = useState(false);
     const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
+    const [remoteServerInfo, setRemoteServerInfo] = useState<{
+        model?: string;
+        binaryFound?: boolean;
+        modelFound?: boolean;
+    } | null>(null);
+    const [connectionError, setConnectionError] = useState<string>('');
 
     const getBackendUrl = () => {
         const isDev = window.location.port === '5173';
@@ -125,22 +132,35 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
         }
     };
 
-    const testRemoteConnection = async () => {
-        const url = settings['TranscriptionServerUrl'];
-        if (!url) return;
+    const testRemoteConnection = useCallback(async (url?: string) => {
+        const serverUrl = url ?? settings['TranscriptionServerUrl'];
+        if (!serverUrl) return;
 
         setConnectionStatus('testing');
+        setRemoteServerInfo(null);
+        setConnectionError('');
         try {
-            const res = await fetch(`${url.replace(/\/$/, '')}/health`, { signal: AbortSignal.timeout(5000) });
+            const res = await fetch(`${serverUrl.replace(/\/$/, '')}/health`, { signal: AbortSignal.timeout(5000) });
             if (res.ok) {
-                setConnectionStatus('ok');
+                const data = await res.json();
+                setConnectionStatus(data.status === 'ok' ? 'ok' : 'error');
+                setRemoteServerInfo({
+                    model: data.model,
+                    binaryFound: data.binaryFound,
+                    modelFound: data.modelFound,
+                });
+                if (data.status !== 'ok') {
+                    setConnectionError('Server is reachable but reports an error. Check whisper.cpp installation on the remote machine.');
+                }
             } else {
                 setConnectionStatus('error');
+                setConnectionError(`Server returned HTTP ${res.status}`);
             }
-        } catch {
+        } catch (err) {
             setConnectionStatus('error');
+            setConnectionError(err instanceof TypeError ? 'Could not connect. Check the URL and ensure the server is running.' : String(err));
         }
-    };
+    }, [settings]);
 
     // Define known settings with friendly names
     const knownSettings: { key: string; label: string; description: string }[] = [
@@ -203,44 +223,99 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
                         ))}
 
                         {transcriptionEnabled && (
-                            <ListItem sx={{ flexDirection: 'column', alignItems: 'flex-start', gap: 1, py: 2 }}>
+                            <ListItem sx={{ flexDirection: 'column', alignItems: 'flex-start', gap: 1.5, py: 2 }}>
                                 <Typography variant="body2" fontWeight="bold">Transcription Mode</Typography>
                                 <ToggleButtonGroup
                                     value={settings['TranscriptionMode'] || 'local'}
                                     exclusive
                                     size="small"
-                                    onChange={(_e, val) => { if (val) { updateSetting('TranscriptionMode', val); setConnectionStatus('idle'); } }}
+                                    onChange={(_e, val) => {
+                                        if (val) {
+                                            updateSetting('TranscriptionMode', val);
+                                            setConnectionStatus('idle');
+                                            setRemoteServerInfo(null);
+                                            setConnectionError('');
+                                        }
+                                    }}
                                 >
                                     <ToggleButton value="local">Local (whisper.cpp)</ToggleButton>
                                     <ToggleButton value="remote">Remote Server</ToggleButton>
                                 </ToggleButtonGroup>
 
                                 {isRemote && (
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', mt: 1 }}>
-                                        <TextField
-                                            size="small"
-                                            fullWidth
-                                            label="Server URL"
-                                            placeholder="http://192.168.1.100:8090"
-                                            value={settings['TranscriptionServerUrl'] || ''}
-                                            onChange={(e) => setSettings(prev => ({ ...prev, TranscriptionServerUrl: e.target.value }))}
-                                            onBlur={() => updateSetting('TranscriptionServerUrl', settings['TranscriptionServerUrl'] || '')}
-                                        />
-                                        <Button
-                                            variant="outlined"
-                                            size="small"
-                                            onClick={testRemoteConnection}
-                                            disabled={connectionStatus === 'testing' || !settings['TranscriptionServerUrl']}
-                                            sx={{ whiteSpace: 'nowrap' }}
-                                        >
-                                            {connectionStatus === 'testing' ? 'Testing...' : 'Test'}
-                                        </Button>
-                                        {connectionStatus === 'ok' && <Chip label="Connected" color="success" size="small" />}
-                                        {connectionStatus === 'error' && <Chip label="Failed" color="error" size="small" />}
-                                    </Box>
+                                    <Paper variant="outlined" sx={{ width: '100%', p: 2 }}>
+                                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                                            Connect to an external machine running the OpenScanner WhisperServer
+                                            to offload transcription from this device.
+                                        </Typography>
+
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
+                                            <TextField
+                                                size="small"
+                                                fullWidth
+                                                label="Server URL"
+                                                placeholder="http://192.168.1.100:8090"
+                                                value={settings['TranscriptionServerUrl'] || ''}
+                                                onChange={(e) => setSettings(prev => ({ ...prev, TranscriptionServerUrl: e.target.value }))}
+                                                onBlur={() => updateSetting('TranscriptionServerUrl', settings['TranscriptionServerUrl'] || '')}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        updateSetting('TranscriptionServerUrl', settings['TranscriptionServerUrl'] || '');
+                                                        testRemoteConnection(settings['TranscriptionServerUrl']);
+                                                    }
+                                                }}
+                                            />
+                                            <Button
+                                                variant="outlined"
+                                                size="small"
+                                                onClick={() => testRemoteConnection()}
+                                                disabled={connectionStatus === 'testing' || !settings['TranscriptionServerUrl']}
+                                                sx={{ whiteSpace: 'nowrap', minWidth: 80 }}
+                                            >
+                                                {connectionStatus === 'testing' ? (
+                                                    <CircularProgress size={18} />
+                                                ) : 'Test'}
+                                            </Button>
+                                        </Box>
+
+                                        {connectionStatus === 'ok' && remoteServerInfo && (
+                                            <Alert severity="success" sx={{ mt: 1.5 }} variant="outlined">
+                                                <AlertTitle>Connected</AlertTitle>
+                                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                                    <Typography variant="body2">
+                                                        Model: <strong>{remoteServerInfo.model}</strong>
+                                                    </Typography>
+                                                    <Box sx={{ display: 'flex', gap: 1 }}>
+                                                        <Chip
+                                                            label={remoteServerInfo.binaryFound ? 'whisper-cli found' : 'whisper-cli missing'}
+                                                            color={remoteServerInfo.binaryFound ? 'success' : 'error'}
+                                                            size="small"
+                                                            variant="outlined"
+                                                        />
+                                                        <Chip
+                                                            label={remoteServerInfo.modelFound ? 'Model loaded' : 'Model missing'}
+                                                            color={remoteServerInfo.modelFound ? 'success' : 'error'}
+                                                            size="small"
+                                                            variant="outlined"
+                                                        />
+                                                    </Box>
+                                                </Box>
+                                            </Alert>
+                                        )}
+
+                                        {connectionStatus === 'error' && (
+                                            <Alert severity="error" sx={{ mt: 1.5 }} variant="outlined">
+                                                <AlertTitle>Connection Failed</AlertTitle>
+                                                <Typography variant="body2">
+                                                    {connectionError || 'Could not reach the remote server.'}
+                                                </Typography>
+                                            </Alert>
+                                        )}
+                                    </Paper>
                                 )}
                             </ListItem>
                         )}
+                        {transcriptionEnabled && <Divider sx={{ my: 1 }} />}
                         {systemInfo.Commit && (
                             <ListItem>
                                 <ListItemText 
