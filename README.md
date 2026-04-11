@@ -27,7 +27,7 @@ OpenScanner is a high-performance, web-based digital radio scanner designed for 
 
 ## Hardware Requirements
 
-- **Raspberry Pi**: (Pi 5 highly recommended for Whisper AI performance).
+- **Raspberry Pi**: (Pi 5 highly recommended for local Whisper AI performance, or use a remote transcription server).
 - **RTL-SDR Dongle**: (RTL2832U based, such as RTLSDRv3 or v4).
 - **GPS Receiver**: (Optional, any USB GPS receiver compatible with `gpsd`).
 - **Antenna**: Tuned for your local 150-800MHz public safety bands.
@@ -74,9 +74,41 @@ To update OpenScanner to the latest version, simply navigate to the project dire
 - **Uninstall Service**: `./scripts/uninstall_service.sh`
 - **Data Location**: Database and recordings are stored in the `/data` directory in the project root.
 
+## Remote Transcription Server
+
+If your Pi lacks the CPU power for local Whisper transcription, you can offload it to a more powerful machine on your network.
+
+### Setup the Remote Server
+
+On a machine with a GPU or fast CPU, install the dependencies and start the server:
+
+```bash
+pip install faster-whisper flask
+python scripts/whisper_server.py --model small.en --port 8090
+```
+
+Options:
+- `--model`: Whisper model size (`tiny.en`, `base.en`, `small.en`, `medium.en`, `large-v3`). Default: `small.en`
+- `--device`: `auto`, `cpu`, or `cuda`. Default: `auto`
+- `--port`: Port to listen on. Default: `8090`
+- `--host`: Bind address. Default: `0.0.0.0`
+
+Verify the server is running: `curl http://<server-ip>:8090/health`
+
+### Configure OpenScanner
+
+1. Open the OpenScanner UI and go to **Settings**
+2. Enable **AI Transcription**
+3. Set **Transcription Mode** to **Remote Server**
+4. Enter the server URL (e.g., `http://192.168.1.100:8090`)
+5. Click **Test** to verify connectivity
+
+No restart is required -- the mode switch takes effect on the next transcription request.
+
 ## Acknowledgments
 
 - [DSD-FME](https://github.com/lwvmobile/dsd-fme): Digital voice decoding.
 - [whisper.cpp](https://github.com/ggerganov/whisper.cpp): High-performance local AI transcription.
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper): CTranslate2-based Whisper for remote server transcription.
 - [FftSharp](https://github.com/swharden/FftSharp): Fast FFT calculations for the live spectrum.
 - [NSwag](https://github.com/RicoSuter/NSwag): OpenAPI/Swagger integration.

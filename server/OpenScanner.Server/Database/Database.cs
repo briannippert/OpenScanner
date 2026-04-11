@@ -103,6 +103,18 @@ public class Database : IDatabase
         {
             conn.Execute("INSERT INTO settings (key, value) VALUES ('EnableTranscription', 'true')");
         }
+
+        var modeCount = conn.ExecuteScalar<int>("SELECT count(*) FROM settings WHERE key = 'TranscriptionMode'");
+        if (modeCount == 0)
+        {
+            conn.Execute("INSERT INTO settings (key, value) VALUES ('TranscriptionMode', 'local')");
+        }
+
+        var urlCount = conn.ExecuteScalar<int>("SELECT count(*) FROM settings WHERE key = 'TranscriptionServerUrl'");
+        if (urlCount == 0)
+        {
+            conn.Execute("INSERT INTO settings (key, value) VALUES ('TranscriptionServerUrl', '')");
+        }
     }
 
     /// <inheritdoc />

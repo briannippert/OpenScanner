@@ -18,7 +18,7 @@ public class WhisperTranscriptionService : ITranscriptionService
         _config = config;
     }
 
-    public string? TranscribeAudio(string audioPath)
+    public virtual string? TranscribeAudio(string audioPath)
     {
         // Check setting
         var enabled = _db.GetSettingAsync("EnableTranscription").GetAwaiter().GetResult();

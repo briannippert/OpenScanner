@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
     Dialog, DialogTitle, DialogContent, DialogActions, 
     Button, List, ListItem, ListItemText, ListItemSecondaryAction, Switch,
-    Box, CircularProgress, Alert, AlertTitle, Link
+    Box, CircularProgress, Alert, AlertTitle, Link,
+    TextField, ToggleButton, ToggleButtonGroup, Typography, Chip
 } from '@mui/material';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
 
@@ -16,6 +17,16 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
     const [systemInfo, setSystemInfo] = useState<Record<string, string>>({});
     const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string, url: string, body?: string } | null>(null);
     const [loading, setLoading] = useState(false);
+    const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
+
+    const getBackendUrl = () => {
+        const isDev = window.location.port === '5173';
+        const port = isDev ? '5212' : window.location.port || '80';
+        const protocol = window.location.protocol;
+        const backendHost = window.location.hostname;
+        const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
+        return `${protocol}//${backendHost}${portSuffix}`;
+    };
 
     useEffect(() => {
         if (open) {
@@ -28,13 +39,7 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
     const fetchSettings = async () => {
         setLoading(true);
         try {
-            const isDev = window.location.port === '5173';
-            const port = isDev ? '5212' : window.location.port || '80';
-            const protocol = window.location.protocol;
-            const backendHost = window.location.hostname;
-            const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-            
-            const res = await fetch(`${protocol}//${backendHost}${portSuffix}/api/settings`);
+            const res = await fetch(`${getBackendUrl()}/api/settings`);
             if (res.ok) {
                 const data = await res.json();
                 setSettings(data);
@@ -48,13 +53,7 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
 
     const fetchSystemInfo = async () => {
         try {
-            const isDev = window.location.port === '5173';
-            const port = isDev ? '5212' : window.location.port || '80';
-            const protocol = window.location.protocol;
-            const backendHost = window.location.hostname;
-            const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-            
-            const res = await fetch(`${protocol}//${backendHost}${portSuffix}/api/system/info`);
+            const res = await fetch(`${getBackendUrl()}/api/system/info`);
             if (res.ok) {
                 const data = await res.json();
                 setSystemInfo(data);
@@ -102,21 +101,44 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
         setSettings(prev => ({ ...prev, [key]: newValue }));
 
         try {
-            const isDev = window.location.port === '5173';
-            const port = isDev ? '5212' : window.location.port || '80';
-            const protocol = window.location.protocol;
-            const backendHost = window.location.hostname;
-            const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
-
-            await fetch(`${protocol}//${backendHost}${portSuffix}/api/settings/${key}`, {
+            await fetch(`${getBackendUrl()}/api/settings/${key}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newValue) // Send plain string as JSON string
+                body: JSON.stringify(newValue)
             });
         } catch (error) {
             console.error("Failed to update setting", error);
-            // Revert
             setSettings(prev => ({ ...prev, [key]: currentValue }));
+        }
+    };
+
+    const updateSetting = async (key: string, value: string) => {
+        setSettings(prev => ({ ...prev, [key]: value }));
+        try {
+            await fetch(`${getBackendUrl()}/api/settings/${key}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(value)
+            });
+        } catch (error) {
+            console.error("Failed to update setting", error);
+        }
+    };
+
+    const testRemoteConnection = async () => {
+        const url = settings['TranscriptionServerUrl'];
+        if (!url) return;
+
+        setConnectionStatus('testing');
+        try {
+            const res = await fetch(`${url.replace(/\/$/, '')}/health`, { signal: AbortSignal.timeout(5000) });
+            if (res.ok) {
+                setConnectionStatus('ok');
+            } else {
+                setConnectionStatus('error');
+            }
+        } catch {
+            setConnectionStatus('error');
         }
     };
 
@@ -125,9 +147,12 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
         { 
             key: 'EnableTranscription', 
             label: 'AI Transcription', 
-            description: 'Enable Whisper AI to transcribe audio. High CPU usage on Pi.' 
+            description: 'Enable Whisper AI speech-to-text for recorded transmissions.' 
         }
     ];
+
+    const isRemote = settings['TranscriptionMode'] === 'remote';
+    const transcriptionEnabled = settings['EnableTranscription'] === 'true';
 
     return (
         <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -176,6 +201,46 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
                                 </ListItemSecondaryAction>
                             </ListItem>
                         ))}
+
+                        {transcriptionEnabled && (
+                            <ListItem sx={{ flexDirection: 'column', alignItems: 'flex-start', gap: 1, py: 2 }}>
+                                <Typography variant="body2" fontWeight="bold">Transcription Mode</Typography>
+                                <ToggleButtonGroup
+                                    value={settings['TranscriptionMode'] || 'local'}
+                                    exclusive
+                                    size="small"
+                                    onChange={(_e, val) => { if (val) { updateSetting('TranscriptionMode', val); setConnectionStatus('idle'); } }}
+                                >
+                                    <ToggleButton value="local">Local (whisper.cpp)</ToggleButton>
+                                    <ToggleButton value="remote">Remote Server</ToggleButton>
+                                </ToggleButtonGroup>
+
+                                {isRemote && (
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', mt: 1 }}>
+                                        <TextField
+                                            size="small"
+                                            fullWidth
+                                            label="Server URL"
+                                            placeholder="http://192.168.1.100:8090"
+                                            value={settings['TranscriptionServerUrl'] || ''}
+                                            onChange={(e) => setSettings(prev => ({ ...prev, TranscriptionServerUrl: e.target.value }))}
+                                            onBlur={() => updateSetting('TranscriptionServerUrl', settings['TranscriptionServerUrl'] || '')}
+                                        />
+                                        <Button
+                                            variant="outlined"
+                                            size="small"
+                                            onClick={testRemoteConnection}
+                                            disabled={connectionStatus === 'testing' || !settings['TranscriptionServerUrl']}
+                                            sx={{ whiteSpace: 'nowrap' }}
+                                        >
+                                            {connectionStatus === 'testing' ? 'Testing...' : 'Test'}
+                                        </Button>
+                                        {connectionStatus === 'ok' && <Chip label="Connected" color="success" size="small" />}
+                                        {connectionStatus === 'error' && <Chip label="Failed" color="error" size="small" />}
+                                    </Box>
+                                )}
+                            </ListItem>
+                        )}
                         {systemInfo.Commit && (
                             <ListItem>
                                 <ListItemText 
