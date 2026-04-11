@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
     Dialog, DialogTitle, DialogContent, DialogActions, 
-    Button, List, ListItem, ListItemText, ListItemSecondaryAction, Switch,
+    Button, Switch,
     Box, CircularProgress, Alert, AlertTitle, Link,
     TextField, ToggleButton, ToggleButtonGroup, Typography, Chip,
-    Divider, Paper
+    Paper, Stack
 } from '@mui/material';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
+import RecordVoiceOverIcon from '@mui/icons-material/RecordVoiceOver';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 
 interface Props {
     open: boolean;
@@ -184,209 +186,234 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
         }
     }, [settings]);
 
-    // Define known settings with friendly names
-    const knownSettings: { key: string; label: string; description: string }[] = [
-        { 
-            key: 'EnableTranscription', 
-            label: 'AI Transcription', 
-            description: 'Enable Whisper AI speech-to-text for recorded transmissions.' 
-        }
-    ];
-
     const isRemote = settings['TranscriptionMode'] === 'remote';
     const transcriptionEnabled = settings['EnableTranscription'] === 'true';
 
+    const SectionHeader: React.FC<{ icon: React.ReactNode; title: string }> = ({ icon, title }) => (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+            <Box sx={{ color: 'primary.main', display: 'flex' }}>{icon}</Box>
+            <Typography variant="subtitle2" fontWeight="bold" sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                {title}
+            </Typography>
+        </Box>
+    );
+
+    const SettingRow: React.FC<{
+        label: string;
+        description: string;
+        checked: boolean;
+        disabled?: boolean;
+        onChange: () => void;
+    }> = ({ label, description, checked, disabled, onChange }) => (
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.5 }}>
+            <Box sx={{ pr: 2 }}>
+                <Typography variant="body2" fontWeight="medium" sx={{ color: disabled ? 'text.disabled' : 'text.primary' }}>
+                    {label}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">{description}</Typography>
+            </Box>
+            <Switch
+                edge="end"
+                checked={checked}
+                disabled={disabled}
+                onChange={onChange}
+                size="small"
+            />
+        </Box>
+    );
+
     return (
         <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-            <DialogTitle>System Settings</DialogTitle>
-            <DialogContent dividers>
-                {updateAvailable && (
-                    <Alert 
-                        severity="success" 
-                        icon={<SystemUpdateIcon />}
-                        sx={{ mb: 2, border: '1px solid #4caf50' }}
-                        action={
-                            <Button 
-                                color="inherit" 
-                                size="small" 
-                                component={Link} 
-                                href={updateInfo?.url} 
-                                target="_blank"
-                                rel="noopener"
-                            >
-                                VIEW
-                            </Button>
-                        }
-                    >
-                        <AlertTitle>Update Available: {updateInfo?.latestVersion}</AlertTitle>
-                        A newer version of OpenScanner is available on GitHub.
-                    </Alert>
-                )}
+            <DialogTitle sx={{ pb: 1 }}>Settings</DialogTitle>
+            <DialogContent dividers sx={{ p: 2 }}>
                 {loading ? (
                     <Box display="flex" justifyContent="center" p={4}>
                         <CircularProgress />
                     </Box>
                 ) : (
-                    <List>
-                        {knownSettings.map((setting) => (
-                            <ListItem key={setting.key}>
-                                <ListItemText 
-                                    primary={setting.label}
-                                    secondary={setting.description}
-                                />
-                                <ListItemSecondaryAction>
-                                    <Switch 
-                                        edge="end" 
-                                        checked={settings[setting.key] === 'true'}
-                                        onChange={() => handleToggle(setting.key, settings[setting.key] || 'false')}
-                                    />
-                                </ListItemSecondaryAction>
-                            </ListItem>
-                        ))}
+                    <Stack spacing={2}>
 
-                        {transcriptionEnabled && (
-                            <ListItem sx={{ flexDirection: 'column', alignItems: 'flex-start', gap: 1.5, py: 2 }}>
-                                <Typography variant="body2" fontWeight="bold">Transcription Mode</Typography>
-                                <ToggleButtonGroup
-                                    value={settings['TranscriptionMode'] || 'local'}
-                                    exclusive
-                                    size="small"
-                                    onChange={(_e, val) => {
-                                        if (val) {
-                                            updateSetting('TranscriptionMode', val);
-                                            setConnectionStatus('idle');
-                                            setRemoteServerInfo(null);
-                                            setConnectionError('');
-                                        }
-                                    }}
-                                >
-                                    <ToggleButton value="local">Local (whisper.cpp)</ToggleButton>
-                                    <ToggleButton value="remote">Remote Server</ToggleButton>
-                                </ToggleButtonGroup>
+                        {/* Update Banner */}
+                        {updateAvailable && (
+                            <Alert 
+                                severity="success" 
+                                icon={<SystemUpdateIcon />}
+                                action={
+                                    <Button 
+                                        color="inherit" 
+                                        size="small" 
+                                        component={Link} 
+                                        href={updateInfo?.url} 
+                                        target="_blank"
+                                        rel="noopener"
+                                    >
+                                        VIEW
+                                    </Button>
+                                }
+                            >
+                                <AlertTitle>Update Available: {updateInfo?.latestVersion}</AlertTitle>
+                                A newer version of OpenScanner is available on GitHub.
+                            </Alert>
+                        )}
 
-                                {isRemote && (
-                                    <>
-                                    <Paper variant="outlined" sx={{ width: '100%', p: 2 }}>
-                                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                                            Connect to an external machine running the OpenScanner WhisperServer
-                                            to offload transcription from this device.
-                                        </Typography>
+                        {/* Transcription Section */}
+                        <Paper variant="outlined" sx={{ p: 2 }}>
+                            <SectionHeader icon={<RecordVoiceOverIcon fontSize="small" />} title="Transcription" />
 
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
-                                            <TextField
-                                                size="small"
-                                                fullWidth
-                                                label="Server URL"
-                                                placeholder="http://192.168.1.100:8090"
-                                                value={settings['TranscriptionServerUrl'] || ''}
-                                                onChange={(e) => setSettings(prev => ({ ...prev, TranscriptionServerUrl: e.target.value }))}
-                                                onBlur={() => testRemoteConnection(settings['TranscriptionServerUrl'])}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') {
-                                                        testRemoteConnection(settings['TranscriptionServerUrl']);
-                                                    }
-                                                }}
-                                            />
-                                            <Button
-                                                variant="outlined"
-                                                size="small"
-                                                onClick={() => testRemoteConnection()}
-                                                disabled={connectionStatus === 'testing' || !settings['TranscriptionServerUrl']}
-                                                sx={{ whiteSpace: 'nowrap', minWidth: 80 }}
-                                            >
-                                                {connectionStatus === 'testing' ? (
-                                                    <CircularProgress size={18} />
-                                                ) : 'Test'}
-                                            </Button>
-                                        </Box>
+                            <SettingRow
+                                label="AI Transcription"
+                                description="Enable Whisper AI speech-to-text for recorded transmissions."
+                                checked={transcriptionEnabled}
+                                onChange={() => handleToggle('EnableTranscription', settings['EnableTranscription'] || 'false')}
+                            />
 
-                                        {connectionStatus === 'ok' && remoteServerInfo && (
-                                            <Alert severity="success" sx={{ mt: 1.5 }} variant="outlined">
-                                                <AlertTitle>Connected</AlertTitle>
-                                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                                                    <Typography variant="body2">
-                                                        Model: <strong>{remoteServerInfo.model}</strong>
-                                                    </Typography>
-                                                    <Typography variant="body2">
-                                                        Acceleration: <strong>{remoteServerInfo.acceleration ?? 'CPU'}</strong>
-                                                        {remoteServerInfo.gpu && ` (${remoteServerInfo.gpu}${remoteServerInfo.gpuMemoryMb ? ` - ${remoteServerInfo.gpuMemoryMb} MB` : ''})`}
-                                                        {!remoteServerInfo.gpu && remoteServerInfo.cpu && ` (${remoteServerInfo.cpu})`}
-                                                    </Typography>
-                                                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                                                        <Chip
-                                                            label={remoteServerInfo.binaryFound ? 'whisper-cli found' : 'whisper-cli missing'}
-                                                            color={remoteServerInfo.binaryFound ? 'success' : 'error'}
-                                                            size="small"
-                                                            variant="outlined"
-                                                        />
-                                                        <Chip
-                                                            label={remoteServerInfo.modelFound ? 'Model loaded' : 'Model missing'}
-                                                            color={remoteServerInfo.modelFound ? 'success' : 'error'}
-                                                            size="small"
-                                                            variant="outlined"
-                                                        />
-                                                        <Chip
-                                                            label={remoteServerInfo.diarizationAvailable ? 'Diarization ready' : 'Diarization unavailable'}
-                                                            color={remoteServerInfo.diarizationAvailable ? 'success' : 'default'}
-                                                            size="small"
-                                                            variant="outlined"
-                                                        />
-                                                    </Box>
-                                                </Box>
-                                            </Alert>
-                                        )}
+                            {transcriptionEnabled && (
+                                <Stack spacing={2} sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+                                    <Box>
+                                        <Typography variant="body2" fontWeight="medium" sx={{ mb: 0.5 }}>Mode</Typography>
+                                        <ToggleButtonGroup
+                                            value={settings['TranscriptionMode'] || 'local'}
+                                            exclusive
+                                            size="small"
+                                            fullWidth
+                                            onChange={(_e, val) => {
+                                                if (val) {
+                                                    updateSetting('TranscriptionMode', val);
+                                                    setConnectionStatus('idle');
+                                                    setRemoteServerInfo(null);
+                                                    setConnectionError('');
+                                                }
+                                            }}
+                                        >
+                                            <ToggleButton value="local">Local (whisper.cpp)</ToggleButton>
+                                            <ToggleButton value="remote">Remote Server</ToggleButton>
+                                        </ToggleButtonGroup>
+                                    </Box>
 
-                                        {connectionStatus === 'error' && (
-                                            <Alert severity="error" sx={{ mt: 1.5 }} variant="outlined">
-                                                <AlertTitle>Connection Failed</AlertTitle>
-                                                <Typography variant="body2">
-                                                    {connectionError || 'Could not reach the remote server.'}
+                                    {isRemote && (
+                                        <Stack spacing={1.5}>
+                                            {/* Server URL */}
+                                            <Box>
+                                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                                                    Connect to a machine running the OpenScanner WhisperServer.
                                                 </Typography>
-                                            </Alert>
-                                        )}
-                                    </Paper>
+                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                                    <TextField
+                                                        size="small"
+                                                        fullWidth
+                                                        label="Server URL"
+                                                        placeholder="http://192.168.1.100:8090"
+                                                        value={settings['TranscriptionServerUrl'] || ''}
+                                                        onChange={(e) => setSettings(prev => ({ ...prev, TranscriptionServerUrl: e.target.value }))}
+                                                        onBlur={() => testRemoteConnection(settings['TranscriptionServerUrl'])}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                                testRemoteConnection(settings['TranscriptionServerUrl']);
+                                                            }
+                                                        }}
+                                                    />
+                                                    <Button
+                                                        variant="outlined"
+                                                        size="small"
+                                                        onClick={() => testRemoteConnection()}
+                                                        disabled={connectionStatus === 'testing' || !settings['TranscriptionServerUrl']}
+                                                        sx={{ whiteSpace: 'nowrap', minWidth: 80, height: 40 }}
+                                                    >
+                                                        {connectionStatus === 'testing' ? (
+                                                            <CircularProgress size={18} />
+                                                        ) : 'Test'}
+                                                    </Button>
+                                                </Box>
+                                            </Box>
 
-                                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', mt: 1 }}>
-                                        <Box>
-                                            <Typography variant="body2" fontWeight="bold" sx={{
-                                                color: remoteServerInfo?.diarizationAvailable === false ? 'text.disabled' : undefined
-                                            }}>Speaker Diarization</Typography>
-                                            <Typography variant="caption" color="text.secondary">
-                                                {remoteServerInfo?.diarizationAvailable === false
-                                                    ? 'Not available on this server. Install WhisperX and configure a HuggingFace token.'
-                                                    : 'Identify different speakers in transmissions using WhisperX.'}
+                                            {/* Connection Result */}
+                                            {connectionStatus === 'ok' && remoteServerInfo && (
+                                                <Alert severity="success" variant="outlined" icon={false} sx={{ '& .MuiAlert-message': { width: '100%' } }}>
+                                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                                                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                            <Typography variant="body2" fontWeight="bold">Connected</Typography>
+                                                            <Chip label={remoteServerInfo.model} size="small" color="primary" variant="outlined" />
+                                                        </Box>
+                                                        <Typography variant="caption" color="text.secondary">
+                                                            {remoteServerInfo.acceleration ?? 'CPU'}
+                                                            {remoteServerInfo.gpu && ` -- ${remoteServerInfo.gpu}`}
+                                                            {remoteServerInfo.gpuMemoryMb && ` (${remoteServerInfo.gpuMemoryMb} MB)`}
+                                                            {!remoteServerInfo.gpu && remoteServerInfo.cpu && ` -- ${remoteServerInfo.cpu}`}
+                                                        </Typography>
+                                                        <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+                                                            <Chip
+                                                                label={remoteServerInfo.binaryFound ? 'whisper-cli' : 'whisper-cli missing'}
+                                                                color={remoteServerInfo.binaryFound ? 'success' : 'error'}
+                                                                size="small" variant="outlined"
+                                                            />
+                                                            <Chip
+                                                                label={remoteServerInfo.modelFound ? 'Model loaded' : 'Model missing'}
+                                                                color={remoteServerInfo.modelFound ? 'success' : 'error'}
+                                                                size="small" variant="outlined"
+                                                            />
+                                                            <Chip
+                                                                label={remoteServerInfo.diarizationAvailable ? 'WhisperX' : 'No WhisperX'}
+                                                                color={remoteServerInfo.diarizationAvailable ? 'success' : 'default'}
+                                                                size="small" variant="outlined"
+                                                            />
+                                                        </Box>
+                                                    </Box>
+                                                </Alert>
+                                            )}
+
+                                            {connectionStatus === 'error' && (
+                                                <Alert severity="error" variant="outlined">
+                                                    <AlertTitle>Connection Failed</AlertTitle>
+                                                    <Typography variant="body2">
+                                                        {connectionError || 'Could not reach the remote server.'}
+                                                    </Typography>
+                                                </Alert>
+                                            )}
+
+                                            {/* Speaker Diarization */}
+                                            <Box sx={{ pt: 0.5, borderTop: '1px solid', borderColor: 'divider' }}>
+                                                <SettingRow
+                                                    label="Speaker Diarization"
+                                                    description={
+                                                        remoteServerInfo?.diarizationAvailable === false
+                                                            ? 'Not available. Install WhisperX and configure a HuggingFace token on the server.'
+                                                            : 'Identify different speakers in transmissions using WhisperX.'
+                                                    }
+                                                    checked={settings['EnableDiarization'] === 'true'}
+                                                    disabled={!remoteServerInfo || !remoteServerInfo.diarizationAvailable}
+                                                    onChange={() => handleToggle('EnableDiarization', settings['EnableDiarization'] || 'false')}
+                                                />
+                                            </Box>
+                                        </Stack>
+                                    )}
+                                </Stack>
+                            )}
+                        </Paper>
+
+                        {/* System Info Section */}
+                        {(systemInfo.Version || systemInfo.Commit) && (
+                            <Paper variant="outlined" sx={{ p: 2 }}>
+                                <SectionHeader icon={<InfoOutlinedIcon fontSize="small" />} title="System" />
+                                <Stack spacing={0.5}>
+                                    {systemInfo.Version && (
+                                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <Typography variant="body2" color="text.secondary">Version</Typography>
+                                            <Typography variant="body2" fontWeight="medium">{systemInfo.Version}</Typography>
+                                        </Box>
+                                    )}
+                                    {systemInfo.Commit && (
+                                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <Typography variant="body2" color="text.secondary">Commit</Typography>
+                                            <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                                                {systemInfo.Commit.substring(0, 12)}
                                             </Typography>
                                         </Box>
-                                        <Switch
-                                            edge="end"
-                                            checked={settings['EnableDiarization'] === 'true'}
-                                            disabled={!remoteServerInfo || !remoteServerInfo.diarizationAvailable}
-                                            onChange={() => handleToggle('EnableDiarization', settings['EnableDiarization'] || 'false')}
-                                        />
-                                    </Box>
-                                    </>
-                                )}
-                            </ListItem>
+                                    )}
+                                </Stack>
+                            </Paper>
                         )}
-                        {transcriptionEnabled && <Divider sx={{ my: 1 }} />}
-                        {systemInfo.Commit && (
-                            <ListItem>
-                                <ListItemText 
-                                    primary="Git Commit"
-                                    secondary={systemInfo.Commit}
-                                    secondaryTypographyProps={{ style: { fontFamily: 'monospace', fontSize: '0.75rem' } }}
-                                />
-                            </ListItem>
-                        )}
-                        {systemInfo.Version && (
-                            <ListItem>
-                                <ListItemText 
-                                    primary="Software Version"
-                                    secondary={systemInfo.Version}
-                                />
-                            </ListItem>
-                        )}
-                    </List>
+
+                    </Stack>
                 )}
             </DialogContent>
             <DialogActions>
