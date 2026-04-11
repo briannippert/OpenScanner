@@ -23,6 +23,10 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
         model?: string;
         binaryFound?: boolean;
         modelFound?: boolean;
+        acceleration?: string;
+        cpu?: string;
+        gpu?: string;
+        gpuMemoryMb?: number;
     } | null>(null);
     const [connectionError, setConnectionError] = useState<string>('');
 
@@ -148,6 +152,10 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
                     model: data.model,
                     binaryFound: data.binaryFound,
                     modelFound: data.modelFound,
+                    acceleration: data.acceleration,
+                    cpu: data.cpu,
+                    gpu: data.gpu,
+                    gpuMemoryMb: data.gpuMemoryMb,
                 });
                 if (data.status !== 'ok') {
                     setConnectionError('Server is reachable but reports an error. Check whisper.cpp installation on the remote machine.');
@@ -285,7 +293,12 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
                                                     <Typography variant="body2">
                                                         Model: <strong>{remoteServerInfo.model}</strong>
                                                     </Typography>
-                                                    <Box sx={{ display: 'flex', gap: 1 }}>
+                                                    <Typography variant="body2">
+                                                        Acceleration: <strong>{remoteServerInfo.acceleration ?? 'CPU'}</strong>
+                                                        {remoteServerInfo.gpu && ` (${remoteServerInfo.gpu}${remoteServerInfo.gpuMemoryMb ? ` - ${remoteServerInfo.gpuMemoryMb} MB` : ''})`}
+                                                        {!remoteServerInfo.gpu && remoteServerInfo.cpu && ` (${remoteServerInfo.cpu})`}
+                                                    </Typography>
+                                                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                                                         <Chip
                                                             label={remoteServerInfo.binaryFound ? 'whisper-cli found' : 'whisper-cli missing'}
                                                             color={remoteServerInfo.binaryFound ? 'success' : 'error'}
