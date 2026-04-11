@@ -76,22 +76,20 @@ To update OpenScanner to the latest version, simply navigate to the project dire
 
 ## Remote Transcription Server
 
-If your Pi lacks the CPU power for local Whisper transcription, you can offload it to a more powerful machine on your network.
+If your Pi lacks the CPU power for local Whisper transcription, you can offload it to a more powerful machine on your network using the [OpenScanner WhisperServer](https://github.com/briannippert/OpenScanner.WhisperServer).
 
 ### Setup the Remote Server
 
-On a machine with a GPU or fast CPU, install the dependencies and start the server:
+On a machine with a GPU or fast CPU:
 
 ```bash
-pip install faster-whisper flask
-python scripts/whisper_server.py --model small.en --port 8090
+git clone https://github.com/briannippert/OpenScanner.WhisperServer.git
+cd OpenScanner.WhisperServer
+chmod +x scripts/*.sh
+./scripts/install_service.sh
 ```
 
-Options:
-- `--model`: Whisper model size (`tiny.en`, `base.en`, `small.en`, `medium.en`, `large-v3`). Default: `small.en`
-- `--device`: `auto`, `cpu`, or `cuda`. Default: `auto`
-- `--port`: Port to listen on. Default: `8090`
-- `--host`: Bind address. Default: `0.0.0.0`
+The installer will walk you through model selection, port configuration, and automatically enable GPU acceleration if an NVIDIA GPU is detected. See the [WhisperServer README](https://github.com/briannippert/OpenScanner.WhisperServer#readme) for full details.
 
 Verify the server is running: `curl http://<server-ip>:8090/health`
 
@@ -109,6 +107,6 @@ No restart is required -- the mode switch takes effect on the next transcription
 
 - [DSD-FME](https://github.com/lwvmobile/dsd-fme): Digital voice decoding.
 - [whisper.cpp](https://github.com/ggerganov/whisper.cpp): High-performance local AI transcription.
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper): CTranslate2-based Whisper for remote server transcription.
+- [OpenScanner WhisperServer](https://github.com/briannippert/OpenScanner.WhisperServer): Remote transcription server for offloading Whisper AI to a more powerful machine.
 - [FftSharp](https://github.com/swharden/FftSharp): Fast FFT calculations for the live spectrum.
 - [NSwag](https://github.com/RicoSuter/NSwag): OpenAPI/Swagger integration.
