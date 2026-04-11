@@ -20,6 +20,9 @@ public abstract class DSDBase : IDecoder
 
     public string? InputSource { get; set; }
 
+    /// <inheritdoc />
+    public bool CanFeedInput => InputSource != null;
+
     protected DSDBase(ILogger logger)
     {
         _logger = logger;
@@ -41,6 +44,7 @@ public abstract class DSDBase : IDecoder
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = CanFeedInput,
             UseShellExecute = false
         };
 
@@ -230,6 +234,24 @@ public abstract class DSDBase : IDecoder
 
             OnActivity?.Invoke(src, tgt, tone);
         }
+    }
+
+    /// <inheritdoc />
+    public void FeedInput(byte[] data, int offset, int count)
+    {
+        if (!CanFeedInput)
+            throw new InvalidOperationException("Decoder is not in stdin-feed mode. Set InputSource first.");
+        
+        try
+        {
+            if (_decoderProcess != null && !_decoderProcess.HasExited)
+            {
+                _decoderProcess.StandardInput.BaseStream.Write(data, offset, count);
+                _decoderProcess.StandardInput.BaseStream.Flush();
+            }
+        }
+        catch (IOException) { /* Process exited between check and write */ }
+        catch (ObjectDisposedException) { /* Process already disposed */ }
     }
 
     public void Stop()

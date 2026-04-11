@@ -90,6 +90,7 @@ function App() {
   const filterNodeRef = useRef<BiquadFilterNode | null>(null);
   const wakeLock = useRef<WakeLockSentinel | null>(null);
   const activeSource = useRef<AudioBufferSourceNode | null>(null);
+  const isParallelRef = useRef(false);
 
   const manualHold = scannerState.manualHoldFrequency;
 
@@ -488,6 +489,7 @@ function App() {
                 const message = JSON.parse(event.data);
                 if (message.type === 'STATE_UPDATE') {
                   const newState = message.payload as ScannerState;
+                  isParallelRef.current = !!(newState.parallelChannels && newState.parallelChannels.length > 0);
                   setScannerState(newState);
                 } else if (message.type === 'NEW_LOG') {
                   const newEntry = message.payload as CallLog;
@@ -531,12 +533,9 @@ function App() {
                 }
 
                 const int16Array = new Int16Array(arrayBuffer);
-                // console.log(`[Audio] Decoded ${int16Array.length} samples`);
 
-                const float32Array = new Float32Array(int16Array.length);
-                for (let i = 0; i < int16Array.length; i++) {
-                    float32Array[i] = int16Array[i] / 32768;
-                }
+                // Determine mono vs stereo based on parallel scan mode
+                const isStereo = isParallelRef.current;
                 
                 let ctx = window.audioCtx;
                 if (!ctx) {
@@ -556,6 +555,29 @@ function App() {
                 if (!ctx) {
                     console.error("[Audio] Failed to get AudioContext");
                     return;
+                }
+
+                let audioBuffer: AudioBuffer;
+                if (isStereo && int16Array.length >= 2) {
+                    // Stereo: interleaved L,R,L,R samples from parallel scan
+                    const frameSamples = Math.floor(int16Array.length / 2);
+                    const leftChannel = new Float32Array(frameSamples);
+                    const rightChannel = new Float32Array(frameSamples);
+                    for (let i = 0; i < frameSamples; i++) {
+                        leftChannel[i] = int16Array[i * 2] / 32768;
+                        rightChannel[i] = int16Array[i * 2 + 1] / 32768;
+                    }
+                    audioBuffer = ctx.createBuffer(2, frameSamples, 48000);
+                    audioBuffer.copyToChannel(leftChannel, 0);
+                    audioBuffer.copyToChannel(rightChannel, 1);
+                } else {
+                    // Mono: single channel
+                    const float32Array = new Float32Array(int16Array.length);
+                    for (let i = 0; i < int16Array.length; i++) {
+                        float32Array[i] = int16Array[i] / 32768;
+                    }
+                    audioBuffer = ctx.createBuffer(1, float32Array.length, 48000);
+                    audioBuffer.copyToChannel(float32Array, 0);
                 }
 
                 // Ensure gain node belongs to current context
@@ -589,9 +611,6 @@ function App() {
                     audioAnalyserRef.current = analyser;
                     setAudioAnalyser(analyser);
                 }
-
-                const audioBuffer = ctx.createBuffer(1, float32Array.length, 48000);
-                audioBuffer.copyToChannel(float32Array, 0);
 
                 const source = ctx.createBufferSource();
                 source.buffer = audioBuffer;

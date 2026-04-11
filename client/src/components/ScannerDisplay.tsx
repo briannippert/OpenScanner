@@ -16,8 +16,10 @@ interface Props {
 
 const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [] }) => {
     const isReceiving = state.status === 'RECEIVING';
-    const isFastScan = state.status === 'SCANNING' && !state.currentFrequency && channels.length > 1;
-    const activeColor = isReceiving ? '#00ff00' : '#555';
+    const isParallel = !!state.parallelChannels && state.parallelChannels.length > 0;
+    const isFastScan = !isParallel && state.status === 'SCANNING' && !state.currentFrequency && channels.length > 1;
+    const hasParallelActivity = isParallel && state.parallelChannels!.some(pc => pc.isActive);
+    const activeColor = isReceiving || hasParallelActivity ? '#00ff00' : '#555';
 
     const displayFreq = state.currentFrequency;
     const displayAlpha = state.currentChannel?.alphaTag;
@@ -113,7 +115,86 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                     gap: 2 
                 }}>
                     <Box textAlign="center">
-                        {isFastScan ? (
+                        {isParallel ? (
+                            <>
+                                <Typography variant="h3" sx={{
+                                    fontFamily: 'monospace',
+                                    fontWeight: 700,
+                                    color: hasParallelActivity ? '#00ff00' : '#555',
+                                    letterSpacing: 3,
+                                    fontSize: { xs: '1.8rem', md: '2.5rem' },
+                                    mb: 1,
+                                    textShadow: hasParallelActivity ? '0 0 10px rgba(0,255,0,0.4)' : 'none'
+                                }}>
+                                    PARALLEL SCAN
+                                </Typography>
+                                <Box display="flex" flexDirection="column" gap={1} width="100%">
+                                    {state.parallelChannels!.map(pc => {
+                                        const dbMin = -60;
+                                        const dbMax = -10;
+                                        const clampedDb = Math.max(dbMin, Math.min(dbMax, pc.signalStrength));
+                                        const meterPct = ((clampedDb - dbMin) / (dbMax - dbMin)) * 100;
+                                        const meterColor = pc.isActive ? '#00ff00' : (meterPct > 30 ? '#ffaa00' : '#333');
+                                        return (
+                                            <Box key={pc.channel.frequency} display="flex" alignItems="center" gap={1}>
+                                                <Typography sx={{
+                                                    fontFamily: 'monospace',
+                                                    fontSize: '0.7rem',
+                                                    color: pc.isActive ? '#00ff00' : '#888',
+                                                    fontWeight: pc.isActive ? 'bold' : 'normal',
+                                                    minWidth: { xs: 60, sm: 90 },
+                                                    whiteSpace: 'nowrap',
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis',
+                                                    transition: 'color 0.3s ease',
+                                                }}>
+                                                    {pc.channel.alphaTag || pc.channel.frequency}
+                                                    {pc.isRecording ? ' [REC]' : ''}
+                                                </Typography>
+                                                <Box sx={{
+                                                    flex: 1,
+                                                    height: 6,
+                                                    bgcolor: '#111',
+                                                    borderRadius: 1,
+                                                    overflow: 'hidden',
+                                                    border: '1px solid #222',
+                                                }}>
+                                                    <Box sx={{
+                                                        width: `${meterPct}%`,
+                                                        height: '100%',
+                                                        bgcolor: meterColor,
+                                                        borderRadius: 1,
+                                                        transition: 'width 0.15s linear, background-color 0.3s ease',
+                                                        boxShadow: pc.isActive ? `0 0 6px ${meterColor}` : 'none',
+                                                    }} />
+                                                </Box>
+                                                <Typography sx={{
+                                                    fontFamily: 'monospace',
+                                                    fontSize: '0.6rem',
+                                                    color: '#555',
+                                                    minWidth: 36,
+                                                    textAlign: 'right',
+                                                }}>
+                                                    {pc.signalStrength > -90 ? `${pc.signalStrength.toFixed(0)}dB` : '---'}
+                                                </Typography>
+                                            </Box>
+                                        );
+                                    })}
+                                </Box>
+                                {state.parallelChannels!.filter(pc => pc.isActive && pc.sourceID).map(pc => (
+                                    <Typography key={pc.channel.frequency} variant="caption" sx={{
+                                        color: '#ffaa00',
+                                        fontWeight: 'bold',
+                                        mt: 0.5,
+                                        display: 'block',
+                                        fontFamily: 'monospace',
+                                        fontSize: '0.65rem'
+                                    }}>
+                                        {pc.channel.alphaTag}: {pc.sourceID ?? '?'} {pc.targetID ? `-> TG ${pc.targetID}` : ''}
+                                    </Typography>
+                                ))}
+                            </>
+                        ) : isFastScan ? (
                             <>
                                 <Typography variant="h3" sx={{
                                     fontFamily: 'monospace',
@@ -243,8 +324,8 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                         )}
                     </Box>
                     
-                    {/* VU Meter (Only when receiving) */}
-                    {isReceiving && analyser && (
+                    {/* VU Meter (When receiving or parallel activity) */}
+                    {(isReceiving || hasParallelActivity) && analyser && (
                         <Box>
                              <VuMeter analyser={analyser} height={60} width={10} />
                         </Box>
@@ -253,8 +334,8 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
 
                 {/* Visualizers */}
                 <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
-                    {/* Audio Waterfall (Heatmap during receive or monitoring) */}
-                    {(state.status === 'RECEIVING' || state.status === 'MONITORING') && analyser && (
+                    {/* Audio Waterfall (Heatmap during receive, monitoring, or active parallel) */}
+                    {(state.status === 'RECEIVING' || state.status === 'MONITORING' || hasParallelActivity) && analyser && (
                         <AudioSpectrogram analyser={analyser} height={60} />
                     )}
 
