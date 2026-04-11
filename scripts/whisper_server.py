@@ -42,7 +42,10 @@ RADIO_PROMPT = (
     "to street intersection. Suspect description: white male, blue jeans. "
     "License plate, vehicle registration, bolo. Structure fire, medical "
     "emergency, staging area. Status check, affirmative, negative, stand by. "
-    "Channel 2, tac channel, command post. Kilo, Tango, Zulu, X-ray. "
+    "Channel 2, tac channel, command post. "
+    "Alpha Adam, Bravo Boy, Charlie Charles, David, Edward, Frank, George, "
+    "Henry, Ida, John, King, Lincoln, Mary, Nora, Ocean, Paul, Queen, Robert, "
+    "Sam, Tom, Union, Victor, William, X-ray, Young, Zebra. "
     "10-20 location, 10-8 in service, 10-7 out of service."
 )
 
