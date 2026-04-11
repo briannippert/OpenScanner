@@ -42,25 +42,31 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
 
     useEffect(() => {
         if (open) {
-            fetchSettings();
+            fetchSettings().then((data) => {
+                if (data && data['TranscriptionMode'] === 'remote' && data['TranscriptionServerUrl']) {
+                    testRemoteConnection(data['TranscriptionServerUrl']);
+                }
+            });
             fetchSystemInfo();
             fetchLatestVersion();
         }
     }, [open]);
 
-    const fetchSettings = async () => {
+    const fetchSettings = async (): Promise<Record<string, string> | null> => {
         setLoading(true);
         try {
             const res = await fetch(`${getBackendUrl()}/api/settings`);
             if (res.ok) {
                 const data = await res.json();
                 setSettings(data);
+                return data;
             }
         } catch (error) {
             console.error("Failed to fetch settings", error);
         } finally {
             setLoading(false);
         }
+        return null;
     };
 
     const fetchSystemInfo = async () => {
@@ -159,6 +165,9 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
                     gpuMemoryMb: data.gpuMemoryMb,
                     diarizationAvailable: data.diarizationAvailable,
                 });
+                if (data.status === 'ok') {
+                    updateSetting('TranscriptionServerUrl', serverUrl);
+                }
                 if (!data.diarizationAvailable && settings['EnableDiarization'] === 'true') {
                     updateSetting('EnableDiarization', 'false');
                 }
@@ -271,10 +280,9 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
                                                 placeholder="http://192.168.1.100:8090"
                                                 value={settings['TranscriptionServerUrl'] || ''}
                                                 onChange={(e) => setSettings(prev => ({ ...prev, TranscriptionServerUrl: e.target.value }))}
-                                                onBlur={() => updateSetting('TranscriptionServerUrl', settings['TranscriptionServerUrl'] || '')}
+                                                onBlur={() => testRemoteConnection(settings['TranscriptionServerUrl'])}
                                                 onKeyDown={(e) => {
                                                     if (e.key === 'Enter') {
-                                                        updateSetting('TranscriptionServerUrl', settings['TranscriptionServerUrl'] || '');
                                                         testRemoteConnection(settings['TranscriptionServerUrl']);
                                                     }
                                                 }}
