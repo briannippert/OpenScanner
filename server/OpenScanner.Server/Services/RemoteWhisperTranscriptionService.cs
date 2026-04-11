@@ -100,6 +100,12 @@ public class RemoteWhisperTranscriptionService : ITranscriptionService
             content.Add(fileContent, "file", Path.GetFileName(tempWavPath));
             content.Add(new StringContent(RadioPrompt), "prompt");
 
+            var diarize = _db.GetSettingAsync("EnableDiarization").GetAwaiter().GetResult();
+            if (diarize == "true")
+            {
+                content.Add(new StringContent("true"), "diarize");
+            }
+
             var response = _httpClient.PostAsync(url, content).GetAwaiter().GetResult();
 
             if (!response.IsSuccessStatusCode)

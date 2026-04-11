@@ -6,6 +6,7 @@ import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import AudioSpectrogram from './AudioSpectrogram';
 import VuMeter from './VuMeter';
+import SpeakerText from './SpeakerText';
 
 interface Props {
     state: ScannerState;
@@ -354,14 +355,21 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                             justifyContent: 'center',
                             textAlign: 'center'
                         }}>
-                            <Typography variant="body2" sx={{ 
+                            <Typography variant="body2" component="div" sx={{ 
                                 color: '#00ff00', 
                                 fontStyle: 'italic',
                                 fontFamily: 'monospace',
                                 fontSize: '0.9rem',
                                 textShadow: '0 0 5px rgba(0,255,0,0.3)'
                             }}>
-                                "{state.lastTranscription}"
+                                <SpeakerText
+                                    text={state.lastTranscription}
+                                    baseColor="#00ff00"
+                                    fontSize="0.9rem"
+                                    fontStyle="italic"
+                                    fontFamily="monospace"
+                                    textShadow="0 0 5px rgba(0,255,0,0.3)"
+                                />
                             </Typography>
                         </Box>
                     )}

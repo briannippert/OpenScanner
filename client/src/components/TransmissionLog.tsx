@@ -32,6 +32,7 @@ import {
     Article
 } from '@mui/icons-material';
 import type { CallLog, Channel } from '../types';
+import SpeakerText from './SpeakerText';
 
 interface LogNodeProps {
     playingId: string | null;
@@ -579,8 +580,13 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                                 )}
                             </Box>
                             {log.transcription && (
-                                <Typography variant="body2" sx={{ color: '#999', fontStyle: 'italic', fontSize: '0.72rem', mt: 0.4, lineHeight: 1.3 }}>
-                                    "{log.transcription}"
+                                <Typography variant="body2" component="div" sx={{ color: '#999', fontStyle: 'italic', fontSize: '0.72rem', mt: 0.4, lineHeight: 1.3 }}>
+                                    <SpeakerText
+                                        text={log.transcription}
+                                        baseColor="#999"
+                                        fontSize="0.72rem"
+                                        fontStyle="italic"
+                                    />
                                 </Typography>
                             )}
                         </Box>

@@ -115,6 +115,12 @@ public class Database : IDatabase
         {
             conn.Execute("INSERT INTO settings (key, value) VALUES ('TranscriptionServerUrl', '')");
         }
+
+        var diarCount = conn.ExecuteScalar<int>("SELECT count(*) FROM settings WHERE key = 'EnableDiarization'");
+        if (diarCount == 0)
+        {
+            conn.Execute("INSERT INTO settings (key, value) VALUES ('EnableDiarization', 'false')");
+        }
     }
 
     /// <inheritdoc />

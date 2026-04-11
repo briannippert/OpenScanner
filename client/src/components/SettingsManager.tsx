@@ -27,6 +27,7 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
         cpu?: string;
         gpu?: string;
         gpuMemoryMb?: number;
+        diarizationAvailable?: boolean;
     } | null>(null);
     const [connectionError, setConnectionError] = useState<string>('');
 
@@ -156,6 +157,7 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
                     cpu: data.cpu,
                     gpu: data.gpu,
                     gpuMemoryMb: data.gpuMemoryMb,
+                    diarizationAvailable: data.diarizationAvailable,
                 });
                 if (data.status !== 'ok') {
                     setConnectionError('Server is reachable but reports an error. Check whisper.cpp installation on the remote machine.');
@@ -251,6 +253,7 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
                                 </ToggleButtonGroup>
 
                                 {isRemote && (
+                                    <>
                                     <Paper variant="outlined" sx={{ width: '100%', p: 2 }}>
                                         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
                                             Connect to an external machine running the OpenScanner WhisperServer
@@ -311,6 +314,12 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
                                                             size="small"
                                                             variant="outlined"
                                                         />
+                                                        <Chip
+                                                            label={remoteServerInfo.diarizationAvailable ? 'Diarization ready' : 'Diarization unavailable'}
+                                                            color={remoteServerInfo.diarizationAvailable ? 'success' : 'default'}
+                                                            size="small"
+                                                            variant="outlined"
+                                                        />
                                                     </Box>
                                                 </Box>
                                             </Alert>
@@ -325,6 +334,22 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
                                             </Alert>
                                         )}
                                     </Paper>
+
+                                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', mt: 1 }}>
+                                        <Box>
+                                            <Typography variant="body2" fontWeight="bold">Speaker Diarization</Typography>
+                                            <Typography variant="caption" color="text.secondary">
+                                                Identify different speakers in transmissions using WhisperX.
+                                                Requires WhisperX and a HuggingFace token on the remote server.
+                                            </Typography>
+                                        </Box>
+                                        <Switch
+                                            edge="end"
+                                            checked={settings['EnableDiarization'] === 'true'}
+                                            onChange={() => handleToggle('EnableDiarization', settings['EnableDiarization'] || 'false')}
+                                        />
+                                    </Box>
+                                    </>
                                 )}
                             </ListItem>
                         )}
