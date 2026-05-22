@@ -42,19 +42,7 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
         return `${protocol}//${backendHost}${portSuffix}`;
     };
 
-    useEffect(() => {
-        if (open) {
-            fetchSettings().then((data) => {
-                if (data && data['TranscriptionMode'] === 'remote' && data['TranscriptionServerUrl']) {
-                    testRemoteConnection(data['TranscriptionServerUrl']);
-                }
-            });
-            fetchSystemInfo();
-            fetchLatestVersion();
-        }
-    }, [open]);
-
-    const fetchSettings = async (): Promise<Record<string, string> | null> => {
+    const fetchSettings = useCallback(async (): Promise<Record<string, string> | null> => {
         setLoading(true);
         try {
             const res = await fetch(`${getBackendUrl()}/api/settings`);
@@ -69,9 +57,9 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
             setLoading(false);
         }
         return null;
-    };
+    }, []);
 
-    const fetchSystemInfo = async () => {
+    const fetchSystemInfo = useCallback(async () => {
         try {
             const res = await fetch(`${getBackendUrl()}/api/system/info`);
             if (res.ok) {
@@ -81,9 +69,9 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
         } catch (error) {
             console.error("Failed to fetch system info", error);
         }
-    };
+    }, []);
 
-    const fetchLatestVersion = async () => {
+    const fetchLatestVersion = useCallback(async () => {
         try {
             const res = await fetch('https://api.github.com/repos/briannippert/OpenScanner/releases/latest');
             if (res.ok) {
@@ -97,42 +85,9 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
         } catch (error) {
             console.error("Failed to fetch latest version from GitHub", error);
         }
-    };
+    }, []);
 
-    const isNewer = (current: string, latest: string) => {
-        if (!current || !latest) return false;
-        const c = current.split('+')[0].replace(/^v/, '').split('.').map(Number);
-        const l = latest.replace(/^v/, '').split('.').map(Number);
-        for (let i = 0; i < Math.max(c.length, l.length); i++) {
-            const cv = c[i] || 0;
-            const lv = l[i] || 0;
-            if (lv > cv) return true;
-            if (cv > lv) return false;
-        }
-        return false;
-    };
-
-    const updateAvailable = updateInfo && isNewer(systemInfo.Version, updateInfo.latestVersion);
-
-    const handleToggle = async (key: string, currentValue: string) => {
-        const newValue = currentValue === 'true' ? 'false' : 'true';
-        
-        // Optimistic update
-        setSettings(prev => ({ ...prev, [key]: newValue }));
-
-        try {
-            await fetch(`${getBackendUrl()}/api/settings/${key}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newValue)
-            });
-        } catch (error) {
-            console.error("Failed to update setting", error);
-            setSettings(prev => ({ ...prev, [key]: currentValue }));
-        }
-    };
-
-    const updateSetting = async (key: string, value: string) => {
+    const updateSetting = useCallback(async (key: string, value: string) => {
         setSettings(prev => ({ ...prev, [key]: value }));
         try {
             await fetch(`${getBackendUrl()}/api/settings/${key}`, {
@@ -143,7 +98,7 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
         } catch (error) {
             console.error("Failed to update setting", error);
         }
-    };
+    }, []);
 
     const testRemoteConnection = useCallback(async (url?: string) => {
         const serverUrl = url ?? settings['TranscriptionServerUrl'];
@@ -184,7 +139,51 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
             setConnectionStatus('error');
             setConnectionError(err instanceof TypeError ? 'Could not connect. Check the URL and ensure the server is running.' : String(err));
         }
-    }, [settings]);
+    }, [settings, updateSetting]);
+
+    useEffect(() => {
+        if (open) {
+            fetchSettings().then((data) => {
+                if (data && data['TranscriptionMode'] === 'remote' && data['TranscriptionServerUrl']) {
+                    testRemoteConnection(data['TranscriptionServerUrl']);
+                }
+            });
+            fetchSystemInfo();
+            fetchLatestVersion();
+        }
+    }, [open, fetchSettings, fetchSystemInfo, fetchLatestVersion, testRemoteConnection]);
+
+    const isNewer = (current: string, latest: string) => {
+        if (!current || !latest) return false;
+        const c = current.split('+')[0].replace(/^v/, '').split('.').map(Number);
+        const l = latest.replace(/^v/, '').split('.').map(Number);
+        for (let i = 0; i < Math.max(c.length, l.length); i++) {
+            const cv = c[i] || 0;
+            const lv = l[i] || 0;
+            if (lv > cv) return true;
+            if (cv > lv) return false;
+        }
+        return false;
+    };
+
+    const updateAvailable = updateInfo && isNewer(systemInfo.Version, updateInfo.latestVersion);
+
+    const handleToggle = async (key: string, currentValue: string) => {
+        const newValue = currentValue === 'true' ? 'false' : 'true';
+        
+        setSettings(prev => ({ ...prev, [key]: newValue }));
+
+        try {
+            await fetch(`${getBackendUrl()}/api/settings/${key}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newValue)
+            });
+        } catch (error) {
+            console.error("Failed to update setting", error);
+            setSettings(prev => ({ ...prev, [key]: currentValue }));
+        }
+    };
 
     const isRemote = settings['TranscriptionMode'] === 'remote';
     const transcriptionEnabled = settings['EnableTranscription'] === 'true';
