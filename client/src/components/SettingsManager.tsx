@@ -15,6 +15,39 @@ interface Props {
     onClose: () => void;
 }
 
+const SectionHeader: React.FC<{ icon: React.ReactNode; title: string }> = ({ icon, title }) => (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+        <Box sx={{ color: 'primary.main', display: 'flex' }}>{icon}</Box>
+        <Typography variant="subtitle2" fontWeight="bold" sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            {title}
+        </Typography>
+    </Box>
+);
+
+const SettingRow: React.FC<{
+    label: string;
+    description: string;
+    checked: boolean;
+    disabled?: boolean;
+    onChange: () => void;
+}> = ({ label, description, checked, disabled, onChange }) => (
+    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.5 }}>
+        <Box sx={{ pr: 2 }}>
+            <Typography variant="body2" fontWeight="medium" sx={{ color: disabled ? 'text.disabled' : 'text.primary' }}>
+                {label}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">{description}</Typography>
+        </Box>
+        <Switch
+            edge="end"
+            checked={checked}
+            disabled={disabled}
+            onChange={onChange}
+            size="small"
+        />
+    </Box>
+);
+
 const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
     const [settings, setSettings] = useState<Record<string, string>>({});
     const [systemInfo, setSystemInfo] = useState<Record<string, string>>({});
@@ -187,39 +220,6 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
 
     const isRemote = settings['TranscriptionMode'] === 'remote';
     const transcriptionEnabled = settings['EnableTranscription'] === 'true';
-
-    const SectionHeader: React.FC<{ icon: React.ReactNode; title: string }> = ({ icon, title }) => (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-            <Box sx={{ color: 'primary.main', display: 'flex' }}>{icon}</Box>
-            <Typography variant="subtitle2" fontWeight="bold" sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                {title}
-            </Typography>
-        </Box>
-    );
-
-    const SettingRow: React.FC<{
-        label: string;
-        description: string;
-        checked: boolean;
-        disabled?: boolean;
-        onChange: () => void;
-    }> = ({ label, description, checked, disabled, onChange }) => (
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 0.5 }}>
-            <Box sx={{ pr: 2 }}>
-                <Typography variant="body2" fontWeight="medium" sx={{ color: disabled ? 'text.disabled' : 'text.primary' }}>
-                    {label}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">{description}</Typography>
-            </Box>
-            <Switch
-                edge="end"
-                checked={checked}
-                disabled={disabled}
-                onChange={onChange}
-                size="small"
-            />
-        </Box>
-    );
 
     return (
         <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
