@@ -54,6 +54,13 @@ public interface IDatabase
     Task SaveTransmissionAsync(CallLog log);
 
     /// <summary>
+    /// Updates only the transcription field of a transmission log entry.
+    /// </summary>
+    /// <param name="id">The transmission ID.</param>
+    /// <param name="transcription">The transcription text.</param>
+    Task UpdateTranscriptionAsync(string id, string? transcription);
+
+    /// <summary>
     /// Retrieves the most recent transmission logs.
     /// </summary>
     /// <param name="limit">Maximum number of logs to return.</param>

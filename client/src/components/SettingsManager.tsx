@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
     Dialog, DialogTitle, DialogContent, DialogActions, 
     Button, List, ListItem, ListItemText, ListItemSecondaryAction, Switch,
-    Box, CircularProgress, Alert, AlertTitle, Link
+    Box, CircularProgress, Alert, AlertTitle, Link, TextField
 } from '@mui/material';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
 
@@ -120,6 +120,26 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
         }
     };
 
+    const handleValueChange = async (key: string, newValue: string) => {
+        setSettings(prev => ({ ...prev, [key]: newValue }));
+
+        try {
+            const isDev = window.location.port === '5173';
+            const port = isDev ? '5212' : window.location.port || '80';
+            const protocol = window.location.protocol;
+            const backendHost = window.location.hostname;
+            const portSuffix = (port === '80' || port === '') ? '' : `:${port}`;
+
+            await fetch(`${protocol}//${backendHost}${portSuffix}/api/settings/${key}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newValue)
+            });
+        } catch (error) {
+            console.error("Failed to update setting", error);
+        }
+    };
+
     // Define known settings with friendly names
     const knownSettings: { key: string; label: string; description: string }[] = [
         { 
@@ -176,6 +196,24 @@ const SettingsManager: React.FC<Props> = ({ open, onClose }) => {
                                 </ListItemSecondaryAction>
                             </ListItem>
                         ))}
+                        {settings['EnableTranscription'] === 'true' && (
+                            <ListItem key="TranscriptionThreads" sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <ListItemText 
+                                    primary="Transcription Threads"
+                                    secondary={`Number of parallel threads for AI transcription. CPU cores: ${systemInfo.CpuCores || 'Unknown'}`}
+                                    sx={{ mr: 2 }}
+                                />
+                                <TextField
+                                    type="number"
+                                    size="small"
+                                    variant="outlined"
+                                    style={{ width: '80px', minWidth: '80px' }}
+                                    value={settings['TranscriptionThreads'] || ''}
+                                    inputProps={{ min: 1, max: 32 }}
+                                    onChange={(e) => handleValueChange('TranscriptionThreads', e.target.value)}
+                                />
+                            </ListItem>
+                        )}
                         {systemInfo.Commit && (
                             <ListItem>
                                 <ListItemText 

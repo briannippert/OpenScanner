@@ -143,6 +143,7 @@ public class SupportService : ISupportService
             catch { }
         }
 
+        info["CpuCores"] = Environment.ProcessorCount.ToString();
         return info;
     }
 

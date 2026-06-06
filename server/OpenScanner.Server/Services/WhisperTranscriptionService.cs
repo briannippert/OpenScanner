@@ -1,21 +1,194 @@
+using System;
+using System.IO;
 using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Collections.Generic;
 using OpenScanner.Server.Interfaces;
 using Microsoft.Extensions.Logging;
 using OpenScanner.Server.Devices;
+using OpenScanner.Server.Models;
 
 namespace OpenScanner.Server.Services;
 
-public class WhisperTranscriptionService : ITranscriptionService
+public class WhisperTranscriptionService : ITranscriptionService, IDisposable
 {
     private readonly IDatabase _db;
     private readonly ILogger<WhisperTranscriptionService> _logger;
     private readonly IConfiguration _config;
+
+    private readonly System.Threading.Channels.Channel<(CallLog Log, string AudioPath)> _queueChannel = System.Threading.Channels.Channel.CreateUnbounded<(CallLog Log, string AudioPath)>();
+    private readonly List<TranscriptionWorker> _workers = new();
+    private readonly object _workersLock = new();
+    private readonly CancellationTokenSource _cts = new();
+
+    public event Action<CallLog>? OnTranscriptionCompleted;
+
+    private class TranscriptionWorker
+    {
+        private readonly CancellationTokenSource _workerCts;
+        public Task Task { get; }
+
+        public TranscriptionWorker(Func<CancellationToken, Task> loop, CancellationToken parentToken)
+        {
+            _workerCts = CancellationTokenSource.CreateLinkedTokenSource(parentToken);
+            Task = Task.Run(() => loop(_workerCts.Token));
+        }
+
+        public void Stop()
+        {
+            _workerCts.Cancel();
+        }
+    }
 
     public WhisperTranscriptionService(IDatabase db, ILogger<WhisperTranscriptionService> logger, IConfiguration config)
     {
         _db = db;
         _logger = logger;
         _config = config;
+
+        // Initialize workers based on current setting
+        var targetCount = GetTargetThreadCount();
+        AdjustWorkers(targetCount);
+
+        // Start background setting monitor
+        _ = StartSettingsMonitor(_cts.Token);
+    }
+
+    private int GetTargetThreadCount()
+    {
+        try
+        {
+            var val = _db.GetSettingAsync("TranscriptionThreads").GetAwaiter().GetResult();
+            if (int.TryParse(val, out var count))
+            {
+                return Math.Max(1, count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read TranscriptionThreads setting");
+        }
+        return Math.Max(1, Environment.ProcessorCount / 2);
+    }
+
+    private void AdjustWorkers(int targetCount)
+    {
+        lock (_workersLock)
+        {
+            if (targetCount < 1) targetCount = 1;
+
+            while (_workers.Count < targetCount)
+            {
+                var worker = new TranscriptionWorker(WorkerLoop, _cts.Token);
+                _workers.Add(worker);
+                _logger.LogInformation($"Started transcription worker. Total workers: {_workers.Count}");
+            }
+
+            while (_workers.Count > targetCount)
+            {
+                var lastIdx = _workers.Count - 1;
+                var worker = _workers[lastIdx];
+                worker.Stop();
+                _workers.RemoveAt(lastIdx);
+                _logger.LogInformation($"Stopped transcription worker. Total workers: {_workers.Count}");
+            }
+        }
+    }
+
+    private async Task StartSettingsMonitor(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(5000, cancellationToken);
+                var targetCount = GetTargetThreadCount();
+                AdjustWorkers(targetCount);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in settings monitor loop");
+            }
+        }
+    }
+
+    private async Task WorkerLoop(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                // Wait for work
+                var hasWork = await _queueChannel.Reader.WaitToReadAsync(cancellationToken);
+                if (!hasWork) break;
+
+                while (_queueChannel.Reader.TryRead(out var job))
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        _queueChannel.Writer.TryWrite(job);
+                        break;
+                    }
+
+                    await ProcessJobAsync(job, cancellationToken);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal exit
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Exception in transcription worker loop");
+        }
+    }
+
+    private async Task ProcessJobAsync((CallLog Log, string AudioPath) job, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Run transcription
+            var transcription = TranscribeAudio(job.AudioPath);
+
+            // Update database
+            await _db.UpdateTranscriptionAsync(job.Log.Id, transcription);
+
+            // Update in-memory log object
+            job.Log.Transcription = transcription;
+
+            // Notify completion
+            OnTranscriptionCompleted?.Invoke(job.Log);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to process transcription for log {job.Log.Id}");
+        }
+    }
+
+    public void QueueTranscription(CallLog log, string audioPath)
+    {
+        _queueChannel.Writer.TryWrite((log, audioPath));
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+
+        lock (_workersLock)
+        {
+            foreach (var worker in _workers)
+            {
+                worker.Stop();
+            }
+            _workers.Clear();
+        }
     }
 
     public string? TranscribeAudio(string audioPath)
