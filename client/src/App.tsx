@@ -493,7 +493,14 @@ function App() {
                   setScannerState(newState);
                 } else if (message.type === 'NEW_LOG') {
                   const newEntry = message.payload as CallLog;
-                  setCallLog(log => [newEntry, ...log].slice(0, 100));
+                  setCallLog(log => {
+                    const exists = log.some(x => x.id === newEntry.id);
+                    if (exists) {
+                      return log.map(x => x.id === newEntry.id ? newEntry : x);
+                    } else {
+                      return [newEntry, ...log].slice(0, 100);
+                    }
+                  });
                 } else if (message.type === 'ERROR') {
                   setErrorMsg(message.payload);
                 }

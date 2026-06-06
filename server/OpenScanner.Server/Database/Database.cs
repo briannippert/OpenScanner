@@ -103,6 +103,13 @@ public class Database : IDatabase
         {
             conn.Execute("INSERT INTO settings (key, value) VALUES ('EnableTranscription', 'true')");
         }
+
+        var threadsCount = conn.ExecuteScalar<int>("SELECT count(*) FROM settings WHERE key = 'TranscriptionThreads'");
+        if (threadsCount == 0)
+        {
+            var defaultThreads = Math.Max(1, Environment.ProcessorCount / 2);
+            conn.Execute("INSERT INTO settings (key, value) VALUES ('TranscriptionThreads', @DefaultThreads)", new { DefaultThreads = defaultThreads.ToString() });
+        }
     }
 
     /// <inheritdoc />
@@ -170,6 +177,13 @@ public class Database : IDatabase
         }
 
         await conn.ExecuteAsync(SqlLoader.GetSql("Transmissions/Insert.sql"), log);
+    }
+
+    /// <inheritdoc />
+    public async Task UpdateTranscriptionAsync(string id, string? transcription)
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync("UPDATE transmissions SET transcription = @Transcription WHERE id = @Id", new { Id = id, Transcription = transcription });
     }
 
     /// <inheritdoc />

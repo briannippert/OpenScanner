@@ -48,6 +48,12 @@ public class RecordingService : IRecordingService
         _logger = logger;
         _transcriptionService = transcriptionService;
         _gpsService = gpsService;
+
+        _transcriptionService.OnTranscriptionCompleted += (log) =>
+        {
+            _logger.LogInformation($"Transcription completed for log {log.Id}: {log.Transcription}");
+            OnNewLog?.Invoke(log);
+        };
     }
 
     public void UpdateSourceTarget(int? src, int? tgt)
@@ -206,17 +212,6 @@ public class RecordingService : IRecordingService
                      _logger.LogError(ex, "WAV conversion failed");
                  }
 
-                 // Run Transcription
-                 string? transcription = null;
-                 try 
-                 {
-                     transcription = _transcriptionService.TranscribeAudio(recordingPath);
-                 }
-                 catch (Exception ex)
-                 {
-                     _logger.LogError(ex, "Transcription failed");
-                 }
-
                  var gps = _gpsService.GetLastLocation();
                  var lat = gps?.Lat ?? 0;
                  var lon = gps?.Lon ?? 0;
@@ -231,7 +226,7 @@ public class RecordingService : IRecordingService
                       lon != 0 ? lon : null,
                       Path.GetFileName(recordingPath),
                       duration,
-                      transcription,
+                      null, // transcription starts as null and is populated asynchronously
                       _currentSourceID,
                       _currentTargetID,
                       lastDetectedTone,
@@ -244,9 +239,12 @@ public class RecordingService : IRecordingService
                       if (t.IsFaulted) _logger.LogError(t.Exception, "Failed to save transmission");
                   });
                  
-                  _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {_currentSourceID} | Tone: {lastDetectedTone} | Text: {transcription}");
-                 _logger.LogInformation($"Recording saved to: {recordingPath}"); // Add this line
+                  _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {_currentSourceID} | Tone: {lastDetectedTone} | Text: (queued)");
+                  _logger.LogInformation($"Recording saved to: {recordingPath}");
                   OnNewLog?.Invoke(log);
+
+                  // Queue transcription in the background
+                  _transcriptionService.QueueTranscription(log, recordingPath);
              }
         }
         else if (recordingPath != null)
@@ -460,17 +458,6 @@ public class RecordingService : IRecordingService
                 _logger.LogError(ex, "WAV conversion failed");
             }
 
-            // Run Transcription
-            string? transcription = null;
-            try
-            {
-                transcription = _transcriptionService.TranscribeAudio(recordingPath);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Transcription failed");
-            }
-
             var gps = _gpsService.GetLastLocation();
             var lat = gps?.Lat ?? 0;
             var lon = gps?.Lon ?? 0;
@@ -485,7 +472,7 @@ public class RecordingService : IRecordingService
                  lon != 0 ? lon : null,
                  Path.GetFileName(recordingPath),
                  duration,
-                 transcription,
+                 null, // transcription starts as null and is populated asynchronously
                  sourceID,
                  targetID,
                  lastDetectedTone,
@@ -497,9 +484,12 @@ public class RecordingService : IRecordingService
                 if (t.IsFaulted) _logger.LogError(t.Exception, "Failed to save transmission");
             });
 
-            _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {sourceID} | Tone: {lastDetectedTone} | Text: {transcription}");
+            _logger.LogInformation($"Saved transmission: {duration:F1}s | RID: {sourceID} | Tone: {lastDetectedTone} | Text: (queued)");
             _logger.LogInformation($"Recording saved to: {recordingPath}");
             OnNewLog?.Invoke(log);
+
+            // Queue transcription in the background
+            _transcriptionService.QueueTranscription(log, recordingPath);
         }
         else if (recordingPath != null)
         {
