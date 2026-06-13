@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider, Button } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
 import ChannelManager from './components/ChannelManager';
@@ -91,6 +91,8 @@ function App() {
   const wakeLock = useRef<WakeLockSentinel | null>(null);
   const activeSource = useRef<AudioBufferSourceNode | null>(null);
   const isParallelRef = useRef(false);
+  const isPageHiddenRef = useRef(false);
+  const volumeRef = useRef(volume);
 
   const manualHold = scannerState.manualHoldFrequency;
 
@@ -103,7 +105,7 @@ function App() {
   }, [volume]);
 
   // Initialize Audio Context on Interaction
-  const initAudio = async () => {
+  const initAudio = useCallback(async () => {
       if (!window.audioCtx) {
           const AudioContextClass = window.AudioContext || window.webkitAudioContext;
           if (AudioContextClass) {
@@ -132,7 +134,7 @@ function App() {
           await window.audioCtx.resume();
       }
       setIsAudioInitialized(true);
-  };
+  }, [volume]);
 
   useEffect(() => {
       window.addEventListener('click', initAudio);
@@ -141,7 +143,7 @@ function App() {
           window.removeEventListener('click', initAudio);
           window.removeEventListener('touchstart', initAudio);
       };
-  }, []);
+  }, [initAudio]);
 
   // Fullscreen Manager
   useEffect(() => {
@@ -219,6 +221,18 @@ function App() {
       }
     };
   }, [scannerState.status]);
+
+  // Track page visibility to handle background tab audio issues
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      isPageHiddenRef.current = document.visibilityState === 'hidden';
+      if (document.visibilityState === 'visible' && nextStartTime.current > 0) {
+        nextStartTime.current = 0;
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
 
   // Clock Effect
   useEffect(() => {
@@ -527,6 +541,9 @@ function App() {
           // console.log("[Audio DEBUG] Message received:", event.data);
 
           if (event.data instanceof Blob) {
+            // Skip audio processing when tab is hidden to prevent scheduler catch-up bursts
+            if (isPageHiddenRef.current) return;
+
             try {
                 // Log incoming data size
                 // console.log(`[Audio] Received Blob size: ${event.data.size}`);
@@ -557,6 +574,11 @@ function App() {
                 if (ctx && ctx.state === 'suspended') {
                     console.log("[Audio] Resuming suspended context...");
                     await ctx.resume();
+                }
+
+                // Reset scheduler after context resume if it drifted far ahead (>=1s)
+                if (ctx && nextStartTime.current > ctx.currentTime + 1.0) {
+                    nextStartTime.current = 0;
                 }
 
                 if (!ctx) {
@@ -591,7 +613,7 @@ function App() {
                 if (!gainNodeRef.current || gainNodeRef.current.context !== ctx) {
                     console.log("[Audio] Recreating GainNode for current context");
                     const gainNode = ctx.createGain();
-                    gainNode.gain.value = volume;
+                    gainNode.gain.value = volumeRef.current;
                     gainNode.connect(ctx.destination);
                     gainNodeRef.current = gainNode;
                     filterNodeRef.current = null; // Force filter recreation

@@ -14,62 +14,64 @@ interface Props {
 const RfSpectrum: React.FC<Props> = ({ data, height = 150 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const historyRef = useRef<HTMLCanvasElement | null>(null);
+    const queueRef = useRef<DataPoint[][]>([]);
+    const animationRef = useRef<number>(0);
     const lastDataRef = useRef<string>('');
 
+    // Push new data to queue
     useEffect(() => {
-        if (!canvasRef.current || !data || data.length === 0) return;
-
+        if (!data || data.length === 0) return;
+        
+        // Basic stability check
         const dataStr = JSON.stringify(data.slice(0, 5)); 
         if (dataStr === lastDataRef.current) return;
         lastDataRef.current = dataStr;
 
+        queueRef.current.push(data);
+        
+        // Cap the queue to prevent memory issues if hidden for a long time
+        if (queueRef.current.length > 500) {
+            queueRef.current.shift();
+        }
+    }, [data]);
+
+    useEffect(() => {
         const width = 800; // Fixed internal width
         const canHeight = height;
 
-        // Initialize history canvas if needed
-        if (!historyRef.current) {
-            historyRef.current = document.createElement('canvas');
-            historyRef.current.width = width;
-            historyRef.current.height = canHeight;
-            const hCtx = historyRef.current.getContext('2d');
-            if (hCtx) {
-                hCtx.fillStyle = '#000';
-                hCtx.fillRect(0, 0, width, canHeight);
+        const drawRowToHistory = (rowData: DataPoint[]) => {
+            if (!historyRef.current) {
+                historyRef.current = document.createElement('canvas');
+                historyRef.current.width = width;
+                historyRef.current.height = canHeight;
+                const hCtx = historyRef.current.getContext('2d');
+                if (hCtx) {
+                    hCtx.fillStyle = '#000';
+                    hCtx.fillRect(0, 0, width, canHeight);
+                }
             }
-        }
 
-        const hCanvas = historyRef.current;
-        const hCtx = hCanvas.getContext('2d', { willReadFrequently: true });
-        if (!hCtx) return;
+            const hCanvas = historyRef.current;
+            const hCtx = hCanvas.getContext('2d', { willReadFrequently: true });
+            if (!hCtx) return;
 
-        // 1. Shift history down
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = width;
-        tempCanvas.height = canHeight;
-        const tempCtx = tempCanvas.getContext('2d');
-        if (tempCtx) {
-            tempCtx.drawImage(hCanvas, 0, 0);
+            // 1. Shift history down
+            hCtx.drawImage(hCanvas, 0, 0, width, canHeight, 0, 1, width, canHeight);
+            
+            // 2. Clear the top row
             hCtx.fillStyle = '#000';
-            hCtx.fillRect(0, 0, width, canHeight);
-            hCtx.drawImage(tempCanvas, 0, 1);
-        }
+            hCtx.fillRect(0, 0, width, 1);
 
-        // 2. Draw new row to history
-        const rowCanvas = document.createElement('canvas');
-        rowCanvas.width = data.length;
-        rowCanvas.height = 1;
-        const rowCtx = rowCanvas.getContext('2d');
-        if (rowCtx) {
-            const imageData = rowCtx.createImageData(data.length, 1);
-            const minDb = -100; // Lowered floor
-            const maxDb = -20;  // Adjusted ceiling
+            // 3. Draw new row
+            const imageData = hCtx.createImageData(rowData.length, 1);
+            const minDb = -100;
+            const maxDb = -20;
 
-            for (let x = 0; x < data.length; x++) {
-                const db = data[x].db;
+            for (let x = 0; x < rowData.length; x++) {
+                const db = rowData[x].db;
                 const val = Math.max(0, Math.min(255, ((db - minDb) / (maxDb - minDb)) * 255));
 
                 let r = 0, g = 0, b = 0;
-                // Improved Heatmap: DarkBlue -> Cyan -> Green -> Yellow -> Red
                 if (val < 50) {
                     b = val * 5;
                 } else if (val < 100) {
@@ -92,17 +94,45 @@ const RfSpectrum: React.FC<Props> = ({ data, height = 150 }) => {
                 imageData.data[i + 2] = b;
                 imageData.data[i + 3] = 255;
             }
-            rowCtx.putImageData(imageData, 0, 0);
-            hCtx.drawImage(rowCanvas, 0, 0, data.length, 1, 0, 0, width, 1);
-        }
+            
+            // Draw the computed row to a temp canvas to stretch it if necessary
+            const rowCanvas = document.createElement('canvas');
+            rowCanvas.width = rowData.length;
+            rowCanvas.height = 1;
+            const rowCtx = rowCanvas.getContext('2d');
+            if (rowCtx) {
+                rowCtx.putImageData(imageData, 0, 0);
+                hCtx.drawImage(rowCanvas, 0, 0, rowData.length, 1, 0, 0, width, 1);
+            }
+        };
 
-        // 3. Copy history to visible canvas
-        const ctx = canvasRef.current.getContext('2d');
-        if (ctx) {
-            ctx.drawImage(hCanvas, 0, 0);
-        }
+        const render = () => {
+            if (queueRef.current.length > 0) {
+                // If we have a massive backlog, process up to 10 rows per frame
+                // to "catch up" quickly but not all at once.
+                const rowsToProcess = Math.min(queueRef.current.length, 10);
+                for (let i = 0; i < rowsToProcess; i++) {
+                    const nextRow = queueRef.current.shift();
+                    if (nextRow) drawRowToHistory(nextRow);
+                }
 
-    }, [data, height]);
+                // Update visible canvas
+                if (canvasRef.current && historyRef.current) {
+                    const ctx = canvasRef.current.getContext('2d');
+                    if (ctx) {
+                        ctx.drawImage(historyRef.current, 0, 0);
+                    }
+                }
+            }
+            animationRef.current = requestAnimationFrame(render);
+        };
+
+        animationRef.current = requestAnimationFrame(render);
+        
+        return () => {
+            if (animationRef.current) cancelAnimationFrame(animationRef.current);
+        };
+    }, [height]);
 
     const minFreq = data && data.length > 0 ? data[0].frequency.toFixed(2) : '---';
     const maxFreq = data && data.length > 0 ? data[data.length - 1].frequency.toFixed(2) : '---';
