@@ -169,6 +169,107 @@ public class RtlDevice : BackgroundService, IRadioSource
     }
 
     /// <inheritdoc />
+    public void StartDebugSpectrum(double freq, double? gain = null)
+    {
+        var targetGain = gain ?? 40; // Default to 40dB for debug
+        var gainStr = targetGain == 0 ? "AUTO" : $"{targetGain} dB";
+        _logger.LogInformation($"Starting RF Spectrum Debug at {freq} MHz (Gain: {gainStr})");
+        _manualOverride = true;
+
+        StopScanning();
+        StopDecoding();
+
+        UpdateState(_state with { Status = "DEBUG", CurrentFrequency = freq, ManualHoldFrequency = freq, RfSpectrum = null, Gain = targetGain });
+
+        _scanCts = new CancellationTokenSource();
+        var token = _scanCts.Token;
+
+        Task.Run(async () => {
+            try 
+            {
+                await RunDebugSpectrumLoop(freq, targetGain, token);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in Debug Spectrum Loop");
+                UpdateState(_state with { Status = "IDLE" });
+            }
+        }, token);
+    }
+
+    private async Task RunDebugSpectrumLoop(double freq, double gain, CancellationToken token)
+    {
+        await Task.Delay(250, token);
+
+        int sampleRate = 2400000; 
+        var binPath = "/usr/bin/rtl_sdr";
+        var args = $"-f {freq}M -s {sampleRate} -g {gain} -b 1 -";
+
+        _logger.LogInformation($"Debug Spectrum HW: {binPath} {args}");
+
+        var psi = new ProcessStartInfo(binPath, args)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        try 
+        {
+            _scannerProcess = Process.Start(psi);
+            UpdateState(_state with { IsHardwareConnected = true });
+        }
+        catch (Exception ex)
+        {
+             _logger.LogError(ex, "Failed to start rtl_sdr debug process");
+             UpdateState(_state with { IsHardwareConnected = false });
+             return;
+        }
+
+        if (_scannerProcess == null) return;
+
+        // Monitor Stderr
+        _ = Task.Run(async () => {
+            try 
+            {
+                while (!token.IsCancellationRequested && !_scannerProcess.HasExited)
+                {
+                    var line = await _scannerProcess.StandardError.ReadLineAsync(token);
+                    if (string.IsNullOrEmpty(line)) continue;
+                    _logger.LogInformation($"Debug HW: {line}");
+                }
+            } 
+            catch (OperationCanceledException) { }
+        }, token);
+
+        var bufferSize = 16384 * 4;
+        var buffer = new byte[bufferSize];
+        var baseStream = _scannerProcess.StandardOutput.BaseStream;
+        var lastUpdate = DateTime.MinValue;
+
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                var bytesRead = await baseStream.ReadAsync(buffer, 0, buffer.Length, token);
+                if (bytesRead <= 0) break;
+
+                if ((DateTime.UtcNow - lastUpdate).TotalMilliseconds < 30) continue;
+                lastUpdate = DateTime.UtcNow;
+
+                ProcessSamplesForSpectrum(buffer, bytesRead, freq, sampleRate, 1024);
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            try { _scannerProcess?.Kill(true); } catch { }
+            _scannerProcess = null;
+        }
+    }
+
+    /// <inheritdoc />
     public void AvoidFrequency(double freq, double durationSeconds)
     {
         _channelLockouts[freq] = DateTime.UtcNow.AddSeconds(durationSeconds);
@@ -201,7 +302,8 @@ public class RtlDevice : BackgroundService, IRadioSource
             CurrentChannel = null, 
             SignalStrength = 0,
             ManualHoldFrequency = null,
-            ParallelChannels = null
+            ParallelChannels = null,
+            Gain = null
         });
         
         // Small delay to let hardware settle before restarting the scan
@@ -583,11 +685,10 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// <summary>
     /// FFT spectrum calculation for UI display only (no carrier detection in parallel mode).
     /// </summary>
-    private void ProcessSamplesForSpectrum(byte[] buffer, int length, double centerFreq, int sampleRate)
+    private void ProcessSamplesForSpectrum(byte[] buffer, int length, double centerFreq, int sampleRate, int fftSize = 256)
     {
-        if (length < 1024) return;
+        if (length < fftSize * 2) return;
 
-        int fftSize = 256;
         int bytesNeeded = fftSize * 2;
         int offset = length - bytesNeeded;
         if (offset < 0) return;
