@@ -1071,13 +1071,23 @@ function App() {
                 
                 <RfWaterfallDebug data={scannerState.rfSpectrum} height={500} />
                 
-                <Box sx={{ mt: 2 }}>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        * Debug mode stops normal scanning and decoding.
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        * Center spike is a DC offset common in RTL-SDR hardware.
-                    </Typography>
+                <Box sx={{ mt: 3, p: 2, bgcolor: 'rgba(255, 255, 255, 0.02)', borderRadius: 1, border: '1px solid #222' }}>
+                    <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', mb: 1 }}>
+                        <Typography variant="caption" sx={{ color: '#ffaa00', fontWeight: 'bold', display: 'flex', alignItems: 'center', minWidth: '100px' }}>
+                            SYSTEM NOTE
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                            Debug mode requires exclusive hardware access. Scanning and decoding are suspended while active.
+                        </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+                        <Typography variant="caption" sx={{ color: '#00ccff', fontWeight: 'bold', display: 'flex', alignItems: 'center', minWidth: '100px' }}>
+                            HARDWARE TIP
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                            The center spike is a DC offset common in RTL-SDR hardware and does not indicate a real signal.
+                        </Typography>
+                    </Box>
                 </Box>
             </DialogContent>
             <DialogActions sx={{ borderTop: '1px solid #222', p: 2 }}>
