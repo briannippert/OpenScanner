@@ -1013,13 +1013,10 @@ function App() {
             }}
         >
             <DialogTitle sx={{ borderBottom: '1px solid #222', p: 3 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Typography variant="h5" sx={{ color: 'primary.main', fontWeight: 'bold', letterSpacing: 1 }}>RF SPECTRUM DEBUG</Typography>
                     <Chip label="2.4 MHz BANDWIDTH" size="small" variant="outlined" color="primary" />
                 </Box>
-                <Typography variant="caption" color="text.secondary">
-                    Advanced diagnostic view for real-time IQ signal analysis.
-                </Typography>
             </DialogTitle>
             <DialogContent sx={{ p: 3 }}>
                 <Box sx={{ mb: 4, mt: 1, display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1035,7 +1032,7 @@ function App() {
 
                     <Box sx={{ width: 180 }}>
                         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                            SDR GAIN: {debugGain} dB
+                            SDR GAIN: {debugGain === 0 ? 'AUTO' : `${debugGain} dB`}
                         </Typography>
                         <Slider 
                             value={debugGain}
@@ -1044,6 +1041,7 @@ function App() {
                             step={1}
                             onChange={(_, val) => setDebugGain(val as number)}
                             valueLabelDisplay="auto"
+                            valueLabelFormat={(val) => val === 0 ? 'AUTO' : `${val}dB`}
                             size="small"
                         />
                     </Box>

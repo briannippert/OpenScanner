@@ -63,28 +63,29 @@ const RfWaterfallDebug: React.FC<Props> = ({ data, height = 500 }) => {
         const rowCtx = rowCanvas.getContext('2d');
         if (rowCtx) {
             const imageData = rowCtx.createImageData(data.length, 1);
-            const minDb = -100;
-            const maxDb = -20;
+            const minDb = -110;
+            const maxDb = 0;
 
             for (let x = 0; x < data.length; x++) {
                 const db = data[x].db;
                 const val = Math.max(0, Math.min(255, ((db - minDb) / (maxDb - minDb)) * 255));
 
                 let r = 0, g = 0, b = 0;
-                if (val < 50) {
-                    b = val * 5;
-                } else if (val < 100) {
+                
+                // Classic Jet-like colormap
+                if (val < 64) {
+                    b = val * 4;
+                } else if (val < 128) {
                     b = 255;
-                    g = (val - 50) * 5;
-                } else if (val < 150) {
+                    g = (val - 64) * 4;
+                } else if (val < 192) {
                     g = 255;
-                    b = 255 - (val - 100) * 5;
-                } else if (val < 200) {
-                    g = 255;
-                    r = (val - 150) * 5;
+                    b = 255 - (val - 128) * 4;
+                    r = (val - 128) * 2; // Add some red early
                 } else {
                     r = 255;
-                    g = 255 - (val - 200) * 5;
+                    g = 255 - (val - 192) * 4;
+                    b = 0;
                 }
 
                 const i = x * 4;

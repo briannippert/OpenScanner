@@ -172,7 +172,8 @@ public class RtlDevice : BackgroundService, IRadioSource
     public void StartDebugSpectrum(double freq, double? gain = null)
     {
         var targetGain = gain ?? 40; // Default to 40dB for debug
-        _logger.LogInformation($"Starting RF Spectrum Debug at {freq} MHz (Gain: {targetGain} dB)");
+        var gainStr = targetGain == 0 ? "AUTO" : $"{targetGain} dB";
+        _logger.LogInformation($"Starting RF Spectrum Debug at {freq} MHz (Gain: {gainStr})");
         _manualOverride = true;
 
         StopScanning();
