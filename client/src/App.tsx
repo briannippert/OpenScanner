@@ -1020,7 +1020,6 @@ function App() {
             <DialogTitle sx={{ borderBottom: '1px solid #222', p: 3 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Typography variant="h5" sx={{ color: 'primary.main', fontWeight: 'bold', letterSpacing: 1 }}>RF SPECTRUM DEBUG</Typography>
-                    <Chip label="2.4 MHz BANDWIDTH" size="small" variant="outlined" color="primary" />
                 </Box>
             </DialogTitle>
             <DialogContent sx={{ p: 3 }}>
@@ -1032,7 +1031,6 @@ function App() {
                         value={debugFreq}
                         onChange={(e) => setDebugFreq(e.target.value)}
                         sx={{ width: 180 }}
-                        helperText="Frequency for 2.4MHz span"
                     />
 
                     <Box sx={{ width: 180 }}>
