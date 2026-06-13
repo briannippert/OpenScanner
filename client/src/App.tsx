@@ -1011,32 +1011,45 @@ function App() {
                 sx: { bgcolor: '#050505', border: '1px solid #333' }
             }}
         >
-            <DialogTitle sx={{ borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h6" sx={{ color: 'primary.main', fontWeight: 'bold' }}>RF SPECTRUM DEBUG</Typography>
-                <Chip label="2.4 MHz BANDWIDTH" size="small" variant="outlined" color="primary" />
+            <DialogTitle sx={{ borderBottom: '1px solid #222', p: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                    <Typography variant="h5" sx={{ color: 'primary.main', fontWeight: 'bold', letterSpacing: 1 }}>RF SPECTRUM DEBUG</Typography>
+                    <Chip label="2.4 MHz BANDWIDTH" size="small" variant="outlined" color="primary" />
+                </Box>
+                <Typography variant="caption" color="text.secondary">
+                    Advanced diagnostic view for real-time IQ signal analysis.
+                </Typography>
             </DialogTitle>
             <DialogContent sx={{ p: 3 }}>
-                <Box sx={{ mb: 3, display: 'flex', gap: 2, alignItems: 'center' }}>
+                <Box sx={{ mb: 4, mt: 1, display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}>
                     <TextField 
                         label="Center Frequency (MHz)"
                         variant="outlined"
                         size="small"
                         value={debugFreq}
                         onChange={(e) => setDebugFreq(e.target.value)}
-                        sx={{ width: 200 }}
+                        sx={{ width: 220 }}
+                        helperText="Enter frequency for 2.4MHz span"
                     />
                     <Button 
                         variant="contained" 
                         color="primary"
                         onClick={() => sendCommand('debug_spectrum', parseFloat(debugFreq))}
                         disabled={scannerState.status === 'DEBUG' && scannerState.currentFrequency === parseFloat(debugFreq)}
+                        sx={{ height: 40, px: 4 }}
                     >
                         TUNE
                     </Button>
                     <Box flexGrow={1} />
-                    <Typography variant="caption" color="text.secondary">
-                        STATUS: <span style={{ color: scannerState.status === 'DEBUG' ? '#00ff00' : '#ff0000', fontWeight: 'bold' }}>{scannerState.status}</span>
-                    </Typography>
+                    <Paper variant="outlined" sx={{ px: 2, py: 1, bgcolor: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <Typography variant="caption" color="text.secondary">SDR STATUS:</Typography>
+                        <Chip 
+                            label={scannerState.status} 
+                            size="small" 
+                            color={scannerState.status === 'DEBUG' ? 'success' : 'default'} 
+                            sx={{ fontWeight: 'bold', height: 20, fontSize: '10px' }} 
+                        />
+                    </Paper>
                 </Box>
                 
                 <RfWaterfallDebug data={scannerState.rfSpectrum} height={500} />
