@@ -179,7 +179,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         StopScanning();
         StopDecoding();
 
-        UpdateState(_state with { Status = "DEBUG", CurrentFrequency = freq, ManualHoldFrequency = freq, RfSpectrum = null, Squelch = targetGain });
+        UpdateState(_state with { Status = "DEBUG", CurrentFrequency = freq, ManualHoldFrequency = freq, RfSpectrum = null, Gain = targetGain });
 
         _scanCts = new CancellationTokenSource();
         var token = _scanCts.Token;
@@ -302,7 +302,8 @@ public class RtlDevice : BackgroundService, IRadioSource
             CurrentChannel = null, 
             SignalStrength = 0,
             ManualHoldFrequency = null,
-            ParallelChannels = null
+            ParallelChannels = null,
+            Gain = null
         });
         
         // Small delay to let hardware settle before restarting the scan

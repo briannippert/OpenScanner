@@ -339,6 +339,7 @@ public record ScannerState(
     double? CurrentSignalDb = null,
     bool IsAudioStreaming = false,
     double? Squelch = null,
+    double? Gain = null,
     string? DeviceName = null,
     string? DevicePort = null,
     SpectrumPoint[]? RfSpectrum = null,
