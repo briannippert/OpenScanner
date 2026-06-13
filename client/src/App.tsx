@@ -181,6 +181,11 @@ function App() {
     document.body.removeChild(link);
   };
 
+  const handleOpenDebug = () => {
+    setIsDebugModalOpen(true);
+    sendCommand('debug_spectrum', Number(debugFreq), debugGain);
+  };
+
   // Wake Lock Manager
   useEffect(() => {
     const requestWakeLock = async () => {
@@ -844,7 +849,7 @@ function App() {
                 </Tooltip>
 
                 <Tooltip title="RF Spectrum Debug">
-                    <IconButton color="inherit" onClick={() => setIsDebugModalOpen(true)} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>
+                    <IconButton color="inherit" onClick={handleOpenDebug} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>
                         <MonitorIcon />
                     </IconButton>
                 </Tooltip>

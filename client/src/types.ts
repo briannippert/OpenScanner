@@ -36,6 +36,7 @@ export interface ScannerState {
     currentSignalDb?: number;
     isAudioStreaming?: boolean;
     squelch?: number;
+    gain?: number;
     rfSpectrum?: { frequency: number, db: number }[];
     gps?: {
         lat: number;
