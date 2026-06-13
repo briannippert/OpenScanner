@@ -96,6 +96,7 @@ function App() {
   const wakeLock = useRef<WakeLockSentinel | null>(null);
   const activeSource = useRef<AudioBufferSourceNode | null>(null);
   const isParallelRef = useRef(false);
+  const isPageHiddenRef = useRef(false);
   const volumeRef = useRef(volume);
 
   const manualHold = scannerState.manualHoldFrequency;
@@ -231,6 +232,18 @@ function App() {
       }
     };
   }, [scannerState.status]);
+
+  // Track page visibility to handle background tab audio issues
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      isPageHiddenRef.current = document.visibilityState === 'hidden';
+      if (document.visibilityState === 'visible' && nextStartTime.current > 0) {
+        nextStartTime.current = 0;
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
 
   // Clock Effect
   useEffect(() => {
@@ -539,6 +552,9 @@ function App() {
           // console.log("[Audio DEBUG] Message received:", event.data);
 
           if (event.data instanceof Blob) {
+            // Skip audio processing when tab is hidden to prevent scheduler catch-up bursts
+            if (isPageHiddenRef.current) return;
+
             try {
                 // Log incoming data size
                 // console.log(`[Audio] Received Blob size: ${event.data.size}`);
@@ -569,6 +585,11 @@ function App() {
                 if (ctx && ctx.state === 'suspended') {
                     console.log("[Audio] Resuming suspended context...");
                     await ctx.resume();
+                }
+
+                // Reset scheduler after context resume to prevent catch-up burst
+                if (ctx && nextStartTime.current > ctx.currentTime) {
+                    nextStartTime.current = 0;
                 }
 
                 if (!ctx) {
