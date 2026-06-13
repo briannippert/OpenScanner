@@ -79,6 +79,7 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
   const [debugFreq, setDebugFreq] = useState<string>('155.500');
+  const [debugGain, setDebugGain] = useState<number>(40);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -1028,14 +1029,30 @@ function App() {
                         size="small"
                         value={debugFreq}
                         onChange={(e) => setDebugFreq(e.target.value)}
-                        sx={{ width: 220 }}
-                        helperText="Enter frequency for 2.4MHz span"
+                        sx={{ width: 180 }}
+                        helperText="Frequency for 2.4MHz span"
                     />
+
+                    <Box sx={{ width: 180 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                            SDR GAIN: {debugGain} dB
+                        </Typography>
+                        <Slider 
+                            value={debugGain}
+                            min={0}
+                            max={50}
+                            step={1}
+                            onChange={(_, val) => setDebugGain(val as number)}
+                            valueLabelDisplay="auto"
+                            size="small"
+                        />
+                    </Box>
+
                     <Button 
                         variant="contained" 
                         color="primary"
-                        onClick={() => sendCommand('debug_spectrum', parseFloat(debugFreq))}
-                        disabled={scannerState.status === 'DEBUG' && scannerState.currentFrequency === parseFloat(debugFreq)}
+                        onClick={() => sendCommand('debug_spectrum', parseFloat(debugFreq), debugGain)}
+                        disabled={scannerState.status === 'DEBUG' && scannerState.currentFrequency === parseFloat(debugFreq) && scannerState.squelch === debugGain}
                         sx={{ height: 40, px: 4 }}
                     >
                         TUNE

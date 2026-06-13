@@ -167,14 +167,21 @@ public class ScannerController : ControllerBase
                 break;
             case "debug_spectrum":
                 double? debugFreq = null;
+                double? debugGain = null;
+
                 if (body.TryGetProperty("frequency", out var df) && df.ValueKind == JsonValueKind.Number)
                     debugFreq = df.GetDouble();
                 else if (body.TryGetProperty("frequency", out var dfs) && double.TryParse(dfs.GetString(), out var dfd))
                     debugFreq = dfd;
 
+                if (body.TryGetProperty("value", out var gv) && gv.ValueKind == JsonValueKind.Number)
+                    debugGain = gv.GetDouble();
+                else if (body.TryGetProperty("gain", out var gs) && double.TryParse(gs.GetString(), out var gd))
+                    debugGain = gd;
+
                 if (debugFreq.HasValue)
                 {
-                    _radio.StartDebugSpectrum(debugFreq.Value);
+                    _radio.StartDebugSpectrum(debugFreq.Value, debugGain);
                 }
                 break;
             default:

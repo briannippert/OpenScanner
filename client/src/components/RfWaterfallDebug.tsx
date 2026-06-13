@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, Paper } from '@mui/material';
 
 interface DataPoint {
     frequency: number;
@@ -115,10 +115,10 @@ const RfWaterfallDebug: React.FC<Props> = ({ data, height = 500 }) => {
 
     }, [data, height]);
 
-    const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        if (!canvasRef.current || !data || data.length === 0) return;
+    const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+        if (!data || data.length === 0) return;
         
-        const rect = canvasRef.current.getBoundingClientRect();
+        const rect = e.currentTarget.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const width = rect.width;
         
@@ -138,24 +138,27 @@ const RfWaterfallDebug: React.FC<Props> = ({ data, height = 500 }) => {
     const centerFreq = data && data.length > 0 ? data[Math.floor(data.length / 2)].frequency.toFixed(3) : '---';
 
     return (
-        <Box sx={{ 
-            width: '100%', 
-            height: height, 
-            border: '2px solid #444', 
-            borderRadius: 1, 
-            overflow: 'hidden',
-            bgcolor: '#000',
-            position: 'relative',
-            boxShadow: '0 0 20px rgba(0,0,0,0.5)',
-            cursor: 'crosshair'
-        }}>
+        <Box 
+            onPointerMove={handlePointerMove}
+            onPointerLeave={() => setHoverInfo(null)}
+            sx={{ 
+                width: '100%', 
+                height: height, 
+                border: '2px solid #444', 
+                borderRadius: 1, 
+                overflow: 'hidden',
+                bgcolor: '#000',
+                position: 'relative',
+                boxShadow: '0 0 20px rgba(0,0,0,0.5)',
+                cursor: 'crosshair',
+                touchAction: 'none' // Prevent scrolling while interacting
+            }}
+        >
             <canvas 
                 ref={canvasRef} 
                 width={1024} 
                 height={height} 
-                style={{ width: '100%', height: '100%', display: 'block' }} 
-                onMouseMove={handleMouseMove}
-                onMouseLeave={() => setHoverInfo(null)}
+                style={{ width: '100%', height: '100%', display: 'block', pointerEvents: 'none' }} 
             />
             
             {/* Frequency Markers Overlay */}
@@ -173,7 +176,7 @@ const RfWaterfallDebug: React.FC<Props> = ({ data, height = 500 }) => {
                 fontSize: '11px',
                 color: '#aaa',
                 pointerEvents: 'none',
-                zIndex: 2
+                zIndex: 10
             }}>
                 <span>{minFreq} MHz</span>
                 <span style={{ color: '#00ff00', fontWeight: 'bold' }}>{centerFreq} MHz (CENTER)</span>
@@ -189,27 +192,29 @@ const RfWaterfallDebug: React.FC<Props> = ({ data, height = 500 }) => {
                         bottom: 0,
                         left: hoverInfo.x,
                         width: '1px',
-                        bgcolor: 'rgba(255, 255, 255, 0.5)',
+                        bgcolor: 'rgba(255, 255, 255, 0.7)',
                         pointerEvents: 'none',
-                        zIndex: 1
+                        zIndex: 5,
+                        boxShadow: '0 0 5px rgba(255,255,255,0.5)'
                     }} />
                     <Paper sx={{
                         position: 'absolute',
                         top: 35,
-                        left: hoverInfo.x + 10,
-                        transform: hoverInfo.x > 800 ? 'translateX(-110%)' : 'none',
-                        p: 1,
-                        bgcolor: 'rgba(20, 20, 20, 0.9)',
-                        border: '1px solid #00ff00',
+                        left: hoverInfo.x + 15,
+                        transform: hoverInfo.x > (canvasRef.current?.clientWidth || 0) * 0.7 ? 'translateX(-110%)' : 'none',
+                        p: 1.5,
+                        bgcolor: 'rgba(10, 10, 10, 0.95)',
+                        border: '2px solid #00ff00',
                         pointerEvents: 'none',
-                        zIndex: 3,
-                        minWidth: 140
+                        zIndex: 20,
+                        minWidth: 160,
+                        boxShadow: '0 4px 15px rgba(0,0,0,0.5)'
                     }}>
-                        <Typography variant="caption" sx={{ color: '#00ff00', fontWeight: 'bold', display: 'block', fontFamily: 'monospace' }}>
-                            FREQ: {hoverInfo.freq.toFixed(4)} MHz
+                        <Typography variant="body2" sx={{ color: '#00ff00', fontWeight: 'bold', display: 'block', fontFamily: 'monospace', fontSize: '13px' }}>
+                            {hoverInfo.freq.toFixed(4)} MHz
                         </Typography>
-                        <Typography variant="caption" sx={{ color: '#fff', display: 'block', fontFamily: 'monospace' }}>
-                            LEVEL: {hoverInfo.db.toFixed(1)} dB
+                        <Typography variant="body2" sx={{ color: '#fff', display: 'block', fontFamily: 'monospace', fontSize: '12px', mt: 0.5 }}>
+                            {hoverInfo.db.toFixed(1)} dB
                         </Typography>
                     </Paper>
                 </>
@@ -225,7 +230,7 @@ const RfWaterfallDebug: React.FC<Props> = ({ data, height = 500 }) => {
                 background: 'rgba(0,0,0,0.4)',
                 padding: '2px 6px',
                 borderRadius: '4px',
-                zIndex: 2
+                zIndex: 10
             }}>
                 2.4 MHz SPAN @ 1024 BINS
             </Box>

@@ -169,15 +169,16 @@ public class RtlDevice : BackgroundService, IRadioSource
     }
 
     /// <inheritdoc />
-    public void StartDebugSpectrum(double freq)
+    public void StartDebugSpectrum(double freq, double? gain = null)
     {
-        _logger.LogInformation($"Starting RF Spectrum Debug at {freq} MHz");
+        var targetGain = gain ?? 40; // Default to 40dB for debug
+        _logger.LogInformation($"Starting RF Spectrum Debug at {freq} MHz (Gain: {targetGain} dB)");
         _manualOverride = true;
 
         StopScanning();
         StopDecoding();
 
-        UpdateState(_state with { Status = "DEBUG", CurrentFrequency = freq, ManualHoldFrequency = freq, RfSpectrum = null });
+        UpdateState(_state with { Status = "DEBUG", CurrentFrequency = freq, ManualHoldFrequency = freq, RfSpectrum = null, Squelch = targetGain });
 
         _scanCts = new CancellationTokenSource();
         var token = _scanCts.Token;
@@ -185,7 +186,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         Task.Run(async () => {
             try 
             {
-                await RunDebugSpectrumLoop(freq, token);
+                await RunDebugSpectrumLoop(freq, targetGain, token);
             }
             catch (Exception ex)
             {
@@ -195,13 +196,13 @@ public class RtlDevice : BackgroundService, IRadioSource
         }, token);
     }
 
-    private async Task RunDebugSpectrumLoop(double freq, CancellationToken token)
+    private async Task RunDebugSpectrumLoop(double freq, double gain, CancellationToken token)
     {
         await Task.Delay(250, token);
 
-        int sampleRate = 2400000; // 2.4 MHz max stable bandwidth
+        int sampleRate = 2400000; 
         var binPath = "/usr/bin/rtl_sdr";
-        var args = $"-f {freq}M -s {sampleRate} -g 20 -b 1 -";
+        var args = $"-f {freq}M -s {sampleRate} -g {gain} -b 1 -";
 
         _logger.LogInformation($"Debug Spectrum HW: {binPath} {args}");
 

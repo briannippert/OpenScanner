@@ -59,7 +59,8 @@ public interface IRadioSource
     /// Starts a high-bandwidth RF spectrum debug mode.
     /// </summary>
     /// <param name="freq">The center frequency in MHz.</param>
-    void StartDebugSpectrum(double freq);
+    /// <param name="gain">The hardware gain (dB).</param>
+    void StartDebugSpectrum(double freq, double? gain = null);
 
     /// <summary>
     /// Temporarily avoids a frequency for a specified duration.
