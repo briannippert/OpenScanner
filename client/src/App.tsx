@@ -1025,7 +1025,7 @@ function App() {
             <DialogContent sx={{ p: 3 }}>
                 <Box sx={{ mb: 4, mt: 1, display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}>
                     <TextField 
-                        label="Center Frequency (MHz)"
+                        label="Center Frequency"
                         variant="outlined"
                         size="small"
                         value={debugFreq}
