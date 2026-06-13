@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider, Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
 import RfWaterfallDebug from './components/RfWaterfallDebug';
@@ -96,11 +96,13 @@ function App() {
   const wakeLock = useRef<WakeLockSentinel | null>(null);
   const activeSource = useRef<AudioBufferSourceNode | null>(null);
   const isParallelRef = useRef(false);
+  const volumeRef = useRef(volume);
 
   const manualHold = scannerState.manualHoldFrequency;
 
   // Update volume when state changes
   useEffect(() => {
+    volumeRef.current = volume;
     if (gainNodeRef.current) {
       gainNodeRef.current.gain.setTargetAtTime(volume, window.audioCtx?.currentTime || 0, 0.05);
     }
@@ -108,7 +110,7 @@ function App() {
   }, [volume]);
 
   // Initialize Audio Context on Interaction
-  const initAudio = async () => {
+  const initAudio = useCallback(async () => {
       if (!window.audioCtx) {
           const AudioContextClass = window.AudioContext || window.webkitAudioContext;
           if (AudioContextClass) {
@@ -137,7 +139,7 @@ function App() {
           await window.audioCtx.resume();
       }
       setIsAudioInitialized(true);
-  };
+  }, [volume]);
 
   useEffect(() => {
       window.addEventListener('click', initAudio);
@@ -146,7 +148,7 @@ function App() {
           window.removeEventListener('click', initAudio);
           window.removeEventListener('touchstart', initAudio);
       };
-  }, []);
+  }, [initAudio]);
 
   // Fullscreen Manager
   useEffect(() => {
@@ -601,7 +603,7 @@ function App() {
                 if (!gainNodeRef.current || gainNodeRef.current.context !== ctx) {
                     console.log("[Audio] Recreating GainNode for current context");
                     const gainNode = ctx.createGain();
-                    gainNode.gain.value = volume;
+                    gainNode.gain.value = volumeRef.current;
                     gainNode.connect(ctx.destination);
                     gainNodeRef.current = gainNode;
                     filterNodeRef.current = null; // Force filter recreation

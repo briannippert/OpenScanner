@@ -16,6 +16,7 @@ const RfWaterfallDebug: React.FC<Props> = ({ data, height = 500 }) => {
     const historyRef = useRef<HTMLCanvasElement | null>(null);
     const lastDataRef = useRef<string>('');
     const [hoverInfo, setHoverInfo] = useState<{ x: number, freq: number, db: number } | null>(null);
+    const [tooltipFlip, setTooltipFlip] = useState(false);
 
     useEffect(() => {
         if (!canvasRef.current || !data || data.length === 0) return;
@@ -122,7 +123,9 @@ const RfWaterfallDebug: React.FC<Props> = ({ data, height = 500 }) => {
         const rect = e.currentTarget.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const width = rect.width;
-        
+
+        setTooltipFlip(mouseX > width * 0.7);
+
         // Map mouse X to data index
         const index = Math.floor((mouseX / width) * data.length);
         if (index >= 0 && index < data.length) {
@@ -202,7 +205,7 @@ const RfWaterfallDebug: React.FC<Props> = ({ data, height = 500 }) => {
                         position: 'absolute',
                         top: 35,
                         left: hoverInfo.x + 15,
-                        transform: hoverInfo.x > (canvasRef.current?.clientWidth || 0) * 0.7 ? 'translateX(-110%)' : 'none',
+                        transform: tooltipFlip ? 'translateX(-110%)' : 'none',
                         p: 1.5,
                         bgcolor: 'rgba(10, 10, 10, 0.95)',
                         border: '2px solid #00ff00',
