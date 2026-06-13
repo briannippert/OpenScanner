@@ -1049,8 +1049,8 @@ function App() {
                     <Button 
                         variant="contained" 
                         color="primary"
-                        onClick={() => sendCommand('debug_spectrum', parseFloat(debugFreq), debugGain)}
-                        disabled={scannerState.status === 'DEBUG' && scannerState.currentFrequency === parseFloat(debugFreq) && scannerState.squelch === debugGain}
+                        onClick={() => sendCommand('debug_spectrum', Number(debugFreq), debugGain)}
+                        disabled={scannerState.status === 'DEBUG' && scannerState.currentFrequency === Number(debugFreq) && scannerState.squelch === debugGain}
                         sx={{ height: 40, px: 4 }}
                     >
                         TUNE
