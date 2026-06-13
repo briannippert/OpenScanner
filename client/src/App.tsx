@@ -587,8 +587,8 @@ function App() {
                     await ctx.resume();
                 }
 
-                // Reset scheduler after context resume to prevent catch-up burst
-                if (ctx && nextStartTime.current > ctx.currentTime) {
+                // Reset scheduler after context resume if it drifted far ahead (>=1s)
+                if (ctx && nextStartTime.current > ctx.currentTime + 1.0) {
                     nextStartTime.current = 0;
                 }
 
