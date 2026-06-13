@@ -141,6 +141,16 @@ public class ScannerControllerTests
     }
 
     [Fact]
+    public async Task ControlScanner_DebugSpectrum_CallsRadioStartDebugSpectrum()
+    {
+        var body = JsonSerializer.SerializeToElement(new { action = "debug_spectrum", frequency = 162.400 });
+        var result = await _controller.ControlScanner(body) as OkResult;
+
+        Assert.NotNull(result);
+        _radioMock.Verify(r => r.StartDebugSpectrum(162.400), Times.Once);
+    }
+
+    [Fact]
     public async Task ControlScanner_UnknownAction_ReturnsBadRequest()
     {
         var body = JsonSerializer.SerializeToElement(new { action = "invalid" });

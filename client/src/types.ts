@@ -26,7 +26,7 @@ export interface ParallelChannelState {
 }
 
 export interface ScannerState {
-    status: 'SCANNING' | 'RECEIVING' | 'MONITORING' | 'IDLE';
+    status: 'SCANNING' | 'RECEIVING' | 'MONITORING' | 'IDLE' | 'DEBUG';
     isHardwareConnected?: boolean;
     deviceName?: string;
     devicePort?: string;
@@ -36,6 +36,7 @@ export interface ScannerState {
     currentSignalDb?: number;
     isAudioStreaming?: boolean;
     squelch?: number;
+    gain?: number;
     rfSpectrum?: { frequency: number, db: number }[];
     gps?: {
         lat: number;

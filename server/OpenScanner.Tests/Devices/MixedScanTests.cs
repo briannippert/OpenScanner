@@ -292,4 +292,16 @@ public class MixedScanTests
         Assert.All(banks, b => Assert.Equal(ScanMode.FrequencyHop, b.Mode));
         Assert.All(banks, b => Assert.Single(b.Frequencies));
     }
+
+    [Fact]
+    public void StartDebugSpectrum_UpdatesState()
+    {
+        var device = CreateRtlDevice();
+        device.StartDebugSpectrum(162.400);
+
+        var state = device.GetState();
+        Assert.Equal("DEBUG", state.Status);
+        Assert.Equal(162.400, state.CurrentFrequency);
+        Assert.Equal(162.400, state.ManualHoldFrequency);
+    }
 }

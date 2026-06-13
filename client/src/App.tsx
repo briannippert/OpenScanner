@@ -1,6 +1,7 @@
-import { useEffect, useState, useRef } from 'react';
-import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider, Button } from '@mui/material';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider, Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
+import RfWaterfallDebug from './components/RfWaterfallDebug';
 import ChannelManager from './components/ChannelManager';
 import FireToneManager from './components/FireToneManager';
 import SettingsManager from './components/SettingsManager';
@@ -21,6 +22,7 @@ import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import SettingsIcon from '@mui/icons-material/Settings';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
+import MonitorIcon from '@mui/icons-material/Monitor';
 import type { ScannerState, Channel, CallLog, FireToneSet } from './types';
 
 const darkTheme = createTheme({
@@ -75,6 +77,9 @@ function App() {
   const [isManagerOpen, setIsManagerOpen] = useState(false);
   const [isToneManagerOpen, setIsToneManagerOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
+  const [debugFreq, setDebugFreq] = useState<string>('155.500');
+  const [debugGain, setDebugGain] = useState<number>(40);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -91,11 +96,13 @@ function App() {
   const wakeLock = useRef<WakeLockSentinel | null>(null);
   const activeSource = useRef<AudioBufferSourceNode | null>(null);
   const isParallelRef = useRef(false);
+  const volumeRef = useRef(volume);
 
   const manualHold = scannerState.manualHoldFrequency;
 
   // Update volume when state changes
   useEffect(() => {
+    volumeRef.current = volume;
     if (gainNodeRef.current) {
       gainNodeRef.current.gain.setTargetAtTime(volume, window.audioCtx?.currentTime || 0, 0.05);
     }
@@ -103,7 +110,7 @@ function App() {
   }, [volume]);
 
   // Initialize Audio Context on Interaction
-  const initAudio = async () => {
+  const initAudio = useCallback(async () => {
       if (!window.audioCtx) {
           const AudioContextClass = window.AudioContext || window.webkitAudioContext;
           if (AudioContextClass) {
@@ -132,7 +139,7 @@ function App() {
           await window.audioCtx.resume();
       }
       setIsAudioInitialized(true);
-  };
+  }, [volume]);
 
   useEffect(() => {
       window.addEventListener('click', initAudio);
@@ -141,7 +148,7 @@ function App() {
           window.removeEventListener('click', initAudio);
           window.removeEventListener('touchstart', initAudio);
       };
-  }, []);
+  }, [initAudio]);
 
   // Fullscreen Manager
   useEffect(() => {
@@ -174,6 +181,11 @@ function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleOpenDebug = () => {
+    setIsDebugModalOpen(true);
+    sendCommand('debug_spectrum', Number(debugFreq), debugGain);
   };
 
   // Wake Lock Manager
@@ -591,7 +603,7 @@ function App() {
                 if (!gainNodeRef.current || gainNodeRef.current.context !== ctx) {
                     console.log("[Audio] Recreating GainNode for current context");
                     const gainNode = ctx.createGain();
-                    gainNode.gain.value = volume;
+                    gainNode.gain.value = volumeRef.current;
                     gainNode.connect(ctx.destination);
                     gainNodeRef.current = gainNode;
                     filterNodeRef.current = null; // Force filter recreation
@@ -838,6 +850,12 @@ function App() {
                     </IconButton>
                 </Tooltip>
 
+                <Tooltip title="RF Spectrum Debug">
+                    <IconButton color="inherit" onClick={handleOpenDebug} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>
+                        <MonitorIcon />
+                    </IconButton>
+                </Tooltip>
+
                 <Tooltip title="Download Support Package">
                     <IconButton color="inherit" onClick={downloadSupportPackage} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>
                         <SupportAgentIcon />
@@ -986,6 +1004,104 @@ function App() {
             open={isSettingsOpen}
             onClose={() => setIsSettingsOpen(false)}
         />
+
+        <Dialog 
+            open={isDebugModalOpen} 
+            onClose={() => {
+                if (scannerState.status === 'DEBUG') {
+                    sendCommand('scan');
+                }
+                setIsDebugModalOpen(false);
+            }}
+            maxWidth="lg"
+            fullWidth
+            PaperProps={{
+                sx: { bgcolor: '#050505', border: '1px solid #333' }
+            }}
+        >
+            <DialogTitle sx={{ borderBottom: '1px solid #222', p: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="h5" sx={{ color: 'primary.main', fontWeight: 'bold', letterSpacing: 1 }}>RF SPECTRUM DEBUG</Typography>
+                </Box>
+            </DialogTitle>
+            <DialogContent sx={{ p: 3 }}>
+                <Box sx={{ mb: 4, mt: 1, display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <TextField 
+                        label="Center Frequency"
+                        variant="outlined"
+                        size="small"
+                        value={debugFreq}
+                        onChange={(e) => setDebugFreq(e.target.value)}
+                        sx={{ width: 180 }}
+                    />
+
+                    <Box sx={{ width: 180 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                            SDR GAIN: {debugGain === 0 ? 'AUTO' : `${debugGain} dB`}
+                        </Typography>
+                        <Slider 
+                            value={debugGain}
+                            min={0}
+                            max={50}
+                            step={1}
+                            onChange={(_, val) => setDebugGain(val as number)}
+                            valueLabelDisplay="auto"
+                            valueLabelFormat={(val) => val === 0 ? 'AUTO' : `${val}dB`}
+                            size="small"
+                        />
+                    </Box>
+
+                    <Button 
+                        variant="contained" 
+                        color="primary"
+                        onClick={() => sendCommand('debug_spectrum', Number(debugFreq), debugGain)}
+                        disabled={scannerState.status === 'DEBUG' && scannerState.currentFrequency === Number(debugFreq) && scannerState.gain === debugGain}
+                        sx={{ height: 40, px: 4 }}
+                    >
+                        TUNE
+                    </Button>
+                    <Box flexGrow={1} />
+                    <Paper variant="outlined" sx={{ px: 2, py: 1, bgcolor: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <Typography variant="caption" color="text.secondary">SDR STATUS:</Typography>
+                        <Chip 
+                            label={scannerState.status} 
+                            size="small" 
+                            color={scannerState.status === 'DEBUG' ? 'success' : 'default'} 
+                            sx={{ fontWeight: 'bold', height: 20, fontSize: '10px' }} 
+                        />
+                    </Paper>
+                </Box>
+                
+                <RfWaterfallDebug data={scannerState.rfSpectrum} height={500} />
+                
+                <Box sx={{ mt: 3, p: 2, bgcolor: 'rgba(255, 255, 255, 0.02)', borderRadius: 1, border: '1px solid #222' }}>
+                    <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', mb: 1 }}>
+                        <Typography variant="caption" sx={{ color: '#ffaa00', fontWeight: 'bold', display: 'flex', alignItems: 'center', minWidth: '100px' }}>
+                            SYSTEM NOTE
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                            Debug mode requires exclusive hardware access. Scanning and decoding are suspended while active.
+                        </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+                        <Typography variant="caption" sx={{ color: '#00ccff', fontWeight: 'bold', display: 'flex', alignItems: 'center', minWidth: '100px' }}>
+                            HARDWARE TIP
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                            The center spike is a DC offset common in RTL-SDR hardware and does not indicate a real signal.
+                        </Typography>
+                    </Box>
+                </Box>
+            </DialogContent>
+            <DialogActions sx={{ borderTop: '1px solid #222', p: 2 }}>
+                <Button onClick={() => {
+                    if (scannerState.status === 'DEBUG') {
+                        sendCommand('scan');
+                    }
+                    setIsDebugModalOpen(false);
+                }} color="inherit">CLOSE</Button>
+            </DialogActions>
+        </Dialog>
 
         <Snackbar 
             open={!isAudioInitialized && (scannerState.status === 'RECEIVING' || scannerState.status === 'MONITORING')} 
