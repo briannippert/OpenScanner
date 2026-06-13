@@ -56,6 +56,12 @@ public interface IRadioSource
     void HoldFrequency(double freq);
 
     /// <summary>
+    /// Starts a high-bandwidth RF spectrum debug mode.
+    /// </summary>
+    /// <param name="freq">The center frequency in MHz.</param>
+    void StartDebugSpectrum(double freq);
+
+    /// <summary>
     /// Temporarily avoids a frequency for a specified duration.
     /// </summary>
     /// <param name="freq">The frequency in MHz.</param>

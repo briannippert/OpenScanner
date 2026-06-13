@@ -26,7 +26,7 @@ export interface ParallelChannelState {
 }
 
 export interface ScannerState {
-    status: 'SCANNING' | 'RECEIVING' | 'MONITORING' | 'IDLE';
+    status: 'SCANNING' | 'RECEIVING' | 'MONITORING' | 'IDLE' | 'DEBUG';
     isHardwareConnected?: boolean;
     deviceName?: string;
     devicePort?: string;

@@ -331,7 +331,7 @@ public record SpectrumPoint(double Frequency, double Db);
 /// Real-time status of the scanner hardware and software.
 /// </summary>
 public record ScannerState(
-    string Status, // "IDLE", "SCANNING", "RECEIVING", "MONITORING"
+    string Status, // "IDLE", "SCANNING", "RECEIVING", "MONITORING", "DEBUG"
     double SignalStrength,
     bool IsHardwareConnected = false,
     double? CurrentFrequency = null,

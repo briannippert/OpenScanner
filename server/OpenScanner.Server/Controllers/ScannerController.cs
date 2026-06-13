@@ -165,6 +165,18 @@ public class ScannerController : ControllerBase
             case "stop_dump":
                 _radio.StopDumping();
                 break;
+            case "debug_spectrum":
+                double? debugFreq = null;
+                if (body.TryGetProperty("frequency", out var df) && df.ValueKind == JsonValueKind.Number)
+                    debugFreq = df.GetDouble();
+                else if (body.TryGetProperty("frequency", out var dfs) && double.TryParse(dfs.GetString(), out var dfd))
+                    debugFreq = dfd;
+
+                if (debugFreq.HasValue)
+                {
+                    _radio.StartDebugSpectrum(debugFreq.Value);
+                }
+                break;
             default:
                 return BadRequest($"Unknown action: {action}");
         }

@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
-import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider, Button } from '@mui/material';
+import { AppBar, Toolbar, Typography, CssBaseline, ThemeProvider, createTheme, Box, Card, Grid, Paper, Chip, IconButton, Snackbar, Alert, Tooltip, Slider, Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField } from '@mui/material';
 import ScannerDisplay from './components/ScannerDisplay';
+import RfWaterfallDebug from './components/RfWaterfallDebug';
 import ChannelManager from './components/ChannelManager';
 import FireToneManager from './components/FireToneManager';
 import SettingsManager from './components/SettingsManager';
@@ -21,6 +22,7 @@ import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import SettingsIcon from '@mui/icons-material/Settings';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
+import MonitorIcon from '@mui/icons-material/Monitor';
 import type { ScannerState, Channel, CallLog, FireToneSet } from './types';
 
 const darkTheme = createTheme({
@@ -75,6 +77,8 @@ function App() {
   const [isManagerOpen, setIsManagerOpen] = useState(false);
   const [isToneManagerOpen, setIsToneManagerOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
+  const [debugFreq, setDebugFreq] = useState<string>('155.500');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -838,6 +842,12 @@ function App() {
                     </IconButton>
                 </Tooltip>
 
+                <Tooltip title="RF Spectrum Debug">
+                    <IconButton color="inherit" onClick={() => setIsDebugModalOpen(true)} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>
+                        <MonitorIcon />
+                    </IconButton>
+                </Tooltip>
+
                 <Tooltip title="Download Support Package">
                     <IconButton color="inherit" onClick={downloadSupportPackage} sx={{ ml: 1, display: { xs: 'none', sm: 'inline-flex' } }}>
                         <SupportAgentIcon />
@@ -986,6 +996,69 @@ function App() {
             open={isSettingsOpen}
             onClose={() => setIsSettingsOpen(false)}
         />
+
+        <Dialog 
+            open={isDebugModalOpen} 
+            onClose={() => {
+                if (scannerState.status === 'DEBUG') {
+                    sendCommand('scan');
+                }
+                setIsDebugModalOpen(false);
+            }}
+            maxWidth="lg"
+            fullWidth
+            PaperProps={{
+                sx: { bgcolor: '#050505', border: '1px solid #333' }
+            }}
+        >
+            <DialogTitle sx={{ borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="h6" sx={{ color: 'primary.main', fontWeight: 'bold' }}>RF SPECTRUM DEBUG</Typography>
+                <Chip label="2.4 MHz BANDWIDTH" size="small" variant="outlined" color="primary" />
+            </DialogTitle>
+            <DialogContent sx={{ p: 3 }}>
+                <Box sx={{ mb: 3, display: 'flex', gap: 2, alignItems: 'center' }}>
+                    <TextField 
+                        label="Center Frequency (MHz)"
+                        variant="outlined"
+                        size="small"
+                        value={debugFreq}
+                        onChange={(e) => setDebugFreq(e.target.value)}
+                        sx={{ width: 200 }}
+                    />
+                    <Button 
+                        variant="contained" 
+                        color="primary"
+                        onClick={() => sendCommand('debug_spectrum', parseFloat(debugFreq))}
+                        disabled={scannerState.status === 'DEBUG' && scannerState.currentFrequency === parseFloat(debugFreq)}
+                    >
+                        TUNE
+                    </Button>
+                    <Box flexGrow={1} />
+                    <Typography variant="caption" color="text.secondary">
+                        STATUS: <span style={{ color: scannerState.status === 'DEBUG' ? '#00ff00' : '#ff0000', fontWeight: 'bold' }}>{scannerState.status}</span>
+                    </Typography>
+                </Box>
+                
+                <RfWaterfallDebug data={scannerState.rfSpectrum} height={500} />
+                
+                <Box sx={{ mt: 2 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        * Debug mode stops normal scanning and decoding.
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        * Center spike is a DC offset common in RTL-SDR hardware.
+                    </Typography>
+                </Box>
+            </DialogContent>
+            <DialogActions sx={{ borderTop: '1px solid #222', p: 2 }}>
+                <Button onClick={() => {
+                    if (scannerState.status === 'DEBUG') {
+                        sendCommand('scan');
+                    }
+                    setIsDebugModalOpen(false);
+                }} color="inherit">CLOSE</Button>
+            </DialogActions>
+        </Dialog>
 
         <Snackbar 
             open={!isAudioInitialized && (scannerState.status === 'RECEIVING' || scannerState.status === 'MONITORING')} 
