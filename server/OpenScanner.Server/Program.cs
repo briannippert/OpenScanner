@@ -29,6 +29,7 @@ var memoryLoggerProvider = new MemoryLoggerProvider();
 builder.Logging.AddProvider(memoryLoggerProvider);
 builder.Services.AddSingleton<ILoggerProvider>(memoryLoggerProvider);
 
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IDatabase, Database>();
 builder.Services.AddSingleton<GpsService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<GpsService>());
@@ -47,6 +48,7 @@ builder.Services.AddSingleton<IChannelService, ChannelService>();
 var radioProvider = builder.Configuration["Radio:Provider"] ?? "RTL-SDR";
 if (radioProvider == "Mock")
 {
+    builder.Services.AddSingleton<IMockAudioProvider, FileAudioProvider>();
     builder.Services.AddSingleton<IRadioSource, MockRadioSource>();
     builder.Services.AddHostedService(sp => (MockRadioSource)sp.GetRequiredService<IRadioSource>());
 }

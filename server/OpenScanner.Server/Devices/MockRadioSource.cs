@@ -1,116 +1,97 @@
-using System.Diagnostics;
 using OpenScanner.Server.Interfaces;
 using OpenScanner.Server.Models;
 using OpenScanner.Server.Services;
 
 namespace OpenScanner.Server.Devices;
 
+/// <summary>
+/// A hardware-free radio source that replays a list of <see cref="ScenarioEvent"/>s
+/// as if they were live transmissions. Used both to demo the app without an
+/// RTL-SDR dongle and to back the device tests.
+///
+/// Timing is driven entirely through an injected <see cref="TimeProvider"/> and
+/// audio through an injected <see cref="IMockAudioProvider"/>, so tests can run
+/// on a <c>FakeTimeProvider</c> with synthetic audio for fast, deterministic
+/// results, while the running app uses the system clock and real file playback.
+/// </summary>
 public class MockRadioSource : BackgroundService, IRadioSource
 {
+    // Loop keeps running this long past the last event before restarting the scenario.
+    private const double LoopTailSeconds = 10;
+    private const double FreqMatchTolerance = 0.001;
+
     private readonly ILogger<MockRadioSource> _logger;
-    private readonly IDatabase _db;
-    private readonly GpsService _gps;
     private readonly ToneDetector _toneDetector;
-    private readonly IDecoderFactory _decoderFactory;
-    private readonly ITranscriptionService _transcriptionService;
     private readonly IRecordingService _recordingService;
     private readonly IChannelService _channelService;
+    private readonly IMockAudioProvider _audioProvider;
+    private readonly TimeProvider _timeProvider;
 
     public event Action<ScannerState>? OnStateChanged;
     public event Action<CallLog>? OnNewLog;
     public event Action<byte[]>? OnAudio;
 
-    private ScannerState _state = new ScannerState("IDLE", 0);
+    private ScannerState _state = new("IDLE", 0);
     private List<ScenarioEvent> _scenarioEvents = new();
-    private DateTime _startTime;
+    private readonly Dictionary<double, DateTimeOffset> _avoidUntil = new();
+
+    private DateTimeOffset _startTime;
     private bool _isRunning;
     private bool _manualOverride;
+    private ScenarioEvent? _lockedEvent; // the event we have already locked onto / streamed
     private CancellationTokenSource? _currentTaskCts;
+    private Task? _simulationTask;
 
-    // Audio buffering
+    // Number of times the loop has parked on a timer. Lets tests deterministically
+    // wait for the loop to reach a known-quiescent point before advancing the clock.
+    private int _parkCount;
+
+    // Audio pre-roll buffer (rolling window of recent audio).
     private readonly LinkedList<byte[]> _preRollBuffer = new();
-    private const int PreRollMaxBytes = 96000 * 2; 
+    private const int PreRollMaxBytes = 96000 * 2;
 
     public MockRadioSource(
         ILogger<MockRadioSource> logger,
-        IDatabase db,
-        GpsService gps,
         ToneDetector toneDetector,
-        IDecoderFactory decoderFactory,
-        ITranscriptionService transcriptionService,
         IRecordingService recordingService,
-        IChannelService channelService)
+        IChannelService channelService,
+        IMockAudioProvider audioProvider,
+        TimeProvider timeProvider)
     {
         _logger = logger;
-        _db = db;
-        _gps = gps;
         _toneDetector = toneDetector;
-        _decoderFactory = decoderFactory;
-        _transcriptionService = transcriptionService;
         _recordingService = recordingService;
         _channelService = channelService;
+        _audioProvider = audioProvider;
+        _timeProvider = timeProvider;
 
-        _state = new ScannerState("IDLE", 0);
+        _recordingService.OnNewLog += log => OnNewLog?.Invoke(log);
 
-        _recordingService.OnNewLog += (log) => OnNewLog?.Invoke(log);
-        
-        // Try to load default scenario
-        var scenarioPath = Path.Combine(AppContext.BaseDirectory, "TestData", "scenario.json");
-        
-        if (File.Exists(scenarioPath))
-        {
-             try 
-             {
-                 var json = File.ReadAllText(scenarioPath);
-                 var options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                 
-                 // Try array first
-                 try 
-                 {
-                     var events = System.Text.Json.JsonSerializer.Deserialize<List<ScenarioEvent>>(json, options);
-                     if (events != null) _scenarioEvents = events;
-                 }
-                 catch (System.Text.Json.JsonException)
-                 {
-                     // Try object wrapper
-                     var wrapper = System.Text.Json.JsonSerializer.Deserialize<ScenarioWrapper>(json, options);
-                     if (wrapper?.Events != null) _scenarioEvents = wrapper.Events;
-                 }
-             }
-             catch (Exception ex)
-             {
-                 _logger.LogWarning(ex, "Failed to load default scenario");
-             }
-        }
+        LoadDefaultScenario();
     }
 
-    public void SetScenario(List<ScenarioEvent> events)
-    {
-        _scenarioEvents = events;
-    }
+    /// <summary>Number of times the simulation loop has parked waiting for time to pass.</summary>
+    public int ParkCount => Volatile.Read(ref _parkCount);
+
+    public void SetScenario(List<ScenarioEvent> events) => _scenarioEvents = events;
 
     public ScannerState GetState() => _state;
 
-    public void ReloadChannels()
-    {
-        _channelService.ReloadChannels();
-    }
+    public void ReloadChannels() => _channelService.ReloadChannels();
 
-    public void SetSquelch(double db)
-    {
-        UpdateState(_state with { Squelch = db });
-    }
+    public void SetSquelch(double db) => UpdateState(_state with { Squelch = db });
 
     public void Start()
     {
         if (_isRunning) return;
         _isRunning = true;
-        _startTime = DateTime.UtcNow;
+        _startTime = _timeProvider.GetUtcNow();
         _manualOverride = false;
+        _lockedEvent = null;
         UpdateState(_state with { Status = "SCANNING", IsHardwareConnected = true });
-        
+
         _currentTaskCts = new CancellationTokenSource();
-        Task.Run(() => SimulationLoop(_currentTaskCts.Token));
+        _simulationTask = Task.Run(() => SimulationLoop(_currentTaskCts.Token));
     }
 
     public void Stop()
@@ -120,15 +101,28 @@ public class MockRadioSource : BackgroundService, IRadioSource
         UpdateState(_state with { Status = "IDLE", IsHardwareConnected = true });
     }
 
+    /// <summary>Cancels the simulation loop and awaits its completion. Intended for shutdown/tests.</summary>
+    public async Task StopAsync()
+    {
+        Stop();
+        if (_simulationTask != null)
+        {
+            try { await _simulationTask; }
+            catch (OperationCanceledException) { }
+        }
+    }
+
     public void HoldFrequency(double freq)
     {
         _manualOverride = true;
+        _lockedEvent = null;
         UpdateState(_state with { ManualHoldFrequency = freq, Status = "MONITORING", CurrentFrequency = freq });
     }
 
     public void ResumeScan()
     {
         _manualOverride = false;
+        _lockedEvent = null;
         UpdateState(_state with { Status = "SCANNING", ManualHoldFrequency = null });
     }
 
@@ -139,18 +133,50 @@ public class MockRadioSource : BackgroundService, IRadioSource
 
     public void AvoidFrequency(double freq, double durationSeconds)
     {
-        _logger.LogInformation($"Mock: Avoiding {freq} for {durationSeconds}s");
+        _avoidUntil[freq] = _timeProvider.GetUtcNow().AddSeconds(durationSeconds);
+        _logger.LogInformation("Mock: Avoiding {Frequency} for {Duration}s", freq, durationSeconds);
     }
 
     public void StartDumping(string label) { }
     public void StopDumping() { }
-    public byte[][] GetPreRollBuffer() => Array.Empty<byte[]>();
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    public byte[][] GetPreRollBuffer()
     {
-        // Auto-start the mock simulation on startup
+        lock (_preRollBuffer)
+        {
+            return _preRollBuffer.ToArray();
+        }
+    }
+
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        // Auto-start the simulation when hosted by the app.
         Start();
-        await Task.CompletedTask;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Total length of the scenario (end time of its last event), or 0 if empty.</summary>
+    internal double ScenarioLength =>
+        _scenarioEvents.Count > 0 ? _scenarioEvents.Max(e => e.Time + e.Duration) : 0;
+
+    /// <summary>
+    /// Pure lookup: the event active at <paramref name="elapsedSeconds"/> into the
+    /// scenario, or null. No timing, threading, or side effects — directly unit-testable.
+    /// </summary>
+    internal ScenarioEvent? GetActiveEvent(double elapsedSeconds) =>
+        _scenarioEvents.FirstOrDefault(e =>
+            elapsedSeconds >= e.Time && elapsedSeconds < e.Time + e.Duration);
+
+    /// <summary>Whether <paramref name="freq"/> is currently within an active avoid window.</summary>
+    internal bool IsAvoided(double freq)
+    {
+        var now = _timeProvider.GetUtcNow();
+        foreach (var (avoidFreq, until) in _avoidUntil)
+        {
+            if (Math.Abs(avoidFreq - freq) < FreqMatchTolerance && until > now)
+                return true;
+        }
+        return false;
     }
 
     private async Task SimulationLoop(CancellationToken token)
@@ -159,221 +185,171 @@ public class MockRadioSource : BackgroundService, IRadioSource
         {
             while (!token.IsCancellationRequested && _isRunning)
             {
-                var elapsed = (DateTime.UtcNow - _startTime).TotalSeconds;
+                var elapsed = (_timeProvider.GetUtcNow() - _startTime).TotalSeconds;
 
-                // Loop scenario if we passed the end (max time + 10s buffer)
-                var maxTime = _scenarioEvents.Any() ? _scenarioEvents.Max(e => e.Time + e.Duration) : 0;
-                if (maxTime > 0 && elapsed > maxTime + 10)
+                // Loop the scenario once we've run past the end (plus a tail).
+                if (ScenarioLength > 0 && elapsed > ScenarioLength + LoopTailSeconds)
                 {
-                    _startTime = DateTime.UtcNow;
-                    _logger.LogInformation("[MockRadioSource] Scenario loop resetting...");
+                    _startTime = _timeProvider.GetUtcNow();
+                    _lockedEvent = null;
+                    _logger.LogInformation("[MockRadioSource] Scenario loop resetting.");
                     elapsed = 0;
                 }
 
-                // Find active event
-                var activeEvent = _scenarioEvents.FirstOrDefault(e => 
-                    elapsed >= e.Time && elapsed < (e.Time + e.Duration));
+                var active = GetActiveEvent(elapsed);
+                var canHear = active != null && CanHear(active);
 
-                if (activeEvent != null)
+                if (canHear)
                 {
-                    // Check if we should hear it
-                    bool canHear = false;
-                    if (_manualOverride)
-                    {
-                        if (Math.Abs((_state.ManualHoldFrequency ?? 0) - activeEvent.Frequency) < 0.001) canHear = true;
-                    }
-                    else
-                    {
-                        // In scanning mode, we "stop" on it
-                        canHear = true;
-                    }
-
-                    if (canHear)
-                    {
-                        if (_state.Status != "RECEIVING" && _state.Status != "MONITORING")
-                        {
-                            // Lock onto it
-                            var channel = _channelService.Channels.FirstOrDefault(c => Math.Abs(c.Frequency - activeEvent.Frequency) < 0.001);
-                            
-                            // Check if avoided
-                            if (channel != null && channel.Avoid && !_manualOverride)
-                            {
-                                canHear = false;
-                            }
-                            else
-                            {
-                                if (channel == null)
-                                {
-                                    // Mock channel if not found
-                                    channel = new Channel(activeEvent.Frequency, "Mock", "Mock Channel", activeEvent.DecoderType ?? "FM", "FM");
-                                }
-
-                                UpdateState(_state with { 
-                                    Status = _manualOverride ? "MONITORING" : "RECEIVING",
-                                    CurrentFrequency = activeEvent.Frequency,
-                                    CurrentChannel = channel,
-                                    SourceID = activeEvent.SourceId,
-                                    TargetID = activeEvent.TargetId
-                                });
-                                
-                                // Start recording via service
-                                if (!_recordingService.IsRecording)
-                                {
-                                    _recordingService.StartRecording(channel, activeEvent.SourceId, activeEvent.TargetId, _preRollBuffer);
-                                }
-                            }
-                        }
-
-                        if (canHear)
-                        {
-                            // Simulate Audio
-                            if (!string.IsNullOrEmpty(activeEvent.AudioFile))
-                            {
-                                try
-                                {
-                                    await PlayAudioFile(activeEvent, token);
-                                }
-                                catch (ObjectDisposedException)
-                                {
-                                    // Normal during shutdown
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                _logger.LogWarning($"[MockRadioSource] Event active but AudioFile is null/empty. Check scenario JSON mapping. Frequency: {activeEvent.Frequency}");
-                                // Generate silence or noise
-                                await Task.Delay(100, token);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        if (!_manualOverride && _state.Status == "RECEIVING")
-                        {
-                            // Lost signal
-                             UpdateState(_state with { Status = "SCANNING", CurrentChannel = null });
-                             if (_state.CurrentChannel != null) _recordingService.StopRecording(_state.CurrentChannel, null);
-                        }
-                    }
+                    await ReceiveAsync(active!, token);
                 }
                 else
                 {
-                    // No active event
-                    if (!_manualOverride && _state.Status == "RECEIVING")
-                    {
-                        UpdateState(_state with { Status = "SCANNING", CurrentChannel = null });
-                        if (_state.CurrentChannel != null) _recordingService.StopRecording(_state.CurrentChannel, null);
-                    }
+                    LoseSignalIfReceiving();
                 }
 
-                await Task.Delay(100, token);
+                await DelayUntilNextBoundary(elapsed, active, token);
             }
         }
         catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { /* normal during shutdown */ }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Simulation loop error");
+            _logger.LogError(ex, "[MockRadioSource] Simulation loop error");
         }
     }
 
-    private async Task PlayAudioFile(ScenarioEvent evt, CancellationToken token)
+    private bool CanHear(ScenarioEvent evt)
     {
-        string filename = evt.AudioFile!;
-        
-        // Robust path resolution - prioritize AppContext.BaseDirectory
-        var path = Path.Combine(AppContext.BaseDirectory, "TestData", filename);
-        
-        // Fallback for development/legacy support if needed, but primary should be enough with CopyToOutputDirectory
-        if (!File.Exists(path))
+        if (_manualOverride)
         {
-            path = Path.Combine(Directory.GetCurrentDirectory(), "TestData", filename);
+            // In manual hold we only hear the frequency we're parked on.
+            return Math.Abs((_state.ManualHoldFrequency ?? 0) - evt.Frequency) < FreqMatchTolerance;
         }
-        
-        // Final fallback: try filename directly
-        if (!File.Exists(path) && File.Exists(filename)) path = filename;
 
-        if (File.Exists(path))
+        // While scanning, a temporarily-avoided or channel-avoided frequency is skipped.
+        if (IsAvoided(evt.Frequency)) return false;
+
+        var channel = FindChannel(evt.Frequency);
+        return channel is not { Avoid: true };
+    }
+
+    private async Task ReceiveAsync(ScenarioEvent evt, CancellationToken token)
+    {
+        // Lock on the first time we hear this event instance.
+        if (!ReferenceEquals(_lockedEvent, evt))
         {
-            _logger.LogInformation($"[MockRadioSource] SUCCESS: Playing audio file from: {path} (Decoder: {evt.DecoderType ?? "None"})");
+            _lockedEvent = evt;
+            var channel = FindChannel(evt.Frequency)
+                ?? new Channel(evt.Frequency, "Mock", "Mock Channel", evt.DecoderType ?? "FM", "FM");
 
-            if (token.IsCancellationRequested) return;
-
-            if (evt.DecoderType?.ToUpper() == "P25")
+            UpdateState(_state with
             {
-                // Use Real Decoder
-                IDecoder decoder;
-                try
-                {
-                    decoder = _decoderFactory.GetDecoder("P25");
-                }
-                catch (ObjectDisposedException)
-                {
-                    return; // Shutdown
-                }
-                
-                // Use ffmpeg with -re (read at native rate) to simulate real-time input.
-                // This prevents the decoder from running too fast and flooding the client.
-                decoder.InputSource = $"/usr/bin/ffmpeg -re -i \"{path}\" -f s16le -ar 48000 -ac 1 -loglevel quiet -";
-                
-                // Hook up events
-                Action<byte[]> audioHandler = (chunk) => 
-                {
-                    OnAudio?.Invoke(chunk);
-                    _recordingService.ProcessAudio(chunk);
-                    _toneDetector.ProcessAudio(chunk);
-                };
-                
-                decoder.OnAudio += audioHandler;
+                Status = _manualOverride ? "MONITORING" : "RECEIVING",
+                CurrentFrequency = evt.Frequency,
+                CurrentChannel = channel,
+                SourceID = evt.SourceId,
+                TargetID = evt.TargetId
+            });
 
-                try 
-                {
-                    // Create dummy channel for decoder context
-                    var dummyChannel = new Channel { Frequency = evt.Frequency };
-                    await decoder.StartAsync(dummyChannel, token);
-                }
-                finally
-                {
-                    decoder.OnAudio -= audioHandler;
-                    decoder.Stop();
-                }
-            }
-            else
+            if (!_recordingService.IsRecording)
             {
-                // Direct Playback (Simulated/Demodulated Audio)
-                // For real fidelity, we should respect sample rate.
-                // Assuming 48k 16bit mono for now as per system standard.
-                var buffer = new byte[3200]; // ~33ms
-                using var fs = File.OpenRead(path);
-                // Skip header if wav
-                if (path.EndsWith(".wav") && fs.Length > 44) fs.Position = 44;
-
-                int bytesRead;
-                long totalBytes = 0;
-                while ((bytesRead = await fs.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
-                {
-                    totalBytes += bytesRead;
-                    // Log every ~100 chunks to avoid spam, but confirm activity
-                    if (totalBytes % (3200 * 50) == 0) 
-                    {
-                        _logger.LogInformation($"[MockRadioSource] Streaming audio... Total: {totalBytes} bytes");
-                    }
-
-                    var chunk = new byte[bytesRead];
-                    Array.Copy(buffer, chunk, bytesRead);
-                    
-                    OnAudio?.Invoke(chunk);
-                    _recordingService.ProcessAudio(chunk);
-                    _toneDetector.ProcessAudio(chunk);
-                    
-                    // Throttle
-                    await Task.Delay(33, token);
-                }
+                ClearPreRoll();
+                _recordingService.StartRecording(channel, evt.SourceId, evt.TargetId, _preRollBuffer);
             }
+
+            await _audioProvider.StreamAsync(evt, HandleAudioChunk, token);
+        }
+    }
+
+    private void LoseSignalIfReceiving()
+    {
+        if (_lockedEvent == null) return;
+
+        var channel = _state.CurrentChannel;
+        _lockedEvent = null;
+        _recordingService.StopRecording(channel!, null);
+
+        if (!_manualOverride)
+        {
+            // Back to scanning; manual hold stays parked on its frequency.
+            UpdateState(_state with { Status = "SCANNING", CurrentChannel = null });
+        }
+    }
+
+    /// <summary>
+    /// Delays until the next scenario transition (current event's end, or the next
+    /// event's start, or the loop reset point). Precise scheduling means transitions
+    /// land exactly instead of being quantized to a poll interval.
+    /// </summary>
+    private async Task DelayUntilNextBoundary(double elapsed, ScenarioEvent? active, CancellationToken token)
+    {
+        double next;
+        if (active != null)
+        {
+            next = active.Time + active.Duration; // wait out the current event
         }
         else
         {
-            _logger.LogWarning($"Audio file not found: {filename}. Checked: {path}");
+            double? nextStart = null;
+            foreach (var e in _scenarioEvents)
+            {
+                if (e.Time > elapsed && (nextStart == null || e.Time < nextStart))
+                    nextStart = e.Time;
+            }
+            next = nextStart ?? (ScenarioLength > 0 ? ScenarioLength + LoopTailSeconds : elapsed + LoopTailSeconds);
+        }
+
+        var waitSeconds = Math.Max(next - elapsed, 0.001);
+        await ParkAsync(TimeSpan.FromSeconds(waitSeconds), token);
+    }
+
+    /// <summary>
+    /// Waits <paramref name="delay"/> of (possibly virtual) time. The timer is
+    /// registered before <see cref="_parkCount"/> is bumped, so once a test observes
+    /// the incremented count it knows the timer exists and it's safe to advance the clock.
+    /// </summary>
+    private async Task ParkAsync(TimeSpan delay, CancellationToken token)
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var timer = _timeProvider.CreateTimer(_ => tcs.TrySetResult(), null, delay, Timeout.InfiniteTimeSpan);
+        using var registration = token.Register(() => tcs.TrySetResult());
+
+        Interlocked.Increment(ref _parkCount);
+        await tcs.Task;
+        token.ThrowIfCancellationRequested();
+    }
+
+    private void HandleAudioChunk(byte[] chunk)
+    {
+        OnAudio?.Invoke(chunk);
+        _recordingService.ProcessAudio(chunk);
+        _toneDetector.ProcessAudio(chunk);
+        AppendPreRoll(chunk);
+    }
+
+    private Channel? FindChannel(double frequency) =>
+        _channelService.Channels.FirstOrDefault(c => Math.Abs(c.Frequency - frequency) < FreqMatchTolerance);
+
+    private void AppendPreRoll(byte[] chunk)
+    {
+        lock (_preRollBuffer)
+        {
+            _preRollBuffer.AddLast(chunk);
+            var total = _preRollBuffer.Sum(b => b.Length);
+            while (total > PreRollMaxBytes && _preRollBuffer.First != null)
+            {
+                total -= _preRollBuffer.First.Value.Length;
+                _preRollBuffer.RemoveFirst();
+            }
+        }
+    }
+
+    private void ClearPreRoll()
+    {
+        lock (_preRollBuffer)
+        {
+            _preRollBuffer.Clear();
         }
     }
 
@@ -381,6 +357,33 @@ public class MockRadioSource : BackgroundService, IRadioSource
     {
         _state = newState;
         OnStateChanged?.Invoke(_state);
+    }
+
+    private void LoadDefaultScenario()
+    {
+        var scenarioPath = Path.Combine(AppContext.BaseDirectory, "TestData", "scenario.json");
+        if (!File.Exists(scenarioPath)) return;
+
+        try
+        {
+            var json = File.ReadAllText(scenarioPath);
+            var options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+            try
+            {
+                var events = System.Text.Json.JsonSerializer.Deserialize<List<ScenarioEvent>>(json, options);
+                if (events != null) _scenarioEvents = events;
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                var wrapper = System.Text.Json.JsonSerializer.Deserialize<ScenarioWrapper>(json, options);
+                if (wrapper?.Events != null) _scenarioEvents = wrapper.Events;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load default scenario");
+        }
     }
 
     private class ScenarioWrapper
