@@ -251,22 +251,30 @@ function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Helper to send commands
-  const sendCommand = (action: string, frequency?: number, value?: number) => {
-    fetch('/api/control', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, frequency, value })
+  // Low-level REST helper for scanner control endpoints
+  const scannerApi = (path: string, method: string, body?: object) =>
+    fetch(`/api/scanner/${path}`, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
     }).catch(err => console.error("Command failed:", err));
+
+  // Helper to send commands, mapping legacy action names onto REST endpoints
+  const sendCommand = (action: string, frequency?: number, value?: number) => {
+    switch (action) {
+        case 'scan': return scannerApi('hold', 'DELETE');
+        case 'hold': return scannerApi('hold', 'PUT', { frequency });
+        case 'start': return scannerApi('power', 'PUT', { enabled: true });
+        case 'stop': return scannerApi('power', 'PUT', { enabled: false });
+        case 'set_squelch': return scannerApi('squelch', 'PUT', { value });
+        case 'debug_spectrum': return scannerApi('debug-spectrum', 'POST', { frequency, gain: value });
+        default: console.error("Unknown command:", action);
+    }
   };
 
   const handleSkip = (freq?: number) => {
     if (freq) {
-        fetch('/api/control', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'avoid', frequency: freq, duration: 10 })
-        }).catch(err => console.error("Skip command failed:", err));
+        scannerApi('avoids', 'POST', { frequency: freq, duration: 10 });
     } else {
         sendCommand('scan');
     }
