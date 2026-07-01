@@ -19,7 +19,7 @@ public class WFM : DSDBase
         int outputRate = 48000;
         string rtlMode = "wbfm";
         // WFM with moderate squelch and increased gain for better signal handling
-        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 -M {rtlMode} -";
+        return $"{PlatformTools.Stdbuf("-o0")}{PlatformTools.RtlFm} -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 -M {rtlMode} -";
     }
 
     protected override Task OnStarted(CancellationToken token)

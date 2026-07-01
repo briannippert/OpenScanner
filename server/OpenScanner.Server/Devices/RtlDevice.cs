@@ -202,7 +202,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         await Task.Delay(250, token);
 
         int sampleRate = 2400000; 
-        var binPath = "/usr/bin/rtl_sdr";
+        var binPath = PlatformTools.RtlSdr;
         var args = $"-f {freq}M -s {sampleRate} -g {gain} -b 1 -";
 
         _logger.LogInformation($"Debug Spectrum HW: {binPath} {args}");
@@ -548,7 +548,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         // Start rtl_sdr wideband capture and distribute IQ to all pipelines
         await Task.Delay(250, token); // USB settle time
 
-        var binPath = "/usr/bin/rtl_sdr";
+        var binPath = PlatformTools.RtlSdr;
         var args = $"-f {bank.CenterFrequency:F3}M -s {sampleRate} -g 20 -b 1 -";
         _logger.LogInformation($"Parallel Scanner: {binPath} {args}");
 
@@ -867,7 +867,7 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         // Standard stable sample rate for R820T tuner
         int scanRate = 1024000; 
-        var binPath = "/usr/bin/rtl_sdr";
+        var binPath = PlatformTools.RtlSdr;
         // -b 1: Use 1 buffer to reduce latency and improve startup reliability
         var args = $"-f {centerFreqMhz:F3}M -s {scanRate} -g 20 -b 1 -";
 

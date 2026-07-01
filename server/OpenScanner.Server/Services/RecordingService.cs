@@ -170,7 +170,7 @@ public class RecordingService : IRecordingService
                  var wavPath = Path.ChangeExtension(recordingPath, ".wav");
                  try 
                  {
-                     var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg")
+                     var convertStart = new ProcessStartInfo(PlatformTools.Ffmpeg)
                      {
                          RedirectStandardOutput = true,
                          RedirectStandardError = true,
@@ -418,7 +418,7 @@ public class RecordingService : IRecordingService
             var wavPath = Path.ChangeExtension(recordingPath, ".wav");
             try
             {
-                var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg")
+                var convertStart = new ProcessStartInfo(PlatformTools.Ffmpeg)
                 {
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
