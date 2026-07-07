@@ -68,14 +68,18 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
 
     const handleFavoriteToggle = () => setFavoritesRefreshKey(k => k + 1);
 
-    // When a highlight targets a recent log, make sure the Recent Activity section
-    // is expanded so the item is rendered and can be scrolled into view.
-    useEffect(() => {
-        if (highlight && liveLogs.some(l => l.id === highlight.id)) {
+    // When a new highlight targets a recent log, make sure the Recent Activity
+    // section is expanded and any active search is cleared so the item is rendered
+    // and can be scrolled into view. This adjusts state during render in response to
+    // a changed prop (React's recommended pattern) rather than in an effect.
+    const [lastHighlightSeq, setLastHighlightSeq] = useState<number | undefined>(highlight?.seq);
+    if (highlight && highlight.seq !== lastHighlightSeq) {
+        setLastHighlightSeq(highlight.seq);
+        if (liveLogs.some(l => l.id === highlight.id)) {
             setRecentOpen(true);
             setSearchQuery('');
         }
-    }, [highlight, liveLogs]);
+    }
 
     const handleDelete = (id: string) => {
         setSearchResults(prev => prev ? prev.filter(log => log.id !== id) : null);
@@ -439,15 +443,25 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
     const [isFavorite, setIsFavorite] = useState(log.isFavorite ?? false);
     const highlight = useContext(HighlightContext);
     const itemRef = useRef<HTMLLIElement>(null);
-    const [flash, setFlash] = useState(false);
 
     // Scroll into view and briefly flash when this log is the highlight target.
+    // The flash is driven imperatively via the Web Animations API so the effect
+    // only touches the DOM (no setState) — it returns to the base style on its own.
     useEffect(() => {
         if (!highlight || highlight.id !== log.id) return;
-        itemRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        setFlash(true);
-        const timer = setTimeout(() => setFlash(false), 2000);
-        return () => clearTimeout(timer);
+        const el = itemRef.current;
+        if (!el) return;
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (typeof el.animate !== 'function') return;
+        const anim = el.animate(
+            [
+                { backgroundColor: 'rgba(255,183,77,0.28)', boxShadow: 'inset 3px 0 0 #ffb74d' },
+                { backgroundColor: 'rgba(255,183,77,0.28)', boxShadow: 'inset 3px 0 0 #ffb74d', offset: 0.7 },
+                { backgroundColor: 'rgba(0,0,0,0)', boxShadow: 'inset 3px 0 0 rgba(255,183,77,0)' },
+            ],
+            { duration: 2000, easing: 'ease-out' }
+        );
+        return () => anim.cancel();
     }, [highlight, log.id]);
 
     const handleFavoriteClick = (e: React.MouseEvent) => {
@@ -477,9 +491,7 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                     '& .MuiListItemSecondaryAction-root': {
                         right: 8
                     },
-                    bgcolor: flash ? 'rgba(255,183,77,0.18)' : 'rgba(0,0,0,0.2)',
-                    boxShadow: flash ? 'inset 3px 0 0 #ffb74d' : 'none',
-                    transition: 'background-color 0.6s ease, box-shadow 0.6s ease'
+                    bgcolor: 'rgba(0,0,0,0.2)'
                 }}
                 secondaryAction={
                     <Box sx={{ display: 'flex', gap: 0.5 }}>
