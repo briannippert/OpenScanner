@@ -75,6 +75,7 @@ function App() {
   const [fireTones, setFireTones] = useState<FireToneSet[]>([]);
   const [callLog, setCallLog] = useState<CallLog[]>([]);
   const [radioEvents, setRadioEvents] = useState<RadioEvent[]>([]);
+  const [highlightLog, setHighlightLog] = useState<{ id: string; seq: number } | null>(null);
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | undefined>(undefined);
   const [isManagerOpen, setIsManagerOpen] = useState(false);
   const [isToneManagerOpen, setIsToneManagerOpen] = useState(false);
@@ -1023,12 +1024,23 @@ function App() {
                 {/* Right Column: Transmission Log (Expanded) */}
                 <Grid size={{ xs: 12, md: 8, lg: 9 }} sx={{ height: { xs: '500px', md: '100%' }, overflow: 'hidden' }}>
                     <Paper sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: '#0a0a0a', border: '1px solid #222', borderRadius: 2, overflowY: 'auto' }}>
-                        {fireTones.length > 0 && <EventLog events={radioEvents} onClear={clearEvents} />}
+                        {fireTones.length > 0 && (
+                            <EventLog
+                                events={radioEvents}
+                                onClear={clearEvents}
+                                onEventClick={(e) => {
+                                    if (e.transmissionId) {
+                                        setHighlightLog(h => ({ id: e.transmissionId!, seq: (h?.seq ?? 0) + 1 }));
+                                    }
+                                }}
+                            />
+                        )}
                         <TransmissionLog
                             liveLogs={callLog}
                             playingId={playingId}
                             onPlay={playRawAudio}
                             onDelete={deleteEntry}
+                            highlight={highlightLog}
                         />
                     </Paper>
                 </Grid>
@@ -1055,6 +1067,7 @@ function App() {
         <SettingsManager
             open={isSettingsOpen}
             onClose={() => setIsSettingsOpen(false)}
+            onRecordingsDeleted={() => setCallLog([])}
         />
 
         <Dialog 

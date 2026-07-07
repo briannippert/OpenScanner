@@ -410,6 +410,9 @@ public class RtlDevice : BackgroundService, IRadioSource
         e.Timestamp = DateTime.UtcNow.ToString("o");
         e.Frequency = _state.CurrentChannel?.Frequency ?? _state.CurrentFrequency ?? 0;
         e.AlphaTag = _state.CurrentChannel?.AlphaTag;
+        // Link the event to the recording it coincides with (if any) so the UI can
+        // jump to it in the transmission history.
+        e.TransmissionId ??= _recordingService.CurrentRecordingId;
 
         _db.AddRadioEventAsync(e).ContinueWith(
             t => _logger.LogError(t.Exception, "Failed to persist radio event"),

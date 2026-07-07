@@ -16,6 +16,14 @@ public interface IRecordingService
     /// </summary>
     bool IsChannelRecording(double frequency);
 
+    /// <summary>
+    /// The transmission log id (<c>log_{startTime}</c>) of the currently active
+    /// recording, or the most recently started one in parallel mode. Null when no
+    /// recording is active. Matches the id assigned to the finalized <see cref="CallLog"/>,
+    /// so callers can link concurrent events to the recording they coincide with.
+    /// </summary>
+    string? CurrentRecordingId { get; }
+
     void StartRecording(Channel channel, int? src, int? tgt, LinkedList<byte[]> preRollBuffer);
     void UpdateSourceTarget(int? src, int? tgt);
     void UpdateSourceTarget(double frequency, int? src, int? tgt);
