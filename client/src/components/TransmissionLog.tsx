@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useContext, createContext } from 'react';
 import { 
     Box, 
     List, 
@@ -40,14 +40,24 @@ interface LogNodeProps {
     onFavoriteToggle: () => void;
 }
 
+/** A request to scroll to and flash a specific log. `seq` bumps on every request
+ *  so re-clicking the same event re-triggers the effect. */
+export interface HighlightRequest {
+    id: string;
+    seq: number;
+}
+
+const HighlightContext = createContext<HighlightRequest | null>(null);
+
 interface Props {
     liveLogs: CallLog[];
     playingId: string | null;
     onPlay: (id: string, path: string, duration?: number) => void;
     onDelete: (id: string) => void;
+    highlight?: HighlightRequest | null;
 }
 
-const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelete }) => {
+const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelete, highlight }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<CallLog[] | null>(null);
     const [years, setYears] = useState<string[]>([]);
@@ -57,6 +67,15 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     const [powerDmsDept, setPowerDmsDept] = useState<string | null>(null);
 
     const handleFavoriteToggle = () => setFavoritesRefreshKey(k => k + 1);
+
+    // When a highlight targets a recent log, make sure the Recent Activity section
+    // is expanded so the item is rendered and can be scrolled into view.
+    useEffect(() => {
+        if (highlight && liveLogs.some(l => l.id === highlight.id)) {
+            setRecentOpen(true);
+            setSearchQuery('');
+        }
+    }, [highlight, liveLogs]);
 
     const handleDelete = (id: string) => {
         setSearchResults(prev => prev ? prev.filter(log => log.id !== id) : null);
@@ -104,6 +123,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     }, [searchQuery]);
 
     return (
+        <HighlightContext.Provider value={highlight ?? null}>
         <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <Box sx={{ p: 2, borderBottom: '1px solid #222' }}>
                 <TextField 
@@ -180,6 +200,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                 )}
             </Box>
         </Box>
+        </HighlightContext.Provider>
     );
 };
 
@@ -416,6 +437,18 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete, o
 
 const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: CallLog } & LogNodeProps) => {
     const [isFavorite, setIsFavorite] = useState(log.isFavorite ?? false);
+    const highlight = useContext(HighlightContext);
+    const itemRef = useRef<HTMLLIElement>(null);
+    const [flash, setFlash] = useState(false);
+
+    // Scroll into view and briefly flash when this log is the highlight target.
+    useEffect(() => {
+        if (!highlight || highlight.id !== log.id) return;
+        itemRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setFlash(true);
+        const timer = setTimeout(() => setFlash(false), 2000);
+        return () => clearTimeout(timer);
+    }, [highlight, log.id]);
 
     const handleFavoriteClick = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -435,15 +468,18 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
 
     return (
         <React.Fragment>
-            <ListItem 
-                sx={{ 
-                    pl: { xs: 4, sm: 10 }, 
+            <ListItem
+                ref={itemRef}
+                sx={{
+                    pl: { xs: 4, sm: 10 },
                     pr: 2,
                     py: 1,
                     '& .MuiListItemSecondaryAction-root': {
                         right: 8
                     },
-                    bgcolor: 'rgba(0,0,0,0.2)'
+                    bgcolor: flash ? 'rgba(255,183,77,0.18)' : 'rgba(0,0,0,0.2)',
+                    boxShadow: flash ? 'inset 3px 0 0 #ffb74d' : 'none',
+                    transition: 'background-color 0.6s ease, box-shadow 0.6s ease'
                 }}
                 secondaryAction={
                     <Box sx={{ display: 'flex', gap: 0.5 }}>

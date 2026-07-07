@@ -121,6 +121,56 @@ public class RecordingServiceTests
     }
 
     [Fact]
+    public void CurrentRecordingId_IsNullWhenIdle()
+    {
+        Assert.Null(_service.CurrentRecordingId);
+    }
+
+    [Fact]
+    public void CurrentRecordingId_LegacyRecording_MatchesFinalizedLogId()
+    {
+        CallLog? saved = null;
+        _db.Setup(d => d.SaveTransmissionAsync(It.IsAny<CallLog>()))
+           .Callback<CallLog>(l => saved = l)
+           .Returns(Task.CompletedTask);
+
+        _service.StartRecording(Chan(), 1, 2, new LinkedList<byte[]>());
+
+        // The id observed mid-recording (used to link coincident events) must equal
+        // the id of the finalized CallLog for a long-enough recording.
+        var liveId = _service.CurrentRecordingId;
+        Assert.NotNull(liveId);
+        Assert.StartsWith("log_", liveId);
+
+        // Feed enough audio to clear the 4KB minimum, then wait out the 0.5s floor.
+        _service.ProcessAudio(new byte[8192]);
+        Thread.Sleep(600);
+        _service.StopRecording(Chan(), "Station 1");
+
+        Assert.NotNull(saved);
+        Assert.Equal(liveId, saved!.Id);
+        Assert.Null(_service.CurrentRecordingId);
+    }
+
+    [Fact]
+    public void CurrentRecordingId_ParallelRecording_ReturnsMostRecentActive()
+    {
+        _service.StartParallelRecording(Chan(155.0), 1, 2, new LinkedList<byte[]>());
+        try
+        {
+            var id = _service.CurrentRecordingId;
+            Assert.NotNull(id);
+            Assert.StartsWith("log_", id);
+        }
+        finally
+        {
+            _service.StopParallelRecording(155.0, null); // short -> aborts
+        }
+
+        Assert.Null(_service.CurrentRecordingId);
+    }
+
+    [Fact]
     public void StartParallelRecording_SameFrequencyTwice_IsIgnored()
     {
         _service.StartParallelRecording(Chan(155.0), 1, 2, new LinkedList<byte[]>());

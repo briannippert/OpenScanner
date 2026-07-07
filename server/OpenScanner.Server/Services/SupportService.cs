@@ -238,6 +238,57 @@ public class SupportService : ISupportService
         return Path.Combine(dataDir, "openscanner.db");
     }
 
+    private static string GetRecordingsPath()
+    {
+        var root = Directory.GetCurrentDirectory();
+        return Path.GetFullPath(Path.Combine(root, "../../data/recordings"));
+    }
+
+    /// <inheritdoc />
+    public StorageInfo GetStorageInfo()
+    {
+        var logger = _loggerProvider.CreateLogger(nameof(SupportService));
+
+        long recordingsBytes = 0;
+        int recordingsCount = 0;
+        try
+        {
+            var dir = GetRecordingsPath();
+            if (Directory.Exists(dir))
+            {
+                foreach (var file in Directory.EnumerateFiles(dir))
+                {
+                    try
+                    {
+                        recordingsBytes += new FileInfo(file).Length;
+                        recordingsCount++;
+                    }
+                    catch (Exception ex) { logger.LogDebug(ex, "Failed to stat recording {File}", file); }
+                }
+            }
+        }
+        catch (Exception ex) { logger.LogDebug(ex, "Failed to size recordings directory"); }
+
+        long databaseBytes = 0;
+        try
+        {
+            var dbPath = GetDatabasePath();
+            if (File.Exists(dbPath)) databaseBytes = new FileInfo(dbPath).Length;
+        }
+        catch (Exception ex) { logger.LogDebug(ex, "Failed to size database"); }
+
+        long diskFree = 0, diskTotal = 0;
+        try
+        {
+            var drive = new DriveInfo(Directory.GetCurrentDirectory());
+            diskFree = drive.AvailableFreeSpace;
+            diskTotal = drive.TotalSize;
+        }
+        catch (Exception ex) { logger.LogDebug(ex, "Failed to read disk space"); }
+
+        return new StorageInfo(recordingsBytes, recordingsCount, databaseBytes, diskFree, diskTotal);
+    }
+
     private object GetDiskSpaceInfo()
     {
         try

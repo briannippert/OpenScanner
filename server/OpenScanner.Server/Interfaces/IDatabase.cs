@@ -68,6 +68,14 @@ public interface IDatabase
     Task<IEnumerable<CallLog>> GetHistoryAsync(int limit = 100);
 
     /// <summary>
+    /// Retrieves the IDs of the oldest non-favorite transmissions, oldest first.
+    /// Used by low-disk cleanup to purge recordings while preserving favorites.
+    /// </summary>
+    /// <param name="limit">Maximum number of IDs to return.</param>
+    /// <returns>A collection of transmission IDs, oldest first.</returns>
+    Task<IEnumerable<string>> GetOldestTransmissionIdsAsync(int limit);
+
+    /// <summary>
     /// Gets all years that have transmission data.
     /// </summary>
     /// <returns>A collection of years as strings.</returns>
