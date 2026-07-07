@@ -253,6 +253,13 @@ public class Database : IDatabase
     }
 
     /// <inheritdoc />
+    public async Task<IEnumerable<string>> GetOldestTransmissionIdsAsync(int limit)
+    {
+        using var conn = GetConnection();
+        return await conn.QueryAsync<string>(SqlLoader.GetSql("Transmissions/GetOldest.sql"), new { Limit = limit });
+    }
+
+    /// <inheritdoc />
     public async Task DeleteTransmissionAsync(string id)
     {
         using var conn = GetConnection();
