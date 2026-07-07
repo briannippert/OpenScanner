@@ -386,6 +386,17 @@ public record ParallelChannelState(
 public record SpectrumPoint(double Frequency, double Db);
 
 /// <summary>
+/// Storage usage statistics surfaced in the settings UI.
+/// </summary>
+public record StorageInfo(
+    long RecordingsBytes,
+    int RecordingsCount,
+    long DatabaseBytes,
+    long DiskFreeBytes,
+    long DiskTotalBytes
+);
+
+/// <summary>
 /// Real-time status of the scanner hardware and software.
 /// </summary>
 public record ScannerState(

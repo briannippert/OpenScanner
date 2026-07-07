@@ -32,6 +32,17 @@ public class SupportController : ControllerBase
     }
 
     /// <summary>
+    /// Retrieves storage usage statistics: recordings size/count, database size, and disk space.
+    /// </summary>
+    /// <returns>Storage usage snapshot.</returns>
+    [HttpGet("system/storage")]
+    [ProducesResponseType(typeof(OpenScanner.Server.Models.StorageInfo), StatusCodes.Status200OK)]
+    public IActionResult GetStorageInfo()
+    {
+        return Ok(_support.GetStorageInfo());
+    }
+
+    /// <summary>
     /// Generates and downloads a support package containing logs, configuration, and system info.
     /// </summary>
     /// <returns>A ZIP file containing diagnostic information.</returns>
