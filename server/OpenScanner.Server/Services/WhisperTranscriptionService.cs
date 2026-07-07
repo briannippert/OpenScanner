@@ -242,7 +242,7 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
             return null;
         }
 
-        var convertStart = new ProcessStartInfo("/usr/bin/ffmpeg")
+        var convertStart = new ProcessStartInfo(PlatformTools.Ffmpeg)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,

@@ -92,6 +92,21 @@ public class Database : IDatabase
         ");
 
         conn.Execute(@"
+            CREATE TABLE IF NOT EXISTS radio_events (
+                id TEXT PRIMARY KEY,
+                timestamp TEXT,
+                type TEXT,
+                label TEXT,
+                frequency REAL,
+                alphaTag TEXT,
+                toneA REAL,
+                toneB REAL,
+                unitId INTEGER,
+                transmissionId TEXT
+            );
+        ");
+
+        conn.Execute(@"
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
@@ -312,6 +327,31 @@ public class Database : IDatabase
     {
         using var conn = GetConnection();
         await conn.ExecuteAsync("DELETE FROM fire_tones WHERE id=@Id", new { Id = id });
+    }
+
+    /// <inheritdoc />
+    public async Task AddRadioEventAsync(RadioEvent e)
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync(
+            @"INSERT INTO radio_events (id, timestamp, type, label, frequency, alphaTag, toneA, toneB, unitId, transmissionId)
+              VALUES (@Id, @Timestamp, @Type, @Label, @Frequency, @AlphaTag, @ToneA, @ToneB, @UnitId, @TransmissionId)",
+            e);
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<RadioEvent>> GetRadioEventsAsync(int limit = 100)
+    {
+        using var conn = GetConnection();
+        return await conn.QueryAsync<RadioEvent>(
+            "SELECT * FROM radio_events ORDER BY timestamp DESC LIMIT @Limit", new { Limit = limit });
+    }
+
+    /// <inheritdoc />
+    public async Task ClearRadioEventsAsync()
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync("DELETE FROM radio_events");
     }
 
     /// <inheritdoc />

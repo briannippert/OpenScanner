@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using OpenScanner.Server.Controllers;
@@ -18,7 +19,13 @@ public class ScannerControllerTests
     {
         _dbMock = new Mock<IDatabase>();
         _radioMock = new Mock<IRadioSource>();
-        _controller = new ScannerController(_dbMock.Object, _radioMock.Object);
+        _controller = new ScannerController(_dbMock.Object, _radioMock.Object)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext()
+            }
+        };
     }
 
     [Fact]
@@ -79,6 +86,139 @@ public class ScannerControllerTests
         _dbMock.Verify(db => db.DeleteChannelAsync(5), Times.Once);
         _radioMock.Verify(r => r.ReloadChannels(), Times.Once);
     }
+
+    // --- REST endpoints ---
+
+    [Fact]
+    public void GetStatus_ReturnsRadioState()
+    {
+        var state = new ScannerState("SCANNING", -50);
+        _radioMock.Setup(r => r.GetState()).Returns(state);
+
+        var result = _controller.GetStatus();
+
+        Assert.Equal("SCANNING", result.Status);
+    }
+
+    [Fact]
+    public void SetPower_Enabled_CallsStart()
+    {
+        var result = _controller.SetPower(new PowerRequest(true)) as OkResult;
+
+        Assert.NotNull(result);
+        _radioMock.Verify(r => r.Start(), Times.Once);
+        _radioMock.Verify(r => r.Stop(), Times.Never);
+    }
+
+    [Fact]
+    public void SetPower_Disabled_CallsStop()
+    {
+        var result = _controller.SetPower(new PowerRequest(false)) as OkResult;
+
+        Assert.NotNull(result);
+        _radioMock.Verify(r => r.Stop(), Times.Once);
+        _radioMock.Verify(r => r.Start(), Times.Never);
+    }
+
+    [Fact]
+    public async Task Hold_HoldsFrequency()
+    {
+        _dbMock.Setup(db => db.GetAllChannelsAsync()).ReturnsAsync(new List<Channel>());
+
+        var result = await _controller.Hold(new HoldRequest(155.5)) as OkResult;
+
+        Assert.NotNull(result);
+        _radioMock.Verify(r => r.HoldFrequency(155.5), Times.Once);
+    }
+
+    [Fact]
+    public async Task Hold_UnAvoidsMatchingChannel()
+    {
+        var channel = new Channel { Id = 1, Frequency = 155.5, Avoid = true };
+        _dbMock.Setup(db => db.GetAllChannelsAsync()).ReturnsAsync(new List<Channel> { channel });
+
+        var result = await _controller.Hold(new HoldRequest(155.5)) as OkResult;
+
+        Assert.NotNull(result);
+        _dbMock.Verify(db => db.UpdateChannelAsync(It.Is<Channel>(c => c.Id == 1 && !c.Avoid)), Times.Once);
+        _radioMock.Verify(r => r.ReloadChannels(), Times.Once);
+        _radioMock.Verify(r => r.HoldFrequency(155.5), Times.Once);
+    }
+
+    [Fact]
+    public void ReleaseHold_ResumesScan()
+    {
+        var result = _controller.ReleaseHold() as OkResult;
+
+        Assert.NotNull(result);
+        _radioMock.Verify(r => r.ResumeScan(), Times.Once);
+    }
+
+    [Fact]
+    public void SetSquelch_CallsRadioSetSquelch()
+    {
+        var result = _controller.SetSquelch(new SquelchRequest(-40)) as OkResult;
+
+        Assert.NotNull(result);
+        _radioMock.Verify(r => r.SetSquelch(-40), Times.Once);
+    }
+
+    [Fact]
+    public void AddAvoid_CallsRadioAvoidFrequency()
+    {
+        var result = _controller.AddAvoid(new AvoidRequest(155.5, 15)) as AcceptedResult;
+
+        Assert.NotNull(result);
+        _radioMock.Verify(r => r.AvoidFrequency(155.5, 15), Times.Once);
+    }
+
+    [Fact]
+    public void AddAvoid_DefaultsDurationTo10()
+    {
+        var result = _controller.AddAvoid(new AvoidRequest(155.5)) as AcceptedResult;
+
+        Assert.NotNull(result);
+        _radioMock.Verify(r => r.AvoidFrequency(155.5, 10), Times.Once);
+    }
+
+    [Fact]
+    public void StartIqDump_UsesProvidedLabel()
+    {
+        var result = _controller.StartIqDump(new IqDumpRequest("test")) as OkResult;
+
+        Assert.NotNull(result);
+        _radioMock.Verify(r => r.StartDumping("test"), Times.Once);
+    }
+
+    [Fact]
+    public void StartIqDump_DefaultsLabelWhenMissing()
+    {
+        var result = _controller.StartIqDump(null) as OkResult;
+
+        Assert.NotNull(result);
+        _radioMock.Verify(r => r.StartDumping("sample"), Times.Once);
+    }
+
+    [Fact]
+    public void StopIqDump_CallsRadioStopDump()
+    {
+        var result = _controller.StopIqDump() as OkResult;
+
+        Assert.NotNull(result);
+        _radioMock.Verify(r => r.StopDumping(), Times.Once);
+    }
+
+    [Fact]
+    public void StartDebugSpectrum_CallsRadioStartDebugSpectrum()
+    {
+        var result = _controller.StartDebugSpectrum(new DebugSpectrumRequest(162.400, 30)) as OkResult;
+
+        Assert.NotNull(result);
+        _radioMock.Verify(r => r.StartDebugSpectrum(162.400, 30), Times.Once);
+    }
+
+    // --- Legacy /api/control shim (deprecated) ---
+#pragma warning disable CS0618 // Intentionally testing the deprecated shim
 
     [Fact]
     public async Task ControlScanner_Start_CallsRadioStart()
@@ -169,4 +309,5 @@ public class ScannerControllerTests
         Assert.NotNull(result);
         Assert.Equal("Action is required", result.Value);
     }
+#pragma warning restore CS0618
 }

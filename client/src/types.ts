@@ -84,6 +84,18 @@ export interface FireToneSet {
     description?: string;
 }
 
+export interface RadioEvent {
+    id: string;
+    timestamp: string;
+    type: 'TONE_OUT';
+    label: string;
+    frequency: number;
+    alphaTag?: string;
+    toneA?: number;
+    toneB?: number;
+    transmissionId?: string;
+}
+
 declare global {
     interface Window {
         audioCtx?: AudioContext;

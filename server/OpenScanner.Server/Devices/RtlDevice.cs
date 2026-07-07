@@ -17,6 +17,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     private readonly ILogger<RtlDevice> _logger;
     private readonly GpsService _gps;
     private readonly ToneDetector _toneDetector;
+    private readonly Mdc1200Decoder _mdc;
     private readonly IDecoderFactory _decoderFactory;
     private readonly ITranscriptionService _transcriptionService;
     private readonly IRecordingService _recordingService;
@@ -30,6 +31,9 @@ public class RtlDevice : BackgroundService, IRadioSource
     
     /// <inheritdoc />
     public event Action<byte[]>? OnAudio;
+
+    /// <inheritdoc />
+    public event Action<RadioEvent>? OnNewEvent;
 
     private ScannerState _state = new ScannerState("IDLE", 0);
     private bool _manualOverride = false;
@@ -69,9 +73,10 @@ public class RtlDevice : BackgroundService, IRadioSource
     public RtlDevice(
         IDatabase db, 
         ILogger<RtlDevice> logger, 
-        GpsService gps, 
-        ToneDetector toneDetector, 
-        IDecoderFactory decoderFactory, 
+        GpsService gps,
+        ToneDetector toneDetector,
+        Mdc1200Decoder mdc,
+        IDecoderFactory decoderFactory,
         ITranscriptionService transcriptionService, 
         IRecordingService recordingService,
         IChannelService channelService)
@@ -80,6 +85,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         _logger = logger;
         _gps = gps;
         _toneDetector = toneDetector;
+        _mdc = mdc;
         _decoderFactory = decoderFactory;
         _transcriptionService = transcriptionService;
         _recordingService = recordingService;
@@ -95,6 +101,21 @@ public class RtlDevice : BackgroundService, IRadioSource
         _toneDetector.OnToneDetected += (tone) => {
             _lastDetectedTone = tone.Name;
             UpdateState(_state with { LastDetectedTone = tone.Name });
+            RaiseRadioEvent(new RadioEvent
+            {
+                Type = "TONE_OUT",
+                Label = tone.Name,
+                ToneA = tone.FrequencyA,
+                ToneB = tone.FrequencyB
+            });
+        };
+
+        _mdc.OnPacket += (pkt) => {
+            // Treat the MDC1200 unit ID like a P25 radio ID: attribute it to the current
+            // transmission via the normal activity path so it lands on the recording's
+            // SourceID, rather than logging a separate signaling event.
+            if (_state.CurrentChannel != null)
+                HandleActivity(_state.CurrentChannel, src: pkt.UnitId, tone: pkt.IsEmergency ? "EMRG" : null);
         };
 
         _recordingService.OnNewLog += (log) => {
@@ -202,7 +223,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         await Task.Delay(250, token);
 
         int sampleRate = 2400000; 
-        var binPath = "/usr/bin/rtl_sdr";
+        var binPath = PlatformTools.RtlSdr;
         var args = $"-f {freq}M -s {sampleRate} -g {gain} -b 1 -";
 
         _logger.LogInformation($"Debug Spectrum HW: {binPath} {args}");
@@ -313,12 +334,26 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// <inheritdoc />
     public void StartDumping(string label)
     {
-        var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../data/samples");
+        var dataDir = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "../../data/samples"));
         if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
-        
-        _iqDumpPath = Path.Combine(dataDir, $"{label}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.iq");
-        _iqDumpStream = new FileStream(_iqDumpPath, FileMode.Create);
-        _logger.LogInformation($"Started IQ dumping to {_iqDumpPath}");
+
+        // Sanitize the user-supplied label to a safe filename token: this strips path
+        // separators and "." so it cannot traverse directories (path injection) and
+        // removes control characters/newlines that could forge log entries.
+        var safeLabel = System.Text.RegularExpressions.Regex.Replace(label ?? "", "[^A-Za-z0-9_-]", "_");
+        if (safeLabel.Length == 0) safeLabel = "dump";
+
+        var fileName = Path.GetFileName($"{safeLabel}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.iq");
+        var fullPath = Path.GetFullPath(Path.Combine(dataDir, fileName));
+
+        // Canonicalize and verify the resolved path stays inside the samples directory,
+        // so a crafted label can never escape it (path-injection barrier).
+        if (!fullPath.StartsWith(dataDir + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            throw new InvalidOperationException("Invalid IQ dump path");
+
+        _iqDumpPath = fullPath;
+        _iqDumpStream = new FileStream(fullPath, FileMode.Create);
+        _logger.LogInformation("Started IQ dumping to {Path}", _iqDumpPath);
     }
 
     /// <inheritdoc />
@@ -363,6 +398,24 @@ public class RtlDevice : BackgroundService, IRadioSource
     {
         _state = newState;
         OnStateChanged?.Invoke(_state);
+    }
+
+    /// <summary>
+    /// Stamps the current channel context onto a detected signaling event, persists it,
+    /// and broadcasts it to clients. Fire-and-forget persistence mirrors the recording path.
+    /// </summary>
+    private void RaiseRadioEvent(RadioEvent e)
+    {
+        e.Id = Guid.NewGuid().ToString();
+        e.Timestamp = DateTime.UtcNow.ToString("o");
+        e.Frequency = _state.CurrentChannel?.Frequency ?? _state.CurrentFrequency ?? 0;
+        e.AlphaTag = _state.CurrentChannel?.AlphaTag;
+
+        _db.AddRadioEventAsync(e).ContinueWith(
+            t => _logger.LogError(t.Exception, "Failed to persist radio event"),
+            TaskContinuationOptions.OnlyOnFaulted);
+
+        OnNewEvent?.Invoke(e);
     }
 
     private void StopScanning()
@@ -548,7 +601,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         // Start rtl_sdr wideband capture and distribute IQ to all pipelines
         await Task.Delay(250, token); // USB settle time
 
-        var binPath = "/usr/bin/rtl_sdr";
+        var binPath = PlatformTools.RtlSdr;
         var args = $"-f {bank.CenterFrequency:F3}M -s {sampleRate} -g 20 -b 1 -";
         _logger.LogInformation($"Parallel Scanner: {binPath} {args}");
 
@@ -733,6 +786,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     private void HandleParallelAudio(Channel channel, byte[] audio)
     {
         _toneDetector.ProcessAudio(audio);
+        _mdc.ProcessAudio(audio);
 
         // Convert mono s16le to stereo s16le with per-channel panning
         var (leftGain, rightGain) = _parallelPanMap.GetValueOrDefault(channel.Frequency, (0.5, 0.5));
@@ -867,7 +921,7 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         // Standard stable sample rate for R820T tuner
         int scanRate = 1024000; 
-        var binPath = "/usr/bin/rtl_sdr";
+        var binPath = PlatformTools.RtlSdr;
         // -b 1: Use 1 buffer to reduce latency and improve startup reliability
         var args = $"-f {centerFreqMhz:F3}M -s {scanRate} -g 20 -b 1 -";
 
@@ -1306,8 +1360,10 @@ public class RtlDevice : BackgroundService, IRadioSource
         if (_state.CurrentChannel != null)
         {
             _recordingService.StopRecording(_state.CurrentChannel, _lastDetectedTone);
+            // Clear the detected tone so it doesn't bleed onto the next transmission.
+            _lastDetectedTone = null;
         }
-        
+
         if (_currentDecoder != null)
         {
             _currentDecoder.Stop();
@@ -1351,8 +1407,9 @@ public class RtlDevice : BackgroundService, IRadioSource
                     }
                 }
 
-                // Analyze for Fire Tone Outs
+                // Analyze for Fire Tone Outs and MDC1200 signaling
                 _toneDetector.ProcessAudio(chunk);
+                _mdc.ProcessAudio(chunk);
                 OnAudio?.Invoke(chunk);
 
                 _recordingService.ProcessAudio(chunk);
@@ -1408,6 +1465,8 @@ public class RtlDevice : BackgroundService, IRadioSource
                 if (_state.CurrentChannel != null)
                 {
                     _recordingService.StopRecording(_state.CurrentChannel, _lastDetectedTone);
+                    // Clear the detected tone so it doesn't bleed onto the next transmission.
+                    _lastDetectedTone = null;
                 }
 
                 if (_manualOverride) UpdateState(_state with { Status = "MONITORING" });

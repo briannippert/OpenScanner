@@ -1,179 +1,289 @@
-using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
-using OpenScanner.Server;
 using OpenScanner.Server.Models;
 using OpenScanner.Server.Services;
 using OpenScanner.Server.Interfaces;
 using OpenScanner.Server.Devices;
-using OpenScanner.Server.Decoders;
 using Xunit;
 
 namespace OpenScanner.Tests;
 
+/// <summary>
+/// Deterministic tests for <see cref="MockRadioSource"/>. Simulation time is driven
+/// by a <see cref="FakeTimeProvider"/> and audio by <see cref="SyntheticAudioProvider"/>,
+/// so a multi-second transmission is exercised by advancing the fake clock instantly —
+/// no real waiting, no ffmpeg, no audio files.
+/// </summary>
 public class MockScenarioTests
 {
     private readonly ILogger<MockRadioSource> _logger;
-    private readonly Mock<IDatabase> _dbMock = new();
-    private readonly Mock<GpsService> _gpsServiceMock;
     private readonly Mock<ToneDetector> _toneDetectorMock;
-    private readonly Mock<ITranscriptionService> _transcriptionServiceMock = new();
     private readonly Mock<IRecordingService> _recordingServiceMock = new();
     private readonly Mock<IChannelService> _channelServiceMock = new();
+    private readonly Mock<IDatabase> _dbMock = new();
+    private readonly FakeTimeProvider _time = new();
     private readonly MockRadioSource _source;
 
     public MockScenarioTests()
     {
-        var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        var loggerFactory = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Warning));
         _logger = loggerFactory.CreateLogger<MockRadioSource>();
-        
-        _gpsServiceMock = new Mock<GpsService>(new Mock<ILogger<GpsService>>().Object);
         _toneDetectorMock = new Mock<ToneDetector>(_dbMock.Object, new Mock<ILogger<ToneDetector>>().Object);
-        
-        var services = new ServiceCollection();
-        services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Debug)); 
-        services.AddTransient<P25>();
-        services.AddTransient<NFM>();
-        services.AddTransient<AM>();
-        services.AddTransient<WFM>();
-        services.AddSingleton<IDecoderFactory, DecoderFactory>();
-        var serviceProvider = services.BuildServiceProvider();
-        var decoderFactory = serviceProvider.GetRequiredService<IDecoderFactory>();
 
-        // Setup default channels
-        var channels = new List<Channel>
+        // Default channel used by most tests.
+        _channelServiceMock.Setup(x => x.Channels).Returns(new List<Channel>
         {
-            new Channel(155.000, "Police", "Test Channel", "P25", "RM", "123 NAC", "Law", "TEST1")
-        };
-        _dbMock.Setup(db => db.GetAllChannelsAsync()).ReturnsAsync(channels);
-        _channelServiceMock.Setup(x => x.Channels).Returns(channels);
-        
-        _source = new MockRadioSource(
-            _logger, 
-            _dbMock.Object, 
-            _gpsServiceMock.Object, 
-            _toneDetectorMock.Object, 
-            decoderFactory,
-            _transcriptionServiceMock.Object,
-            _recordingServiceMock.Object,
-            _channelServiceMock.Object);
-    }
-
-    [Fact]
-    public async Task Scenario_DetectsSignal_AndDecodesP25()
-    {
-        // Arrange
-        var events = new List<ScenarioEvent>
-        {
-            new ScenarioEvent
-            {
-                Time = 1, // Start after 1 second
-                Frequency = 155.000,
-                AudioFile = "p25_raw.wav",
-                Duration = 4,
-                SourceId = 101,
-                TargetId = 202,
-                DecoderType = "P25"
-            }
-        };
-        _source.SetScenario(events);
-        
-        var audioReceived = false;
-        
-        _source.OnAudio += (data) => audioReceived = true;
-
-        // Act
-        _source.Start();
-        
-        // Wait for event start (1s) + processing/decoding
-        await Task.Delay(3000); 
-
-        // Assert - Should be receiving
-        var state = _source.GetState();
-        Assert.Equal("RECEIVING", state.Status);
-        Assert.True(audioReceived, "Should have received audio data");
-        
-        _source.Stop();
-    }
-
-    [Fact]
-    public async Task Scenario_DoesNotDetect_WhenOnDifferentHold()
-    {
-        // Arrange
-        var events = new List<ScenarioEvent>
-        {
-            new ScenarioEvent { Time = 0.5, Frequency = 155.000, AudioFile = "test_48k.wav", Duration = 2 }
-        };
-        _source.SetScenario(events);
-        
-        // Mock channel service to find the channel we are holding on
-        _channelServiceMock.Setup(x => x.Channels).Returns(new List<Channel> 
-        { 
-             new Channel(155.000, "Police", "Test Channel", "FM", "FM"),
-             new Channel(156.000, "Marine", "Marine Channel", "FM", "FM")
+            new(155.000, "Police", "Test Channel", "FM", "FM")
         });
-        
-        _source.Start();
-        
-        // Allow service to start and settle in SCANNING
-        await Task.Delay(100); 
-        
-        // Act
-        _source.HoldFrequency(156.000); // Hold on different freq (Status -> MONITORING)
-        
-        // Wait for event time (0.5s)
-        await Task.Delay(1500);
 
-        // Assert
-        var state = _source.GetState();
-        Assert.Equal("MONITORING", state.Status);
-        Assert.Equal(156.000, state.CurrentFrequency); // Should still be on hold freq
-        
-        _source.Stop();
+        _source = new MockRadioSource(
+            _logger,
+            _toneDetectorMock.Object,
+            new Mdc1200Decoder(new Mock<ILogger<Mdc1200Decoder>>().Object),
+            _dbMock.Object,
+            _recordingServiceMock.Object,
+            _channelServiceMock.Object,
+            new SyntheticAudioProvider(),
+            _time);
+    }
+
+    // --- Pure event-selection logic (no clock, no threads) ---
+
+    [Fact]
+    public void GetActiveEvent_ReturnsEventOnlyWithinItsWindow()
+    {
+        _source.SetScenario(new List<ScenarioEvent>
+        {
+            new() { Time = 1, Frequency = 155.0, Duration = 2 },
+            new() { Time = 5, Frequency = 156.0, Duration = 1 },
+        });
+
+        Assert.Null(_source.GetActiveEvent(0.99));
+        Assert.Equal(155.0, _source.GetActiveEvent(1.0)!.Frequency);
+        Assert.Equal(155.0, _source.GetActiveEvent(2.99)!.Frequency);
+        Assert.Null(_source.GetActiveEvent(3.0));           // end is exclusive
+        Assert.Null(_source.GetActiveEvent(4.5));
+        Assert.Equal(156.0, _source.GetActiveEvent(5.0)!.Frequency);
+        Assert.Null(_source.GetActiveEvent(6.0));
     }
 
     [Fact]
-    public async Task Scenario_PlaysGoldenSample_Correctly()
+    public void ScenarioLength_IsEndOfLastEvent()
     {
-        // Arrange
-        var events = new List<ScenarioEvent>
+        _source.SetScenario(new List<ScenarioEvent>
         {
-            new ScenarioEvent
-            {
-                Time = 0.5,
-                Frequency = 155.000,
-                AudioFile = "test_8k.wav",
-                Duration = 4.8,
-                SourceId = 999,
-                TargetId = 888
-            }
-        };
-        _source.SetScenario(events);
-        
-        _channelServiceMock.Setup(x => x.Channels).Returns(new List<Channel> 
-        { 
-             new Channel(155.000, "Police", "Test Channel", "FM", "FM")
+            new() { Time = 1, Frequency = 155.0, Duration = 2 },   // ends at 3
+            new() { Time = 5, Frequency = 156.0, Duration = 4 },   // ends at 9
+        });
+
+        Assert.Equal(9, _source.ScenarioLength);
+    }
+
+    // --- End-to-end simulation, deterministically clocked ---
+
+    [Fact]
+    public async Task ScanMode_DetectsSignal_EmitsAudio_ThenResumesScanning()
+    {
+        _source.SetScenario(new List<ScenarioEvent>
+        {
+            new() { Time = 1, Frequency = 155.000, Duration = 4, SourceId = 101, TargetId = 202 }
         });
 
         var audioChunks = 0;
-        _source.OnAudio += (data) => audioChunks++;
+        _source.OnAudio += _ => Interlocked.Increment(ref audioChunks);
 
-        // Act
-        _source.Start();
-        
-        await Task.Delay(100); // Allow start
-        _source.HoldFrequency(155.000); // Lock on immediately
+        await StartAndSettle();
 
-        // Wait for event start time (0.5s) + playback (File is ~4.8s) + buffer
-        await Task.Delay(6000);
+        // Jump to the event: scanner should lock on and stream its audio.
+        await AdvanceAndSettle(TimeSpan.FromSeconds(1));
 
-        // Assert
-        Assert.True(audioChunks > 10, $"Should have received audio chunks (Got {audioChunks})");
-        
+        var state = _source.GetState();
+        Assert.Equal("RECEIVING", state.Status);
+        Assert.Equal(155.000, state.CurrentFrequency);
+        Assert.Equal(101, state.SourceID);
+        Assert.Equal(202, state.TargetID);
+        Assert.True(audioChunks > 0, $"expected audio chunks, got {audioChunks}");
+
+        // Jump past the end: scanner should drop the signal and resume scanning.
+        await AdvanceAndSettle(TimeSpan.FromSeconds(4));
+
+        Assert.Equal("SCANNING", _source.GetState().Status);
+        _recordingServiceMock.Verify(r => r.StopRecording(It.IsAny<Channel>(), It.IsAny<string?>()), Times.Once);
+
+        await _source.StopAsync();
+    }
+
+    [Fact]
+    public async Task ManualHold_OnDifferentFrequency_DoesNotReceive()
+    {
+        _source.SetScenario(new List<ScenarioEvent>
+        {
+            new() { Time = 0.5, Frequency = 155.000, Duration = 2 }
+        });
+        _channelServiceMock.Setup(x => x.Channels).Returns(new List<Channel>
+        {
+            new(155.000, "Police", "Test Channel", "FM", "FM"),
+            new(156.000, "Marine", "Marine Channel", "FM", "FM")
+        });
+
+        var audioChunks = 0;
+        _source.OnAudio += _ => Interlocked.Increment(ref audioChunks);
+
+        await StartAndSettle();
+        _source.HoldFrequency(156.000); // Hold on a different frequency.
+
+        await AdvanceAndSettle(TimeSpan.FromSeconds(0.5)); // Event fires on 155.
+
         var state = _source.GetState();
         Assert.Equal("MONITORING", state.Status);
+        Assert.Equal(156.000, state.CurrentFrequency);
+        Assert.Equal(0, audioChunks);
 
-        _source.Stop();
+        await _source.StopAsync();
+    }
+
+    [Fact]
+    public async Task ManualHold_OnMatchingFrequency_ReceivesAndBuffersPreRoll()
+    {
+        _source.SetScenario(new List<ScenarioEvent>
+        {
+            new() { Time = 0.5, Frequency = 155.000, Duration = 4.8, SourceId = 999, TargetId = 888 }
+        });
+
+        var audioChunks = 0;
+        _source.OnAudio += _ => Interlocked.Increment(ref audioChunks);
+
+        await StartAndSettle();
+        _source.HoldFrequency(155.000);
+
+        await AdvanceAndSettle(TimeSpan.FromSeconds(0.5));
+
+        Assert.True(audioChunks > 10, $"expected steady audio, got {audioChunks}");
+        Assert.Equal("MONITORING", _source.GetState().Status);
+        Assert.NotEmpty(_source.GetPreRollBuffer());
+
+        await _source.StopAsync();
+    }
+
+    [Fact]
+    public async Task ScanMode_AvoidedFrequency_IsSkipped()
+    {
+        _source.SetScenario(new List<ScenarioEvent>
+        {
+            new() { Time = 1, Frequency = 155.000, Duration = 3 }
+        });
+
+        var audioChunks = 0;
+        _source.OnAudio += _ => Interlocked.Increment(ref audioChunks);
+
+        await StartAndSettle();
+        _source.AvoidFrequency(155.000, 10); // Avoid it for the whole event.
+
+        await AdvanceAndSettle(TimeSpan.FromSeconds(1));
+
+        Assert.Equal("SCANNING", _source.GetState().Status);
+        Assert.Equal(0, audioChunks);
+
+        await _source.StopAsync();
+    }
+
+    // --- Edge cases ---
+
+    [Fact]
+    public void GetActiveEvent_OverlappingEvents_ReturnsFirstMatch()
+    {
+        _source.SetScenario(new List<ScenarioEvent>
+        {
+            new() { Time = 1, Frequency = 155.0, Duration = 5 },
+            new() { Time = 2, Frequency = 156.0, Duration = 5 }, // overlaps the first
+        });
+
+        Assert.Equal(155.0, _source.GetActiveEvent(3.0)!.Frequency);
+    }
+
+    [Fact]
+    public void ScenarioLength_EmptyScenario_IsZero()
+    {
+        _source.SetScenario(new List<ScenarioEvent>());
+        Assert.Equal(0, _source.ScenarioLength);
+        Assert.Null(_source.GetActiveEvent(0));
+    }
+
+    [Fact]
+    public void IsAvoided_IsTrueWithinWindow_AndExpiresAfterDuration()
+    {
+        _source.AvoidFrequency(155.0, 2);
+
+        Assert.True(_source.IsAvoided(155.0));
+        Assert.False(_source.IsAvoided(156.0)); // only the avoided frequency
+
+        _time.Advance(TimeSpan.FromSeconds(2.5));
+        Assert.False(_source.IsAvoided(155.0)); // window expired
+    }
+
+    [Fact]
+    public async Task ScanMode_AfterAvoidExpires_ReceivesAgain()
+    {
+        _source.SetScenario(new List<ScenarioEvent>
+        {
+            new() { Time = 5, Frequency = 155.000, Duration = 3 }
+        });
+
+        await StartAndSettle();
+        _source.AvoidFrequency(155.000, 2); // expires well before the event at t=5
+
+        await AdvanceAndSettle(TimeSpan.FromSeconds(5));
+
+        Assert.Equal("RECEIVING", _source.GetState().Status);
+
+        await _source.StopAsync();
+    }
+
+    [Fact]
+    public async Task ManualHold_AvoidIsIgnored_StillReceives()
+    {
+        _source.SetScenario(new List<ScenarioEvent>
+        {
+            new() { Time = 1, Frequency = 155.000, Duration = 3 }
+        });
+
+        var audioChunks = 0;
+        _source.OnAudio += _ => Interlocked.Increment(ref audioChunks);
+
+        await StartAndSettle();
+        _source.HoldFrequency(155.000);
+        _source.AvoidFrequency(155.000, 100); // avoid is a scan-mode concept only
+
+        await AdvanceAndSettle(TimeSpan.FromSeconds(1));
+
+        Assert.Equal("MONITORING", _source.GetState().Status);
+        Assert.True(audioChunks > 0, "manual hold should still receive an avoided frequency");
+
+        await _source.StopAsync();
+    }
+
+    // --- Helpers: drive the loop deterministically via the fake clock ---
+
+    private async Task StartAndSettle()
+    {
+        _source.Start();
+        await WaitFor(() => _source.ParkCount >= 1);
+    }
+
+    private async Task AdvanceAndSettle(TimeSpan span)
+    {
+        var before = _source.ParkCount;
+        _time.Advance(span);
+        await WaitFor(() => _source.ParkCount > before);
+    }
+
+    private static async Task WaitFor(Func<bool> condition, int timeoutMs = 2000)
+    {
+        var sw = Stopwatch.StartNew();
+        while (!condition() && sw.ElapsedMilliseconds < timeoutMs)
+            await Task.Delay(2);
+        Assert.True(condition(), "loop did not reach the expected state in time");
     }
 }

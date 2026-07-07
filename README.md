@@ -59,6 +59,41 @@ For API documentation, visit:
 - **Full Install**: `./scripts/install_service.sh` (Builds everything and installs the systemd service).
 - **Dependencies Only**: `./scripts/install_service.sh --deps-only` (Installs all required system libraries, radio drivers, and Whisper models, then exits without building the app or installing the service).
 
+## Running on macOS
+
+OpenScanner also runs on macOS (Apple Silicon and Intel) for development and desktop use. The macOS setup script uses **Homebrew** to install dependencies, builds whisper.cpp and DSD-FME from source, builds the app, and prints how to run it. macOS has no systemd, so it does **not** install a background service.
+
+```bash
+git clone https://github.com/briannippert/OpenScanner.git
+cd OpenScanner
+chmod +x scripts/*.sh
+
+# Installs deps (Homebrew + .NET 10 + whisper.cpp + dsd-fme) and builds the app
+./scripts/install_mac.sh
+
+# Dependencies only:
+./scripts/install_mac.sh --deps-only
+```
+
+Then run the app and open `http://localhost:8080` (Swagger at `/swagger`):
+
+```bash
+cd server/OpenScanner.Server
+dotnet run -c Release --urls "http://0.0.0.0:8080"
+```
+
+**Requirements:** [Homebrew](https://brew.sh) and macOS 13+. The script installs the rest (`rtl-sdr`, `ffmpeg`, `coreutils`, the .NET 10 SDK, etc.).
+
+**No SDR hardware?** OpenScanner ships with a mock radio source so you can run the full UI without a dongle. Set the provider to `Mock` in `server/OpenScanner.Server/appsettings.Development.json`:
+
+```json
+"Radio": { "Provider": "Mock" }
+```
+
+**GPS (optional):** OpenScanner connects to `gpsd` on `localhost:2947`; install and start it via `brew install gpsd` if you want live location.
+
+> **Note on external tools:** OpenScanner resolves `rtl_sdr`, `rtl_fm`, `ffmpeg`, and `dsd-fme` from your `PATH` and common install locations (Homebrew's `/opt/homebrew/bin` and `/usr/local/bin`, plus the standard Linux paths), so the same code runs on both the Raspberry Pi and macOS.
+
 ## Updating
 
 To update OpenScanner to the latest version, simply navigate to the project directory and re-run the installation script. This will pull the latest changes, rebuild components, and restart the service:

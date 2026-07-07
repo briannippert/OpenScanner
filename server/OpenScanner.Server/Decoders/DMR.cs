@@ -32,9 +32,9 @@ public class DMR : DSDBase
         string rtlMode = "fm";
         string dsdArgs = "-fs -ma -V 1"; // DMR TDMA Simplex, auto modulation, slot 1
 
-        string source = InputSource ?? $"rtl_fm -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
+        string source = InputSource ?? $"{PlatformTools.RtlFm} -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
 
-        return $"stdbuf -o0 {source} | stdbuf -i0 -o0 /usr/local/bin/dsd-fme {dsdArgs} -i - -o - -s {outputRate} | stdbuf -o0 /usr/bin/ffmpeg -f s16le -ar {dsdOutputRate} -ac 2 -probesize 32 -analyzeduration 0 -i - -af volume=2.0 -f s16le -ar 48000 -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
+        return $"{PlatformTools.Stdbuf("-o0")}{source} | {PlatformTools.Stdbuf("-i0 -o0")}{PlatformTools.DsdFme} {dsdArgs} -i - -o - -s {outputRate} | {PlatformTools.Stdbuf("-o0")}{PlatformTools.Ffmpeg} -f s16le -ar {dsdOutputRate} -ac 2 -probesize 32 -analyzeduration 0 -i - -af volume=2.0 -f s16le -ar 48000 -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
     }
 
     protected override void ParseMetadata(string line)

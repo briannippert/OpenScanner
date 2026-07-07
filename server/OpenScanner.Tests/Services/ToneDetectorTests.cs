@@ -95,6 +95,57 @@ public class ToneDetectorTests
         Assert.False(fired);
     }
 
+    [Fact]
+    public async Task Detects_SingleTone_WhenSustained()
+    {
+        // A tone set with no Tone B is a single (long) tone page.
+        var toneSet = new FireToneSet { Name = "Single Station", FrequencyA = 1010, FrequencyB = 0 };
+        _dbMock.Setup(db => db.GetAllFireTonesAsync()).ReturnsAsync(new[] { toneSet });
+
+        var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object);
+        var reload = DateTime.UtcNow.AddSeconds(2);
+        while (detector.ToneCount == 0 && DateTime.UtcNow < reload)
+            await Task.Delay(10);
+
+        int fireCount = 0;
+        FireToneSet? detected = null;
+        detector.OnToneDetected += (t) => { detected = t; fireCount++; };
+
+        // Feed 100ms tone chunks continuously for ~1.5s, mimicking live audio arrival.
+        var chunk = GenerateSineWave(1010, 0.1, 48000);
+        var deadline = DateTime.UtcNow.AddSeconds(1.6);
+        while (DateTime.UtcNow < deadline)
+        {
+            detector.ProcessAudio(chunk);
+            await Task.Delay(80);
+        }
+
+        Assert.NotNull(detected);
+        Assert.Equal("Single Station", detected!.Name);
+        // A single sustained page must fire exactly once, not repeatedly per chunk.
+        Assert.Equal(1, fireCount);
+    }
+
+    [Fact]
+    public async Task SingleTone_TooShort_DoesNotFire()
+    {
+        var toneSet = new FireToneSet { Name = "Single Station", FrequencyA = 1010, FrequencyB = 0 };
+        _dbMock.Setup(db => db.GetAllFireTonesAsync()).ReturnsAsync(new[] { toneSet });
+
+        var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object);
+        var reload = DateTime.UtcNow.AddSeconds(2);
+        while (detector.ToneCount == 0 && DateTime.UtcNow < reload)
+            await Task.Delay(10);
+
+        bool fired = false;
+        detector.OnToneDetected += (_) => fired = true;
+
+        // A brief burst (well under the 1s minimum) must not fire.
+        detector.ProcessAudio(GenerateSineWave(1010, 0.1, 48000));
+
+        Assert.False(fired);
+    }
+
     private byte[] GenerateSineWave(double freq, double durationSec, int sampleRate)
     {
         int samples = (int)(sampleRate * durationSec);

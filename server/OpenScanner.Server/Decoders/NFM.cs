@@ -19,7 +19,7 @@ public class NFM : DSDBase
         
         // NFM decoder with optimized squelch and gain settings
         // Simplified pipeline: no parallel MDC processing to avoid audio artifacts
-        return $"stdbuf -o0 rtl_fm -f {channel.Frequency}M -M fm -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 -";
+        return $"{PlatformTools.Stdbuf("-o0")}{PlatformTools.RtlFm} -f {channel.Frequency}M -M fm -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 -";
     }
 
     protected override Task OnStarted(CancellationToken token)

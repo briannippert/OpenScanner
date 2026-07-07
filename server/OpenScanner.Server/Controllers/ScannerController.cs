@@ -88,14 +88,146 @@ public class ScannerController : ControllerBase
     }
 
     /// <summary>
+    /// Retrieves the current real-time state of the scanner.
+    /// </summary>
+    /// <returns>The current <see cref="ScannerState"/>.</returns>
+    [HttpGet("scanner")]
+    [ProducesResponseType(typeof(ScannerState), StatusCodes.Status200OK)]
+    public ScannerState GetStatus() => _radio.GetState();
+
+    /// <summary>
+    /// Turns the scanner on (start) or off (stop).
+    /// </summary>
+    /// <param name="request">Whether the scanner should be enabled.</param>
+    [HttpPut("scanner/power")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult SetPower([FromBody] PowerRequest request)
+    {
+        if (request.Enabled) _radio.Start();
+        else _radio.Stop();
+        return Ok();
+    }
+
+    /// <summary>
+    /// Holds the scanner on a specific frequency, un-avoiding it if necessary.
+    /// </summary>
+    /// <param name="request">The frequency to hold, in MHz.</param>
+    [HttpPut("scanner/hold")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> Hold([FromBody] HoldRequest request)
+    {
+        await HoldFrequencyInternal(request.Frequency);
+        return Ok();
+    }
+
+    /// <summary>
+    /// Releases any active hold and resumes normal scanning.
+    /// </summary>
+    [HttpDelete("scanner/hold")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult ReleaseHold()
+    {
+        _radio.ResumeScan();
+        return Ok();
+    }
+
+    /// <summary>
+    /// Sets the squelch threshold.
+    /// </summary>
+    /// <param name="request">The squelch threshold, in dB.</param>
+    [HttpPut("scanner/squelch")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult SetSquelch([FromBody] SquelchRequest request)
+    {
+        _radio.SetSquelch(request.Value);
+        return Ok();
+    }
+
+    /// <summary>
+    /// Temporarily avoids a frequency for a given duration.
+    /// </summary>
+    /// <param name="request">The frequency to avoid and how long to avoid it.</param>
+    [HttpPost("scanner/avoids")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    public IActionResult AddAvoid([FromBody] AvoidRequest request)
+    {
+        _radio.AvoidFrequency(request.Frequency, request.Duration);
+        return Accepted();
+    }
+
+    /// <summary>
+    /// Starts recording raw IQ data to a file.
+    /// </summary>
+    /// <param name="request">An optional label for the dump filename.</param>
+    [HttpPost("scanner/iq-dump")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult StartIqDump([FromBody] IqDumpRequest? request)
+    {
+        _radio.StartDumping(request?.Label ?? "sample");
+        return Ok();
+    }
+
+    /// <summary>
+    /// Stops recording raw IQ data.
+    /// </summary>
+    [HttpDelete("scanner/iq-dump")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult StopIqDump()
+    {
+        _radio.StopDumping();
+        return Ok();
+    }
+
+    /// <summary>
+    /// Starts high-bandwidth RF spectrum debug mode.
+    /// </summary>
+    /// <param name="request">The center frequency (MHz) and optional hardware gain (dB).</param>
+    [HttpPost("scanner/debug-spectrum")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult StartDebugSpectrum([FromBody] DebugSpectrumRequest request)
+    {
+        _radio.StartDebugSpectrum(request.Frequency, request.Gain);
+        return Ok();
+    }
+
+    /// <summary>
+    /// Holds the scanner on a frequency, un-avoiding a matching channel first.
+    /// </summary>
+    private async Task HoldFrequencyInternal(double frequency)
+    {
+        var channels = await _db.GetAllChannelsAsync();
+        foreach (var ch in channels)
+        {
+            if (Math.Abs(ch.Frequency - frequency) < 0.0001)
+            {
+                if (ch.Avoid)
+                {
+                    ch.Avoid = false;
+                    await _db.UpdateChannelAsync(ch);
+                    _radio.ReloadChannels();
+                }
+                break;
+            }
+        }
+        _radio.HoldFrequency(frequency);
+    }
+
+    /// <summary>
     /// Sends a direct control command to the scanner service.
     /// </summary>
+    /// <remarks>
+    /// Deprecated: use the resource-oriented <c>/api/scanner/*</c> endpoints instead.
+    /// This action-dispatch endpoint is retained for backward compatibility.
+    /// </remarks>
     /// <param name="body">JSON payload with 'action' (start, stop, scan, hold, set_squelch) and optional parameters.</param>
     [HttpPost("control")]
+    [Obsolete("Use the resource-oriented /api/scanner/* endpoints instead.")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ControlScanner([FromBody] JsonElement body)
     {
+        Response.Headers.Append("Deprecation", "true");
+        Response.Headers.Append("Link", "</api/scanner>; rel=\"successor-version\"");
         if (!body.TryGetProperty("action", out var actionProp))
             return BadRequest("Action is required");
 
@@ -132,22 +264,7 @@ public class ScannerController : ControllerBase
                 
                 if (targetFreq.HasValue)
                 {
-                    // Check if channel is avoided, if so, un-avoid it
-                    var channels = await _db.GetAllChannelsAsync();
-                    foreach (var ch in channels)
-                    {
-                        if (Math.Abs(ch.Frequency - targetFreq.Value) < 0.0001)
-                        {
-                            if (ch.Avoid)
-                            {
-                                ch.Avoid = false;
-                                await _db.UpdateChannelAsync(ch);
-                                _radio.ReloadChannels();
-                            }
-                            break;
-                        }
-                    }
-                    _radio.HoldFrequency(targetFreq.Value);
+                    await HoldFrequencyInternal(targetFreq.Value);
                 }
                 break;
             case "set_squelch":
@@ -190,3 +307,21 @@ public class ScannerController : ControllerBase
         return Ok();
     }
 }
+
+/// <summary>Request to turn the scanner on or off.</summary>
+public record PowerRequest(bool Enabled);
+
+/// <summary>Request to hold the scanner on a frequency (MHz).</summary>
+public record HoldRequest(double Frequency);
+
+/// <summary>Request to set the squelch threshold (dB).</summary>
+public record SquelchRequest(double Value);
+
+/// <summary>Request to temporarily avoid a frequency (MHz) for a duration (seconds).</summary>
+public record AvoidRequest(double Frequency, double Duration = 10);
+
+/// <summary>Request to start an IQ dump with an optional filename label.</summary>
+public record IqDumpRequest(string? Label = null);
+
+/// <summary>Request to start RF spectrum debug mode at a center frequency (MHz) with optional gain (dB).</summary>
+public record DebugSpectrumRequest(double Frequency, double? Gain = null);

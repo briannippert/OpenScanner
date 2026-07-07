@@ -23,7 +23,8 @@ import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import SettingsIcon from '@mui/icons-material/Settings';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import MonitorIcon from '@mui/icons-material/Monitor';
-import type { ScannerState, Channel, CallLog, FireToneSet } from './types';
+import type { ScannerState, Channel, CallLog, FireToneSet, RadioEvent } from './types';
+import EventLog from './components/EventLog';
 
 const darkTheme = createTheme({
   palette: {
@@ -73,6 +74,7 @@ function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [fireTones, setFireTones] = useState<FireToneSet[]>([]);
   const [callLog, setCallLog] = useState<CallLog[]>([]);
+  const [radioEvents, setRadioEvents] = useState<RadioEvent[]>([]);
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | undefined>(undefined);
   const [isManagerOpen, setIsManagerOpen] = useState(false);
   const [isToneManagerOpen, setIsToneManagerOpen] = useState(false);
@@ -251,22 +253,30 @@ function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Helper to send commands
-  const sendCommand = (action: string, frequency?: number, value?: number) => {
-    fetch('/api/control', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, frequency, value })
+  // Low-level REST helper for scanner control endpoints
+  const scannerApi = (path: string, method: string, body?: object) =>
+    fetch(`/api/scanner/${path}`, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
     }).catch(err => console.error("Command failed:", err));
+
+  // Helper to send commands, mapping legacy action names onto REST endpoints
+  const sendCommand = (action: string, frequency?: number, value?: number) => {
+    switch (action) {
+        case 'scan': return scannerApi('hold', 'DELETE');
+        case 'hold': return scannerApi('hold', 'PUT', { frequency });
+        case 'start': return scannerApi('power', 'PUT', { enabled: true });
+        case 'stop': return scannerApi('power', 'PUT', { enabled: false });
+        case 'set_squelch': return scannerApi('squelch', 'PUT', { value });
+        case 'debug_spectrum': return scannerApi('debug-spectrum', 'POST', { frequency, gain: value });
+        default: console.error("Unknown command:", action);
+    }
   };
 
   const handleSkip = (freq?: number) => {
     if (freq) {
-        fetch('/api/control', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'avoid', frequency: freq, duration: 10 })
-        }).catch(err => console.error("Skip command failed:", err));
+        scannerApi('avoids', 'POST', { frequency: freq, duration: 10 });
     } else {
         sendCommand('scan');
     }
@@ -416,6 +426,15 @@ function App() {
       .catch(err => console.error("Failed to fetch fire tones:", err));
   };
 
+  const clearEvents = async () => {
+    try {
+      await fetch(`/api/events`, { method: 'DELETE' });
+      setRadioEvents([]);
+    } catch (err) {
+      console.error("Failed to clear events:", err);
+    }
+  };
+
   const handleSaveChannel = async (channel: Channel) => {
     const baseUrl = `/api/channels`;
 
@@ -494,6 +513,11 @@ function App() {
       .then(data => setCallLog(data))
       .catch(err => console.error("Failed to fetch history:", err));
 
+    fetch(`/api/events`)
+      .then(res => res.json())
+      .then(data => setRadioEvents(data))
+      .catch(err => console.error("Failed to fetch events:", err));
+
     const connectControlWs = () => {
         wsControl.current = new WebSocket(wsControlUrl);
         
@@ -525,6 +549,12 @@ function App() {
                     } else {
                       return [newEntry, ...log].slice(0, 100);
                     }
+                  });
+                } else if (message.type === 'NEW_EVENT') {
+                  const newEvent = message.payload as RadioEvent;
+                  setRadioEvents(events => {
+                    if (events.some(x => x.id === newEvent.id)) return events;
+                    return [newEvent, ...events].slice(0, 100);
                   });
                 } else if (message.type === 'ERROR') {
                   setErrorMsg(message.payload);
@@ -993,11 +1023,12 @@ function App() {
                 {/* Right Column: Transmission Log (Expanded) */}
                 <Grid size={{ xs: 12, md: 8, lg: 9 }} sx={{ height: { xs: '500px', md: '100%' }, overflow: 'hidden' }}>
                     <Paper sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: '#0a0a0a', border: '1px solid #222', borderRadius: 2, overflowY: 'auto' }}>
-                        <TransmissionLog 
-                            liveLogs={callLog} 
-                            playingId={playingId} 
-                            onPlay={playRawAudio} 
-                            onDelete={deleteEntry} 
+                        {fireTones.length > 0 && <EventLog events={radioEvents} onClear={clearEvents} />}
+                        <TransmissionLog
+                            liveLogs={callLog}
+                            playingId={playingId}
+                            onPlay={playRawAudio}
+                            onDelete={deleteEntry}
                         />
                     </Paper>
                 </Grid>

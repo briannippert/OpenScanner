@@ -291,18 +291,18 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                 />
                             )}
                             {state.lastDetectedTone && (
-                                <Chip 
-                                    label={`ALERT: ${state.lastDetectedTone}`} 
-                                    size="small" 
+                                <Chip
+                                    label={`ALERT: ${state.lastDetectedTone}`}
+                                    size="small"
                                     color="error"
                                     variant="filled"
-                                    sx={{ 
+                                    sx={{
                                         height: 20,
                                         fontSize: '0.7rem',
                                         fontWeight: 'bold',
                                         fontFamily: 'monospace',
                                         animation: 'pulse 1s infinite'
-                                    }} 
+                                    }}
                                 />
                             )}
                         </Box>

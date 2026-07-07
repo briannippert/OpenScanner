@@ -31,6 +31,7 @@ public class MixedScanTests
             logger.Object,
             gps.Object,
             toneDetector.Object,
+            new Mdc1200Decoder(new Mock<ILogger<Mdc1200Decoder>>().Object),
             decoderFactory.Object,
             transcription.Object,
             recording.Object,
@@ -190,6 +191,7 @@ public class MixedScanTests
 
         var device = new RtlDevice(
             db.Object, logger.Object, gps.Object, toneDetector.Object,
+            new Mdc1200Decoder(new Mock<ILogger<Mdc1200Decoder>>().Object),
             decoderFactory.Object, transcription.Object, recording.Object, channelService.Object);
 
         // Lock onto the channel — this triggers StartDecoding after a 150ms delay
@@ -250,6 +252,7 @@ public class MixedScanTests
 
         var device = new RtlDevice(
             db.Object, logger.Object, gps.Object, toneDetector.Object,
+            new Mdc1200Decoder(new Mock<ILogger<Mdc1200Decoder>>().Object),
             decoderFactory.Object, transcription.Object, recording.Object, channelService.Object);
 
         device.HoldFrequency(155.0);
