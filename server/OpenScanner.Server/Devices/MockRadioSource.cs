@@ -22,6 +22,8 @@ public class MockRadioSource : BackgroundService, IRadioSource
 
     private readonly ILogger<MockRadioSource> _logger;
     private readonly ToneDetector _toneDetector;
+    private readonly Mdc1200Decoder _mdc;
+    private readonly IDatabase _db;
     private readonly IRecordingService _recordingService;
     private readonly IChannelService _channelService;
     private readonly IMockAudioProvider _audioProvider;
@@ -30,6 +32,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
     public event Action<ScannerState>? OnStateChanged;
     public event Action<CallLog>? OnNewLog;
     public event Action<byte[]>? OnAudio;
+    public event Action<RadioEvent>? OnNewEvent;
 
     private ScannerState _state = new("IDLE", 0);
     private List<ScenarioEvent> _scenarioEvents = new();
@@ -53,6 +56,8 @@ public class MockRadioSource : BackgroundService, IRadioSource
     public MockRadioSource(
         ILogger<MockRadioSource> logger,
         ToneDetector toneDetector,
+        Mdc1200Decoder mdc,
+        IDatabase db,
         IRecordingService recordingService,
         IChannelService channelService,
         IMockAudioProvider audioProvider,
@@ -60,6 +65,8 @@ public class MockRadioSource : BackgroundService, IRadioSource
     {
         _logger = logger;
         _toneDetector = toneDetector;
+        _mdc = mdc;
+        _db = db;
         _recordingService = recordingService;
         _channelService = channelService;
         _audioProvider = audioProvider;
@@ -67,7 +74,42 @@ public class MockRadioSource : BackgroundService, IRadioSource
 
         _recordingService.OnNewLog += log => OnNewLog?.Invoke(log);
 
+        _toneDetector.OnToneDetected += tone =>
+        {
+            UpdateState(_state with { LastDetectedTone = tone.Name });
+            RaiseRadioEvent(new RadioEvent
+            {
+                Type = "TONE_OUT",
+                Label = tone.Name,
+                ToneA = tone.FrequencyA,
+                ToneB = tone.FrequencyB
+            });
+        };
+
+        _mdc.OnPacket += pkt =>
+        {
+            // Attribute the MDC1200 unit ID to the current transmission like a P25 radio ID.
+            UpdateState(_state with { SourceID = pkt.UnitId });
+        };
+
         LoadDefaultScenario();
+    }
+
+    /// <summary>
+    /// Stamps channel context onto a detected signaling event, persists it, and broadcasts it.
+    /// </summary>
+    private void RaiseRadioEvent(RadioEvent e)
+    {
+        e.Id = Guid.NewGuid().ToString();
+        e.Timestamp = _timeProvider.GetUtcNow().UtcDateTime.ToString("o");
+        e.Frequency = _state.CurrentChannel?.Frequency ?? _state.CurrentFrequency ?? 0;
+        e.AlphaTag = _state.CurrentChannel?.AlphaTag;
+
+        _db.AddRadioEventAsync(e).ContinueWith(
+            t => _logger.LogError(t.Exception, "Failed to persist radio event"),
+            TaskContinuationOptions.OnlyOnFaulted);
+
+        OnNewEvent?.Invoke(e);
     }
 
     /// <summary>Number of times the simulation loop has parked waiting for time to pass.</summary>
@@ -325,6 +367,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
         OnAudio?.Invoke(chunk);
         _recordingService.ProcessAudio(chunk);
         _toneDetector.ProcessAudio(chunk);
+        _mdc.ProcessAudio(chunk);
         AppendPreRoll(chunk);
     }
 

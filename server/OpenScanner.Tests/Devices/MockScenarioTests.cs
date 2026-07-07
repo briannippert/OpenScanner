@@ -41,6 +41,8 @@ public class MockScenarioTests
         _source = new MockRadioSource(
             _logger,
             _toneDetectorMock.Object,
+            new Mdc1200Decoder(new Mock<ILogger<Mdc1200Decoder>>().Object),
+            _dbMock.Object,
             _recordingServiceMock.Object,
             _channelServiceMock.Object,
             new SyntheticAudioProvider(),
@@ -183,6 +185,81 @@ public class MockScenarioTests
 
         Assert.Equal("SCANNING", _source.GetState().Status);
         Assert.Equal(0, audioChunks);
+
+        await _source.StopAsync();
+    }
+
+    // --- Edge cases ---
+
+    [Fact]
+    public void GetActiveEvent_OverlappingEvents_ReturnsFirstMatch()
+    {
+        _source.SetScenario(new List<ScenarioEvent>
+        {
+            new() { Time = 1, Frequency = 155.0, Duration = 5 },
+            new() { Time = 2, Frequency = 156.0, Duration = 5 }, // overlaps the first
+        });
+
+        Assert.Equal(155.0, _source.GetActiveEvent(3.0)!.Frequency);
+    }
+
+    [Fact]
+    public void ScenarioLength_EmptyScenario_IsZero()
+    {
+        _source.SetScenario(new List<ScenarioEvent>());
+        Assert.Equal(0, _source.ScenarioLength);
+        Assert.Null(_source.GetActiveEvent(0));
+    }
+
+    [Fact]
+    public void IsAvoided_IsTrueWithinWindow_AndExpiresAfterDuration()
+    {
+        _source.AvoidFrequency(155.0, 2);
+
+        Assert.True(_source.IsAvoided(155.0));
+        Assert.False(_source.IsAvoided(156.0)); // only the avoided frequency
+
+        _time.Advance(TimeSpan.FromSeconds(2.5));
+        Assert.False(_source.IsAvoided(155.0)); // window expired
+    }
+
+    [Fact]
+    public async Task ScanMode_AfterAvoidExpires_ReceivesAgain()
+    {
+        _source.SetScenario(new List<ScenarioEvent>
+        {
+            new() { Time = 5, Frequency = 155.000, Duration = 3 }
+        });
+
+        await StartAndSettle();
+        _source.AvoidFrequency(155.000, 2); // expires well before the event at t=5
+
+        await AdvanceAndSettle(TimeSpan.FromSeconds(5));
+
+        Assert.Equal("RECEIVING", _source.GetState().Status);
+
+        await _source.StopAsync();
+    }
+
+    [Fact]
+    public async Task ManualHold_AvoidIsIgnored_StillReceives()
+    {
+        _source.SetScenario(new List<ScenarioEvent>
+        {
+            new() { Time = 1, Frequency = 155.000, Duration = 3 }
+        });
+
+        var audioChunks = 0;
+        _source.OnAudio += _ => Interlocked.Increment(ref audioChunks);
+
+        await StartAndSettle();
+        _source.HoldFrequency(155.000);
+        _source.AvoidFrequency(155.000, 100); // avoid is a scan-mode concept only
+
+        await AdvanceAndSettle(TimeSpan.FromSeconds(1));
+
+        Assert.Equal("MONITORING", _source.GetState().Status);
+        Assert.True(audioChunks > 0, "manual hold should still receive an avoided frequency");
 
         await _source.StopAsync();
     }

@@ -245,6 +245,64 @@ public class FireToneSet
 }
 
 /// <summary>
+/// A decoded signaling event surfaced to the event log — either a fire tone-out
+/// (two-tone / Quick Call II) detection or an MDC1200 data packet.
+/// </summary>
+public class RadioEvent
+{
+    /// <summary>Unique identifier for the event.</summary>
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>Timestamp of the detection (ISO 8601).</summary>
+    public string Timestamp { get; set; } = string.Empty;
+
+    /// <summary>Event discriminator: "TONE_OUT", "MDC_PTT", or "MDC_EMERGENCY".</summary>
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>Human-friendly label (tone set name, or MDC unit/op description).</summary>
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>Frequency the event was detected on, in MHz.</summary>
+    public double Frequency { get; set; }
+
+    /// <summary>Channel alpha tag at the time of detection, if known.</summary>
+    public string? AlphaTag { get; set; }
+
+    /// <summary>Fire tone-out Tone A frequency in Hz (TONE_OUT only).</summary>
+    public double? ToneA { get; set; }
+
+    /// <summary>Fire tone-out Tone B frequency in Hz (TONE_OUT only).</summary>
+    public double? ToneB { get; set; }
+
+    /// <summary>MDC1200 unit (radio) ID (MDC_* only).</summary>
+    public int? UnitId { get; set; }
+
+    /// <summary>Id of the transmission recording this event coincided with, if any.</summary>
+    public string? TransmissionId { get; set; }
+}
+
+/// <summary>
+/// A decoded MDC1200 data packet.
+/// </summary>
+public class Mdc1200Packet
+{
+    /// <summary>16-bit unit (radio) ID.</summary>
+    public int UnitId { get; set; }
+
+    /// <summary>MDC opcode.</summary>
+    public int Op { get; set; }
+
+    /// <summary>MDC argument byte.</summary>
+    public int Arg { get; set; }
+
+    /// <summary>True when the packet represents an emergency.</summary>
+    public bool IsEmergency { get; set; }
+
+    /// <summary>Human-friendly description of the op/arg.</summary>
+    public string Description { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// GPS Telemetry data.
 /// </summary>
 public record GpsData(

@@ -23,6 +23,11 @@ public interface IRadioSource
     event Action<byte[]>? OnAudio;
 
     /// <summary>
+    /// Event triggered when a signaling event (fire tone-out or MDC1200) is detected.
+    /// </summary>
+    event Action<RadioEvent>? OnNewEvent;
+
+    /// <summary>
     /// Gets the current state of the scanner.
     /// </summary>
     /// <returns>The current <see cref="ScannerState"/>.</returns>

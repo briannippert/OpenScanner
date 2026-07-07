@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Moq;
 using OpenScanner.Server.Controllers;
 using OpenScanner.Server.Interfaces;
 using OpenScanner.Server.Models;
+using OpenScanner.Server.Services;
 using Xunit;
 
 namespace OpenScanner.Tests.Controllers;
@@ -10,12 +12,15 @@ namespace OpenScanner.Tests.Controllers;
 public class FiretonesControllerTests
 {
     private readonly Mock<IDatabase> _dbMock;
+    private readonly ToneDetector _toneDetector;
     private readonly FiretonesController _controller;
 
     public FiretonesControllerTests()
     {
         _dbMock = new Mock<IDatabase>();
-        _controller = new FiretonesController(_dbMock.Object);
+        _dbMock.Setup(db => db.GetAllFireTonesAsync()).ReturnsAsync(Array.Empty<FireToneSet>());
+        _toneDetector = new ToneDetector(_dbMock.Object, new Mock<ILogger<ToneDetector>>().Object);
+        _controller = new FiretonesController(_dbMock.Object, _toneDetector);
     }
 
     [Fact]
@@ -70,5 +75,32 @@ public class FiretonesControllerTests
         // Assert
         Assert.NotNull(result);
         _dbMock.Verify(db => db.DeleteFireToneAsync(2), Times.Once);
+    }
+
+    [Fact]
+    public async Task AddFireTone_ReloadsDetector()
+    {
+        // The detector loads tones once in its constructor; a successful add must
+        // trigger a reload so the running detector picks up the new tone set.
+        _dbMock.Setup(db => db.AddFireToneAsync(It.IsAny<FireToneSet>())).ReturnsAsync(1);
+
+        await _controller.AddFireTone(new FireToneSet { Name = "New Station" });
+
+        // ReloadTones fetches the tone list again (fire-and-forget); poll for it.
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                _dbMock.Verify(db => db.GetAllFireTonesAsync(), Times.AtLeast(2));
+                return;
+            }
+            catch (MockException)
+            {
+                await Task.Delay(20);
+            }
+        }
+
+        _dbMock.Verify(db => db.GetAllFireTonesAsync(), Times.AtLeast(2));
     }
 }

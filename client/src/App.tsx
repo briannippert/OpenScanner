@@ -23,7 +23,8 @@ import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import SettingsIcon from '@mui/icons-material/Settings';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import MonitorIcon from '@mui/icons-material/Monitor';
-import type { ScannerState, Channel, CallLog, FireToneSet } from './types';
+import type { ScannerState, Channel, CallLog, FireToneSet, RadioEvent } from './types';
+import EventLog from './components/EventLog';
 
 const darkTheme = createTheme({
   palette: {
@@ -73,6 +74,7 @@ function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [fireTones, setFireTones] = useState<FireToneSet[]>([]);
   const [callLog, setCallLog] = useState<CallLog[]>([]);
+  const [radioEvents, setRadioEvents] = useState<RadioEvent[]>([]);
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | undefined>(undefined);
   const [isManagerOpen, setIsManagerOpen] = useState(false);
   const [isToneManagerOpen, setIsToneManagerOpen] = useState(false);
@@ -424,6 +426,15 @@ function App() {
       .catch(err => console.error("Failed to fetch fire tones:", err));
   };
 
+  const clearEvents = async () => {
+    try {
+      await fetch(`/api/events`, { method: 'DELETE' });
+      setRadioEvents([]);
+    } catch (err) {
+      console.error("Failed to clear events:", err);
+    }
+  };
+
   const handleSaveChannel = async (channel: Channel) => {
     const baseUrl = `/api/channels`;
 
@@ -502,6 +513,11 @@ function App() {
       .then(data => setCallLog(data))
       .catch(err => console.error("Failed to fetch history:", err));
 
+    fetch(`/api/events`)
+      .then(res => res.json())
+      .then(data => setRadioEvents(data))
+      .catch(err => console.error("Failed to fetch events:", err));
+
     const connectControlWs = () => {
         wsControl.current = new WebSocket(wsControlUrl);
         
@@ -533,6 +549,12 @@ function App() {
                     } else {
                       return [newEntry, ...log].slice(0, 100);
                     }
+                  });
+                } else if (message.type === 'NEW_EVENT') {
+                  const newEvent = message.payload as RadioEvent;
+                  setRadioEvents(events => {
+                    if (events.some(x => x.id === newEvent.id)) return events;
+                    return [newEvent, ...events].slice(0, 100);
                   });
                 } else if (message.type === 'ERROR') {
                   setErrorMsg(message.payload);
@@ -1001,11 +1023,12 @@ function App() {
                 {/* Right Column: Transmission Log (Expanded) */}
                 <Grid size={{ xs: 12, md: 8, lg: 9 }} sx={{ height: { xs: '500px', md: '100%' }, overflow: 'hidden' }}>
                     <Paper sx={{ height: '100%', display: 'flex', flexDirection: 'column', bgcolor: '#0a0a0a', border: '1px solid #222', borderRadius: 2, overflowY: 'auto' }}>
-                        <TransmissionLog 
-                            liveLogs={callLog} 
-                            playingId={playingId} 
-                            onPlay={playRawAudio} 
-                            onDelete={deleteEntry} 
+                        {fireTones.length > 0 && <EventLog events={radioEvents} onClear={clearEvents} />}
+                        <TransmissionLog
+                            liveLogs={callLog}
+                            playingId={playingId}
+                            onPlay={playRawAudio}
+                            onDelete={deleteEntry}
                         />
                     </Paper>
                 </Grid>

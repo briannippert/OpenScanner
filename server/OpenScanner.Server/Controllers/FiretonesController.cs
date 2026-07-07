@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using OpenScanner.Server.Models;
 using OpenScanner.Server.Interfaces;
+using OpenScanner.Server.Services;
 
 namespace OpenScanner.Server.Controllers;
 
@@ -13,10 +14,12 @@ namespace OpenScanner.Server.Controllers;
 public class FiretonesController : ControllerBase
 {
     private readonly IDatabase _db;
+    private readonly ToneDetector _toneDetector;
 
-    public FiretonesController(IDatabase db)
+    public FiretonesController(IDatabase db, ToneDetector toneDetector)
     {
         _db = db;
+        _toneDetector = toneDetector;
     }
 
     /// <summary>
@@ -41,6 +44,7 @@ public class FiretonesController : ControllerBase
     {
         var id = await _db.AddFireToneAsync(tone);
         tone.Id = id;
+        _toneDetector.ReloadTones();
         return CreatedAtAction(nameof(GetFireTones), new { id }, tone);
     }
 
@@ -55,6 +59,7 @@ public class FiretonesController : ControllerBase
     {
         tone.Id = id;
         await _db.UpdateFireToneAsync(tone);
+        _toneDetector.ReloadTones();
         return Ok();
     }
 
@@ -67,6 +72,7 @@ public class FiretonesController : ControllerBase
     public async Task<IActionResult> DeleteFireTone(int id)
     {
         await _db.DeleteFireToneAsync(id);
+        _toneDetector.ReloadTones();
         return Ok();
     }
 }

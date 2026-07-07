@@ -14,10 +14,29 @@ public class ToneDetector
     private List<FireToneSet> _activeToneSets = new();
     private readonly int _sampleRate = 48000;
     
-    // Detection state
+    // Two-tone (Quick Call II) detection state
     private string? _detectedToneAName;
     private DateTime _toneADetectedTime = DateTime.MinValue;
     private double _lastToneAFreq;
+
+    // Single (long) tone detection state, keyed by tone set name. Some agencies page
+    // with a single sustained tone instead of a two-tone A/B sequence; a FireToneSet
+    // with FrequencyB <= 0 is treated as single-tone.
+    private readonly Dictionary<string, SingleToneRun> _singleToneRuns = new();
+
+    // A single tone must be continuously present for at least this long before it fires,
+    // which rejects the brief tones that occur in speech.
+    private const double SingleToneMinDurationSeconds = 1.0;
+
+    // Momentary dropouts shorter than this don't reset a sustained-tone run.
+    private const double SingleToneGapToleranceSeconds = 0.3;
+
+    private struct SingleToneRun
+    {
+        public DateTime Start;
+        public DateTime LastSeen;
+        public bool Fired;
+    }
 
     /// <summary>
     /// Event triggered when a complete 2-tone sequence is detected.
@@ -69,11 +88,20 @@ public class ToneDetector
             samples[i] = s / 32768f;
         }
 
+        var now = DateTime.UtcNow;
+
         // Check for active tones in this chunk
         // Standard FTO: Tone A (approx 1s) followed by Tone B (approx 3s)
-        
+
         foreach (var toneSet in _activeToneSets)
         {
+            // A tone set with no second frequency is a single (long) tone page.
+            if (toneSet.FrequencyB <= 0)
+            {
+                HandleSingleTone(toneSet, samples, now);
+                continue;
+            }
+
             // check Tone A
             bool toneAPresent = IsFrequencyPresent(samples, toneSet.FrequencyA);
             
@@ -105,6 +133,45 @@ public class ToneDetector
         if (_detectedToneAName != null && (DateTime.UtcNow - _toneADetectedTime).TotalSeconds > 3.0)
         {
             _detectedToneAName = null;
+        }
+    }
+
+    /// <summary>
+    /// Detects a single sustained tone. Fires once FrequencyA has been continuously
+    /// present for <see cref="SingleToneMinDurationSeconds"/>, then stays quiet until
+    /// the tone drops out so a long page only fires a single event.
+    /// </summary>
+    private void HandleSingleTone(FireToneSet toneSet, float[] samples, DateTime now)
+    {
+        bool present = IsFrequencyPresent(samples, toneSet.FrequencyA);
+
+        if (present)
+        {
+            if (!_singleToneRuns.TryGetValue(toneSet.Name, out var run) ||
+                (now - run.LastSeen).TotalSeconds > SingleToneGapToleranceSeconds)
+            {
+                // No active run (or the previous one lapsed): start a fresh one.
+                run = new SingleToneRun { Start = now, LastSeen = now, Fired = false };
+            }
+            else
+            {
+                run.LastSeen = now;
+            }
+
+            if (!run.Fired && (now - run.Start).TotalSeconds >= SingleToneMinDurationSeconds)
+            {
+                _logger.LogInformation($"ToneDetector: DETECTED single-tone {toneSet.Name} ({toneSet.FrequencyA} Hz)");
+                OnToneDetected?.Invoke(toneSet);
+                run.Fired = true;
+            }
+
+            _singleToneRuns[toneSet.Name] = run;
+        }
+        else if (_singleToneRuns.TryGetValue(toneSet.Name, out var run) &&
+                 (now - run.LastSeen).TotalSeconds > SingleToneGapToleranceSeconds)
+        {
+            // Tone has been absent long enough — end the run so it can re-fire later.
+            _singleToneRuns.Remove(toneSet.Name);
         }
     }
 

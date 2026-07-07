@@ -41,6 +41,7 @@ public class WebSocketBroadcaster
         _logger = logger;
         _radio.OnStateChanged += BroadcastState;
         _radio.OnNewLog += BroadcastLog;
+        _radio.OnNewEvent += BroadcastEvent;
         _radio.OnAudio += BroadcastAudio;
     }
 
@@ -169,6 +170,12 @@ public class WebSocketBroadcaster
     private void BroadcastLog(CallLog log)
     {
         var msg = new { type = "NEW_LOG", payload = log };
+        _ = BroadcastJson(msg);
+    }
+
+    private void BroadcastEvent(RadioEvent e)
+    {
+        var msg = new { type = "NEW_EVENT", payload = e };
         _ = BroadcastJson(msg);
     }
 

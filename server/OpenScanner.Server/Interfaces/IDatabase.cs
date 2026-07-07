@@ -166,6 +166,25 @@ public interface IDatabase
     /// <param name="id">The ID of the tone set to delete.</param>
     Task DeleteFireToneAsync(int id);
 
+    // Radio Events (fire tone-out and MDC1200 detections)
+
+    /// <summary>
+    /// Persists a decoded signaling event (fire tone-out or MDC1200 packet).
+    /// </summary>
+    /// <param name="e">The event to store.</param>
+    Task AddRadioEventAsync(RadioEvent e);
+
+    /// <summary>
+    /// Retrieves the most recent radio events, newest first.
+    /// </summary>
+    /// <param name="limit">Maximum number of events to return.</param>
+    Task<IEnumerable<RadioEvent>> GetRadioEventsAsync(int limit = 100);
+
+    /// <summary>
+    /// Clears all stored radio events.
+    /// </summary>
+    Task ClearRadioEventsAsync();
+
     // Settings
 
     /// <summary>

@@ -68,23 +68,23 @@ const FireToneManager: React.FC<Props> = ({ open, onClose, tones, onSave, onDele
                                 required autoFocus
                             />
                             <Box display="flex" gap={2}>
-                                <TextField 
-                                    label="Tone A (Hz)" 
-                                    type="number" 
+                                <TextField
+                                    label="Tone A (Hz)"
+                                    type="number"
                                     inputProps={{ step: "0.1" }}
-                                    value={editing.frequencyA} 
-                                    onChange={e => handleChange('frequencyA', parseFloat(e.target.value))} 
-                                    required 
+                                    value={editing.frequencyA}
+                                    onChange={e => handleChange('frequencyA', parseFloat(e.target.value))}
+                                    required
                                     sx={{ flex: 1 }}
                                 />
-                                <TextField 
-                                    label="Tone B (Hz)" 
-                                    type="number" 
+                                <TextField
+                                    label="Tone B (Hz)"
+                                    type="number"
                                     inputProps={{ step: "0.1" }}
-                                    value={editing.frequencyB} 
-                                    onChange={e => handleChange('frequencyB', parseFloat(e.target.value))} 
-                                    required 
+                                    value={editing.frequencyB || ''}
+                                    onChange={e => handleChange('frequencyB', parseFloat(e.target.value) || 0)}
                                     sx={{ flex: 1 }}
+                                    helperText="Leave blank for a single (long) tone"
                                 />
                             </Box>
                             <TextField 
@@ -120,7 +120,9 @@ const FireToneManager: React.FC<Props> = ({ open, onClose, tones, onSave, onDele
                                     <Box display="flex" alignItems="center" gap={2}>
                                         <Typography variant="subtitle1" fontWeight="bold">{tone.name}</Typography>
                                         <Typography variant="body2" color="error" fontFamily="monospace">
-                                            {tone.frequencyA} / {tone.frequencyB} Hz
+                                            {tone.frequencyB > 0
+                                                ? `${tone.frequencyA} / ${tone.frequencyB} Hz`
+                                                : `${tone.frequencyA} Hz (single tone)`}
                                         </Typography>
                                     </Box>
                                 }
