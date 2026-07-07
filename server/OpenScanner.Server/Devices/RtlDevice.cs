@@ -334,7 +334,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// <inheritdoc />
     public void StartDumping(string label)
     {
-        var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../data/samples");
+        var dataDir = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "../../data/samples"));
         if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
 
         // Sanitize the user-supplied label to a safe filename token: this strips path
@@ -343,11 +343,16 @@ public class RtlDevice : BackgroundService, IRadioSource
         var safeLabel = System.Text.RegularExpressions.Regex.Replace(label ?? "", "[^A-Za-z0-9_-]", "_");
         if (safeLabel.Length == 0) safeLabel = "dump";
 
-        // Path.GetFileName strips any residual directory component, guaranteeing the
-        // result stays inside dataDir.
         var fileName = Path.GetFileName($"{safeLabel}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.iq");
-        _iqDumpPath = Path.Combine(dataDir, fileName);
-        _iqDumpStream = new FileStream(_iqDumpPath, FileMode.Create);
+        var fullPath = Path.GetFullPath(Path.Combine(dataDir, fileName));
+
+        // Canonicalize and verify the resolved path stays inside the samples directory,
+        // so a crafted label can never escape it (path-injection barrier).
+        if (!fullPath.StartsWith(dataDir + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            throw new InvalidOperationException("Invalid IQ dump path");
+
+        _iqDumpPath = fullPath;
+        _iqDumpStream = new FileStream(fullPath, FileMode.Create);
         _logger.LogInformation("Started IQ dumping to {Path}", _iqDumpPath);
     }
 
