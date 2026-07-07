@@ -71,16 +71,20 @@ public class ChannelServiceTests
     [Fact]
     public async Task CheckGeoRefresh_LargeMove_ReloadsAgain()
     {
+        // Record each nearby-lookup so we can wait for the fire-and-forget refreshes
+        // to actually run before verifying, instead of racing them.
+        var calls = new System.Collections.Concurrent.ConcurrentBag<(double Lat, double Lon)>();
         _db.Setup(d => d.GetAllChannelsAsync()).ReturnsAsync(AllChannels);
         _db.Setup(d => d.GetChannelsNearAsync(It.IsAny<double>(), It.IsAny<double>()))
-           .ReturnsAsync(LocalChannels);
+           .ReturnsAsync(LocalChannels)
+           .Callback<double, double>((lat, lon) => calls.Add((lat, lon)));
         var service = new ChannelService(_db.Object, _logger);
         await WaitFor(() => service.Channels.Count == 2);
 
         service.CheckGeoRefresh(43.0, -71.0);            // first fix
         service.CheckGeoRefresh(44.0, -72.0);            // ~85 miles away
 
-        await WaitFor(() => true);
+        await WaitFor(() => calls.Contains((43.0, -71.0)) && calls.Contains((44.0, -72.0)));
         _db.Verify(d => d.GetChannelsNearAsync(43.0, -71.0), Times.Once);
         _db.Verify(d => d.GetChannelsNearAsync(44.0, -72.0), Times.Once);
     }

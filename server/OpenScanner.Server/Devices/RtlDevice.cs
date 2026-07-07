@@ -336,10 +336,16 @@ public class RtlDevice : BackgroundService, IRadioSource
     {
         var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../data/samples");
         if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
-        
-        _iqDumpPath = Path.Combine(dataDir, $"{label}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.iq");
+
+        // Sanitize the user-supplied label to a safe filename token: this strips path
+        // separators and "." so it cannot traverse directories (path injection) and
+        // removes control characters/newlines that could forge log entries.
+        var safeLabel = System.Text.RegularExpressions.Regex.Replace(label ?? "", "[^A-Za-z0-9_-]", "_");
+        if (safeLabel.Length == 0) safeLabel = "dump";
+
+        _iqDumpPath = Path.Combine(dataDir, $"{safeLabel}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.iq");
         _iqDumpStream = new FileStream(_iqDumpPath, FileMode.Create);
-        _logger.LogInformation($"Started IQ dumping to {_iqDumpPath}");
+        _logger.LogInformation("Started IQ dumping to {Path}", _iqDumpPath);
     }
 
     /// <inheritdoc />

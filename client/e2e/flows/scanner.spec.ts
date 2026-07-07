@@ -7,9 +7,9 @@ test.describe('Scanner Control', () => {
 
   test('clicking channel card triggers hold', async ({ page }) => {
     let holdRequestSent = false;
-    await page.route(/\/api\/control/, async route => {
+    await page.route(/\/api\/scanner\/hold/, async route => {
         const data = route.request().postDataJSON();
-        if (data.action === 'hold' && data.frequency === 155.000) {
+        if (route.request().method() === 'PUT' && data.frequency === 155.000) {
             holdRequestSent = true;
         }
         await route.fulfill({ status: 200 });
