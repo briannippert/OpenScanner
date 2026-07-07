@@ -343,7 +343,10 @@ public class RtlDevice : BackgroundService, IRadioSource
         var safeLabel = System.Text.RegularExpressions.Regex.Replace(label ?? "", "[^A-Za-z0-9_-]", "_");
         if (safeLabel.Length == 0) safeLabel = "dump";
 
-        _iqDumpPath = Path.Combine(dataDir, $"{safeLabel}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.iq");
+        // Path.GetFileName strips any residual directory component, guaranteeing the
+        // result stays inside dataDir.
+        var fileName = Path.GetFileName($"{safeLabel}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.iq");
+        _iqDumpPath = Path.Combine(dataDir, fileName);
         _iqDumpStream = new FileStream(_iqDumpPath, FileMode.Create);
         _logger.LogInformation("Started IQ dumping to {Path}", _iqDumpPath);
     }
