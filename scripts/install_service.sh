@@ -72,17 +72,18 @@ fi
 # ----------------------------------------------------------------
 log_step "Updating Repository..."
 if git remote get-url origin &> /dev/null; then
-    # npm install (run by the .NET build) may modify package-lock.json.
-    # If the only locally modified files are package.json / package-lock.json,
-    # restore them so git pull can apply upstream changes cleanly.
-    CHANGED_FILES=$(git diff --name-only 2>/dev/null)
-    if [ -n "$CHANGED_FILES" ]; then
-        NON_PKG=$(echo "$CHANGED_FILES" | grep -v "^client/package\.json$" | grep -v "^client/package-lock\.json$")
-        if [ -z "$NON_PKG" ]; then
-            log_info "Resetting auto-modified package files before update..."
-            git checkout -- client/package.json client/package-lock.json 2>/dev/null || true
-        fi
-    fi
+    # Preserve user config stored in tracked files (the PowerDMS department in
+    # appsettings.json) so the hard reset below can't lose it. Exported so it also
+    # survives the self-restart re-exec further down. Only capture it once —
+    # after a reset the file holds the committed (empty) value.
+    SAVED_POWERDMS_DEPT="${SAVED_POWERDMS_DEPT:-$(jq -r '.PowerDMS.Department // ""' "$APPSETTINGS" 2>/dev/null || echo "")}"
+    export SAVED_POWERDMS_DEPT
+
+    # Local churn — the .NET build rewrites client/package*.json and the installer
+    # writes the PowerDMS dept into appsettings.json, all tracked — can block a
+    # fast-forward `git pull`. Discard local changes so the update always applies;
+    # the preserved config is re-applied in the PowerDMS step below.
+    git reset --hard HEAD 2>/dev/null || true
 
     # Record the installer's committed version before the pull so we can tell
     # whether the update changed the installer itself.
@@ -345,6 +346,13 @@ fi
 
 if [ "${SKIP_POWERDMS:-false}" = false ]; then
     CURRENT_DEPT=$(jq -r '.PowerDMS.Department // ""' "$APPSETTINGS" 2>/dev/null || echo "")
+    # Re-apply the department preserved before the update reset the config.
+    if [ -z "$CURRENT_DEPT" ] && [ -n "${SAVED_POWERDMS_DEPT:-}" ]; then
+        UPDATED=$(jq --arg dept "$SAVED_POWERDMS_DEPT" '.PowerDMS.Department = $dept' "$APPSETTINGS")
+        echo "$UPDATED" > "$APPSETTINGS"
+        CURRENT_DEPT="$SAVED_POWERDMS_DEPT"
+        log_info "Restored PowerDMS department after update: $SAVED_POWERDMS_DEPT"
+    fi
     if [ -z "$CURRENT_DEPT" ]; then
         echo ""
         read -r -p "$(echo -e "${BLUE}[INFO]${NC} Enter your PowerDMS department slug (leave empty to skip): ")" POWERDMS_DEPT
