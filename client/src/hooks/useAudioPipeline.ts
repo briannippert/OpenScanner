@@ -47,10 +47,14 @@ export function useAudioPipeline(volume: number) {
   const audioAnalyserRef = useRef<AnalyserNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const filterNodeRef = useRef<BiquadFilterNode | null>(null);
-  // Live-stream ring-buffer player (AudioWorklet) — replaces per-frame source scheduling.
+  // Live-stream ring-buffer player (AudioWorklet) — replaces per-frame source
+  // scheduling where supported. AudioWorklet requires a secure context, so on the
+  // Pi over plain http:// it's unavailable and we fall back to scheduled buffer
+  // sources (see nextStartTime below).
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const workletCtxRef = useRef<BaseAudioContext | null>(null);
   const workletSetupRef = useRef<Promise<AudioWorkletNode | null> | null>(null);
+  const nextStartTime = useRef<number>(0); // fallback scheduler cursor
   const isPageHiddenRef = useRef(false);
   const isParallelRef = useRef(false);
   const volumeRef = useRef(volume);
@@ -97,20 +101,15 @@ export function useAudioPipeline(volume: number) {
     return ctx;
   }, []);
 
-  // Build (once per context) the live-stream graph: worklet → analyser → filter → gain.
+  // Build (once per context) the live-stream graph: [worklet] → analyser → filter
+  // → gain. Returns the worklet node, or null when AudioWorklet is unavailable
+  // (non-secure context, e.g. the Pi over http://) — callers then fall back to
+  // scheduling buffer sources into the same analyser.
   const ensureLiveGraph = useCallback(async (ctx: AudioContext): Promise<AudioWorkletNode | null> => {
-    if (workletNodeRef.current && workletCtxRef.current === ctx) return workletNodeRef.current;
+    if (audioAnalyserRef.current && workletCtxRef.current === ctx) return workletNodeRef.current;
     if (!workletSetupRef.current || workletCtxRef.current !== ctx) {
       workletCtxRef.current = ctx;
       workletSetupRef.current = (async () => {
-        try {
-          await ctx.audioWorklet.addModule('/pcm-player-processor.js');
-        } catch (err) {
-          // Adding the same module twice (StrictMode/reconnect) throws — ignore.
-          if (!(err instanceof Error) || !/already|registered/i.test(err.message)) {
-            console.error('[Audio] Failed to load worklet:', err);
-          }
-        }
         if (!gainNodeRef.current || gainNodeRef.current.context !== ctx) {
           const gainNode = ctx.createGain();
           gainNode.gain.value = volumeRef.current;
@@ -129,12 +128,20 @@ export function useAudioPipeline(volume: number) {
         audioAnalyserRef.current = analyser;
         setAudioAnalyser(analyser);
 
+        // AudioWorklet is only available in a secure context. When it isn't, leave
+        // the node null and let the caller use the buffer-source fallback.
         let node: AudioWorkletNode | null = null;
-        try {
-          node = new AudioWorkletNode(ctx, 'pcm-player', { outputChannelCount: [2] });
-          node.connect(analyser);
-        } catch (err) {
-          console.error('[Audio] Failed to create worklet node:', err);
+        if (ctx.audioWorklet) {
+          try {
+            await ctx.audioWorklet.addModule('/pcm-player-processor.js');
+            node = new AudioWorkletNode(ctx, 'pcm-player', { outputChannelCount: [2] });
+            node.connect(analyser);
+          } catch (err) {
+            if (!(err instanceof Error) || !/already|registered/i.test(err.message)) {
+              console.error('[Audio] Worklet unavailable, using buffer-source fallback:', err);
+            }
+            node = null;
+          }
         }
         workletNodeRef.current = node;
         return node;
@@ -344,28 +351,59 @@ export function useAudioPipeline(volume: number) {
           const ctx = await ensureCtx();
           if (!ctx) return;
           const node = await ensureLiveGraph(ctx);
-          if (!node) return;
+          const analyser = audioAnalyserRef.current;
+          if (!analyser) return;
 
           const arrayBuffer = await event.data.arrayBuffer();
           const int16Array = new Int16Array(arrayBuffer);
           const isStereo = isParallelRef.current;
 
-          // Deinterleave Int16 → Float32 and hand off to the ring-buffer worklet,
-          // transferring the buffers to avoid a copy. The worklet plays samples
-          // contiguously (no per-frame node scheduling → no boundary pops).
+          // Deinterleave Int16 → Float32.
+          let left: Float32Array<ArrayBuffer>;
+          let right: Float32Array<ArrayBuffer>;
           if (isStereo && int16Array.length >= 2) {
             const frameSamples = Math.floor(int16Array.length / 2);
-            const left = new Float32Array(frameSamples);
-            const right = new Float32Array(frameSamples);
+            left = new Float32Array(frameSamples);
+            right = new Float32Array(frameSamples);
             for (let i = 0; i < frameSamples; i++) {
               left[i] = int16Array[i * 2] / 32768;
               right[i] = int16Array[i * 2 + 1] / 32768;
             }
-            node.port.postMessage({ channels: [left, right] }, [left.buffer, right.buffer]);
           } else {
-            const mono = new Float32Array(int16Array.length);
-            for (let i = 0; i < int16Array.length; i++) mono[i] = int16Array[i] / 32768;
-            node.port.postMessage({ channels: [mono] }, [mono.buffer]);
+            left = new Float32Array(int16Array.length);
+            for (let i = 0; i < int16Array.length; i++) left[i] = int16Array[i] / 32768;
+            right = left;
+          }
+
+          if (node) {
+            // Preferred path: hand off to the ring-buffer worklet (contiguous
+            // playback, no per-frame boundary pops), transferring the buffers.
+            if (left === right) {
+              node.port.postMessage({ channels: [left] }, [left.buffer]);
+            } else {
+              node.port.postMessage({ channels: [left, right] }, [left.buffer, right.buffer]);
+            }
+          } else {
+            // Fallback (no AudioWorklet, e.g. http://): schedule a buffer source
+            // into the analyser with a jitter buffer.
+            const frames = left.length;
+            const stereo = left !== right;
+            const audioBuffer = ctx.createBuffer(stereo ? 2 : 1, frames, 48000);
+            audioBuffer.copyToChannel(left, 0);
+            if (stereo) audioBuffer.copyToChannel(right, 1);
+
+            const source = ctx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(analyser);
+
+            const currentTime = ctx.currentTime;
+            const JITTER_BUFFER = 0.2;
+            const MAX_DRIFT = 0.6;
+            if (nextStartTime.current < currentTime || nextStartTime.current > currentTime + MAX_DRIFT) {
+              nextStartTime.current = currentTime + JITTER_BUFFER;
+            }
+            source.start(nextStartTime.current);
+            nextStartTime.current += audioBuffer.duration;
           }
         } catch (err) {
           console.error('[Audio] Processing error:', err);
