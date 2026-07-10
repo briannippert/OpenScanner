@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Box } from '@mui/material';
+import { viridisRGB } from '../viz/ramp';
 
 interface DataPoint {
     frequency: number;
@@ -69,24 +70,8 @@ const RfSpectrum: React.FC<Props> = ({ data, height = 150 }) => {
 
             for (let x = 0; x < rowData.length; x++) {
                 const db = rowData[x].db;
-                const val = Math.max(0, Math.min(255, ((db - minDb) / (maxDb - minDb)) * 255));
-
-                let r = 0, g = 0, b = 0;
-                if (val < 50) {
-                    b = val * 5;
-                } else if (val < 100) {
-                    b = 255;
-                    g = (val - 50) * 5;
-                } else if (val < 150) {
-                    g = 255;
-                    b = 255 - (val - 100) * 5;
-                } else if (val < 200) {
-                    g = 255;
-                    r = (val - 150) * 5;
-                } else {
-                    r = 255;
-                    g = 255 - (val - 200) * 5;
-                }
+                const t = Math.max(0, Math.min(1, (db - minDb) / (maxDb - minDb)));
+                const [r, g, b] = viridisRGB(t);
 
                 const i = x * 4;
                 imageData.data[i] = r;

@@ -6,8 +6,8 @@ test.describe('Fire Tone Management', () => {
     // Open Fire Tone Manager (button with NotificationsActiveIcon)
     // Note: It's hidden on xs screens according to styles, so ensure viewport is large enough
     await page.setViewportSize({ width: 1024, height: 768 });
-    await page.locator('button:has(svg[data-testid="NotificationsActiveIcon"])').click({ force: true });
-    await expect(page.getByText('Manage Fire Tone Outs')).toBeVisible();
+    await page.getByRole('button', { name: 'Fire Tone Outs' }).click();
+    await expect(page.getByText('Manage Fire Tone-Outs')).toBeVisible();
   });
 
   test('lists existing tones', async ({ page }) => {
@@ -41,7 +41,7 @@ test.describe('Fire Tone Management', () => {
     // Save
     await page.getByRole('button', { name: 'Save' }).click();
     
-    await expect(page.getByText('Manage Fire Tone Outs')).toBeVisible();
+    await expect(page.getByText('Manage Fire Tone-Outs')).toBeVisible();
   });
 
   test('can edit existing tone', async ({ page }) => {
@@ -64,7 +64,7 @@ test.describe('Fire Tone Management', () => {
     await page.getByLabel('Name').fill(updatedName);
     await page.getByRole('button', { name: 'Save' }).click();
     
-    await expect(page.getByText('Manage Fire Tone Outs')).toBeVisible();
+    await expect(page.getByText('Manage Fire Tone-Outs')).toBeVisible();
   });
 
   test('can delete tone', async ({ page }) => {

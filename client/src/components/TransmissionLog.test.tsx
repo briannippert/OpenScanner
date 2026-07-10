@@ -48,7 +48,7 @@ describe('TransmissionLog Component', () => {
     it('renders search bar', async () => {
         render(<TransmissionLog liveLogs={[]} playingId={null} onPlay={mockOnPlay} onDelete={mockOnDelete} />);
         await waitForInit();
-        expect(screen.getByPlaceholderText('Search logs...')).toBeInTheDocument();
+        expect(screen.getByPlaceholderText('Search logs…')).toBeInTheDocument();
     });
 
     it('displays live logs in "Recent Activity"', async () => {
@@ -63,7 +63,7 @@ describe('TransmissionLog Component', () => {
     it('displays "No recent activity" when liveLogs is empty', async () => {
         render(<TransmissionLog liveLogs={[]} playingId={null} onPlay={mockOnPlay} onDelete={mockOnDelete} />);
         await waitForInit();
-        expect(screen.getByText('No recent activity.')).toBeInTheDocument();
+        expect(screen.getByText('No recent activity')).toBeInTheDocument();
     });
 
     it('calls onPlay when play button is clicked', async () => {
@@ -92,7 +92,7 @@ describe('TransmissionLog Component', () => {
              const buttonsInRow = row.querySelectorAll('button');
              // 0: Star, 1: Play, 2: Delete
              fireEvent.click(buttonsInRow[1]);
-             expect(mockOnPlay).toHaveBeenCalledWith('1', 'audio1.wav', 5.5);
+             expect(mockOnPlay).toHaveBeenCalledWith('1', 'audio1.wav', 5.5, 'Police Dispatch');
         }
     });
 
@@ -131,7 +131,7 @@ describe('TransmissionLog Component', () => {
 
         render(<TransmissionLog liveLogs={[]} playingId={null} onPlay={mockOnPlay} onDelete={mockOnDelete} />);
         
-        const searchInput = screen.getByPlaceholderText('Search logs...');
+        const searchInput = screen.getByPlaceholderText('Search logs…');
         fireEvent.change(searchInput, { target: { value: 'Search' } });
 
         await waitFor(() => {

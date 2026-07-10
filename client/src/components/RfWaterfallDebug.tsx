@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, Typography, Paper } from '@mui/material';
+import { viridisRGB } from '../viz/ramp';
 
 interface DataPoint {
     frequency: number;
@@ -69,25 +70,10 @@ const RfWaterfallDebug: React.FC<Props> = ({ data, height = 500 }) => {
 
             for (let x = 0; x < data.length; x++) {
                 const db = data[x].db;
-                const val = Math.max(0, Math.min(255, ((db - minDb) / (maxDb - minDb)) * 255));
+                const t = Math.max(0, Math.min(1, (db - minDb) / (maxDb - minDb)));
 
-                let r = 0, g = 0, b = 0;
-                
-                // Classic Jet-like colormap
-                if (val < 64) {
-                    b = val * 4;
-                } else if (val < 128) {
-                    b = 255;
-                    g = (val - 64) * 4;
-                } else if (val < 192) {
-                    g = 255;
-                    b = 255 - (val - 128) * 4;
-                    r = (val - 128) * 2; // Add some red early
-                } else {
-                    r = 255;
-                    g = 255 - (val - 192) * 4;
-                    b = 0;
-                }
+                // Perceptual (viridis) magnitude ramp — matches the audio spectrogram.
+                const [r, g, b] = viridisRGB(t);
 
                 const i = x * 4;
                 imageData.data[i] = r;

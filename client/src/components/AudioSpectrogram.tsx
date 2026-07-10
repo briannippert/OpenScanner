@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Box } from '@mui/material';
+import { viridisRGB } from '../viz/ramp';
 
 interface Props {
     analyser?: AnalyserNode;
@@ -52,23 +53,11 @@ const AudioSpectrogram: React.FC<Props> = ({ analyser, height = 150 }) => {
                 const i = Math.floor((x / canvas.width) * (bufferLength / 2)); // Use lower half of spectrum (0-4khz)
                 const value = dataArray[i];
 
-                // Heatmap Color Map: Black -> Blue -> Green -> Yellow -> Red
+                // Perceptual (viridis) magnitude ramp; below the noise floor stays black.
                 let r = 0, g = 0, b = 0;
-                
-                if (value < 20) { // Silence/Noise floor
-                    r = 0; g = 0; b = 0; // Black
-                } else if (value < 60) {
-                    b = (value - 20) * 6; // Blue-ish
-                } else if (value < 120) {
-                    b = 255;
-                    g = (value - 60) * 4; // Cyan/Green
-                } else if (value < 180) {
-                    g = 255;
-                    r = (value - 120) * 4; // Yellow
-                    b = 255 - r;
-                } else {
-                    r = 255;
-                    g = 255 - (value - 180) * 4; // Red
+                const FLOOR = 18;
+                if (value >= FLOOR) {
+                    [r, g, b] = viridisRGB((value - FLOOR) / (255 - FLOOR));
                 }
 
                 const pixelIndex = x * 4;
@@ -91,11 +80,12 @@ const AudioSpectrogram: React.FC<Props> = ({ analyser, height = 150 }) => {
     }, [analyser]);
 
     return (
-        <Box sx={{ 
-            width: '100%', 
-            height: height, 
-            border: '1px solid #333', 
-            borderRadius: 1, 
+        <Box sx={{
+            width: '100%',
+            height: height,
+            border: '1px solid',
+            borderColor: 'surface.border',
+            borderRadius: 1,
             overflow: 'hidden',
             bgcolor: '#000',
             position: 'relative'
