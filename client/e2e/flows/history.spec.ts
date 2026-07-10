@@ -6,17 +6,17 @@ test.describe('Transmission Log', () => {
   });
 
   test('displays logs', async ({ page }) => {
-    // Check logs exist
-    await expect(page.getByRole('button', { name: 'Recent Activity' })).toBeVisible();
-    
-    // Target the log list container specifically
-    const logList = page.locator('.MuiCollapse-wrapperInner .MuiList-root');
-    await expect(logList.getByText('Police Dispatch').first()).toBeVisible();
+    // Recent is the default tab in the segmented control.
+    await expect(page.getByRole('tab', { name: 'Recent' })).toBeVisible();
+
+    // Scope to the transmission-log region (the channel grid also lists tags).
+    const log = page.getByTestId('transmission-log');
+    await expect(log.getByText('Police Dispatch').first()).toBeVisible();
   });
 
   test('supports search', async ({ page }) => {
     // Test Search
-    const searchInput = page.getByPlaceholder('Search logs...');
+    const searchInput = page.getByPlaceholder('Search logs…');
     
     // Mock search results
     await page.route(/\/api\/history\/search/, async route => {
@@ -42,14 +42,8 @@ test.describe('Transmission Log', () => {
           });
       });
 
-      // Find the play button for the first log
-      // Assuming there is a play button/icon in the list item
-      const logItem = page.locator('.MuiCollapse-wrapperInner .MuiList-root .MuiListItem-root').first();
-      // Click the item or a specific play button. Often list items are clickable for playback or have an icon.
-      // Let's assume clicking the item expands or plays, or look for a play icon.
-      // If `TransmissionLog.tsx` is standard, maybe clicking the item plays.
-      
-      // Let's try clicking a "Play" icon if visible, otherwise the item.
+      // Find the play button for the first log row in the transmission log.
+      const logItem = page.getByTestId('transmission-log').locator('.MuiListItem-root').first();
       const playButton = logItem.locator('button:has(svg[data-testid="PlayCircleOutlineIcon"])');
       await expect(playButton).toBeVisible();
       await playButton.click();

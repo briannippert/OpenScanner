@@ -39,6 +39,11 @@ public class RtlDevice : BackgroundService, IRadioSource
     private bool _manualOverride = false;
     
     private string? _lastDetectedTone;
+    // After a fire tone-out we keep the recording open this long so the pause
+    // before the dispatch voice doesn't split it into a separate transmission.
+    private const int ActivityTimeoutMs = 2000;
+    private const int ToneHoldMs = 6000;
+    private DateTime _toneHoldUntil = DateTime.MinValue;
 
     private DateTime _recordingLockoutUntil = DateTime.MinValue;
     private CancellationTokenSource? _scanCts;
@@ -111,6 +116,10 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         _toneDetector.OnToneDetected += (tone) => {
             _lastDetectedTone = tone.Name;
+            // Open the hold window and extend the current recording's stop timer so
+            // the tone and the dispatch voice that follows it stay one transmission.
+            _toneHoldUntil = DateTime.UtcNow.AddMilliseconds(ToneHoldMs);
+            if (_recordingService.IsRecording) ScheduleStopTimeout();
             UpdateState(_state with { LastDetectedTone = tone.Name });
             RaiseRadioEvent(new RadioEvent
             {
@@ -1530,16 +1539,28 @@ public class RtlDevice : BackgroundService, IRadioSource
         // Throttle updates to avoid task thrashing (e.g. max 2 times per second)
         if ((DateTime.UtcNow - _lastActivityReset).TotalMilliseconds < 500) return;
         _lastActivityReset = DateTime.UtcNow;
+        ScheduleStopTimeout();
+    }
 
+    // (Re)schedule the timer that finalizes the current transmission once audio
+    // stops. Normally 2s of silence ends a transmission; within the post-tone
+    // hold window we wait longer so the tone and the following dispatch voice are
+    // captured as a single transmission (with the speech available to transcribe).
+    private void ScheduleStopTimeout()
+    {
         _activityTimeoutCts?.Cancel();
         _activityTimeoutCts = new CancellationTokenSource();
-        
+        var token = _activityTimeoutCts.Token;
+
         if (!_manualOverride)
         {
             RestartSessionTimeout(5000); // 5s hang time
         }
 
-        Task.Delay(2000, _activityTimeoutCts.Token).ContinueWith(t => 
+        bool withinToneHold = _lastDetectedTone != null && DateTime.UtcNow < _toneHoldUntil;
+        int stopDelayMs = withinToneHold ? ToneHoldMs : ActivityTimeoutMs;
+
+        Task.Delay(stopDelayMs, token).ContinueWith(t =>
         {
             if (!t.IsCanceled)
             {

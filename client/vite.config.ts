@@ -18,22 +18,22 @@ export default defineConfig({
         name: 'OpenScanner',
         short_name: 'OpenScanner',
         description: 'P25 Digital Radio Scanner Dashboard',
-        theme_color: '#000000',
-        background_color: '#000000',
+        theme_color: '#08090b',
+        background_color: '#08090b',
         display: 'standalone',
         icons: [
           {
-            src: 'vite.svg',
+            src: 'favicon.svg',
             sizes: '192x192',
             type: 'image/svg+xml'
           },
           {
-            src: 'vite.svg',
+            src: 'favicon.svg',
             sizes: '512x512',
             type: 'image/svg+xml'
           },
           {
-            src: 'vite.svg',
+            src: 'favicon.svg',
             sizes: '512x512',
             type: 'image/svg+xml',
             purpose: 'any maskable'

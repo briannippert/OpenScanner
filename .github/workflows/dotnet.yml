@@ -53,7 +53,9 @@ jobs:
       run: dotnet restore server/OpenScanner.slnx
 
     - name: Build
-      run: dotnet build server/OpenScanner.slnx --no-restore
+      # Skip the frontend build here — the client is built and validated by the
+      # Frontend workflow, so building it again in the .NET job is redundant.
+      run: dotnet build server/OpenScanner.slnx --no-restore -p:SkipFrontendBuild=true
 
     - name: Test
       run: dotnet test server/OpenScanner.slnx --no-build --verbosity normal

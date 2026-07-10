@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Box } from '@mui/material';
+import { accent, status, surface } from '../theme/tokens';
 
 interface Props {
     analyser?: AnalyserNode;
@@ -51,15 +52,12 @@ const VuMeter: React.FC<Props> = ({ analyser, height = 200, width = 20 }) => {
                 // Calculate threshold for this bar (bottom is 0, top is 1)
                 const threshold = i / bars;
                 
-                // Color logic
-                let color = '#333'; // Inactive
+                // Semantic VU ramp: green → amber → red near the top; dim when inactive.
+                let color: string = surface.raised;
                 if (volume > threshold) {
-                    if (i > bars * 0.8) color = '#ff0000'; // Red (Top 20%)
-                    else if (i > bars * 0.6) color = '#ff9800'; // Yellow
-                    else color = '#00ff00'; // Green
-                } else {
-                    // Dim background for inactive bars
-                    color = '#1a1a1a';
+                    if (i > bars * 0.8) color = status.error;
+                    else if (i > bars * 0.6) color = status.warn;
+                    else color = accent.main;
                 }
 
                 ctx.fillStyle = color;
@@ -79,12 +77,13 @@ const VuMeter: React.FC<Props> = ({ analyser, height = 200, width = 20 }) => {
     }, [analyser, width, height]);
 
     return (
-        <Box sx={{ 
-            border: '1px solid #333', 
-            bgcolor: '#000', 
-            p: 0.5, 
+        <Box sx={{
+            border: '1px solid',
+            borderColor: 'surface.border',
+            bgcolor: '#000',
+            p: 0.5,
             borderRadius: 1,
-            display: 'inline-block' 
+            display: 'inline-block'
         }}>
             <canvas ref={canvasRef} width={width} height={height} />
         </Box>

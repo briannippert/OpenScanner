@@ -35,6 +35,11 @@ public class ChannelPipeline : IDisposable
     // noise floor sits around -35 to -45 dB and a carrier reads -5 to -15 dB.
     private const double AnalogSquelchThresholdDb = -28.0;
 
+    // Digital channels are marked inactive after this long without voice audio.
+    private const double DigitalHangSeconds = 2.0;
+    // 16-bit PCM peak below which a decoder chunk is treated as inter-call filler.
+    private const short DigitalSilencePeak = 1200;
+
     // Signal level metering (read from channelizer's pre-demod IQ power)
 
     /// <summary>Fires when decoded audio is available.</summary>
@@ -139,6 +144,16 @@ public class ChannelPipeline : IDisposable
             {
                 _decoder.FeedInput(_audioBuffer, 0, audioBytes);
             }
+
+            // Digital activity is refreshed by the decoder callbacks (voice audio /
+            // OnActivity). dsd-fme keeps emitting audio between calls, so without an
+            // idle reset here the channel would read "active" forever. This runs on
+            // every IQ chunk, so it fires even when the decoder has gone quiet.
+            if (_isActive && (DateTime.UtcNow - _lastActivityTime).TotalSeconds > DigitalHangSeconds)
+            {
+                _isActive = false;
+                OnActivityEnded?.Invoke(_channel);
+            }
         }
         else
         {
@@ -185,6 +200,21 @@ public class ChannelPipeline : IDisposable
     // --- Private helpers ---
 
     /// <summary>
+    /// True if a 16-bit LE PCM chunk contains audio above the silence floor
+    /// (i.e. actual decoded voice, not dsd-fme's inter-call filler).
+    /// </summary>
+    private static bool HasVoiceSignal(byte[] chunk)
+    {
+        // Sample sparsely — we only need to know if any sample is loud.
+        for (int i = 0; i + 1 < chunk.Length; i += 8)
+        {
+            short sample = (short)(chunk[i] | (chunk[i + 1] << 8));
+            if (sample > DigitalSilencePeak || sample < -DigitalSilencePeak) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Whether this mode requires a decoder process (dsd-fme).
     /// P25 and DMR need digital voice decoding; NFM/AM/WFM are decoded by the channelizer.
     /// </summary>
@@ -210,11 +240,13 @@ public class ChannelPipeline : IDisposable
         {
             if (_disposed) return;
 
-            if (!_isActive)
+            // Only treat non-silent audio as activity — dsd-fme emits low-level
+            // filler between calls, which must not keep the channel "active".
+            if (HasVoiceSignal(chunk))
             {
                 _isActive = true;
+                _lastActivityTime = DateTime.UtcNow;
             }
-            _lastActivityTime = DateTime.UtcNow;
 
             OnAudio?.Invoke(_channel, chunk);
         };

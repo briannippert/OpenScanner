@@ -1,42 +1,70 @@
 import React, { useState, useEffect, useRef, useContext, createContext } from 'react';
-import { 
-    Box, 
-    List, 
-    ListItem, 
-    ListItemText, 
-    ListItemButton, 
-    Collapse, 
-    Typography, 
-    IconButton, 
-    Divider, 
-    TextField, 
+import {
+    Box,
+    List,
+    ListItem,
+    ListItemText,
+    ListItemButton,
+    Collapse,
+    Typography,
+    IconButton,
+    Divider,
+    TextField,
     CircularProgress,
     InputAdornment,
-    Tooltip
+    Tooltip,
 } from '@mui/material';
-import { 
-    ExpandLess, 
-    ExpandMore, 
-    PlayCircleOutline, 
-    StopCircle, 
-        Delete,
-        Download,
-        Folder,
-        Search,
-        Star,
-        StarBorder,
+import { alpha } from '@mui/material/styles';
+import {
+    ExpandLess,
+    ExpandMore,
+    PlayCircleOutline,
+    StopCircle,
+    Delete,
+    Download,
+    Folder,
+    Search,
+    Star,
+    StarBorder,
     CalendarMonth,
     Today,
     Radio,
     History as HistoryIcon,
     Article,
-    Link as LinkIcon
+    Link as LinkIcon,
+    SearchOff,
+    Inbox,
+    Campaign,
 } from '@mui/icons-material';
+import { Chip } from '@mui/material';
 import type { CallLog, Channel } from '../types';
+import { status } from '../theme/tokens';
+import EmptyState from './common/EmptyState';
+import PanelSkeleton from './common/PanelSkeleton';
+import SegmentedControl from './common/SegmentedControl';
+import ActivityHeatmap from './ActivityHeatmap';
+
+type LogTab = 'recent' | 'favorites' | 'browse';
+type LogFilter = 'all' | 'tones';
+
+// A recording counts as a "tone-out" if it detected a tone itself, or if a fire
+// tone-out event links to it (events carry the transmissionId of their recording).
+const matchesFilter = (log: CallLog, filter: LogFilter, toneOutIds?: Set<string>): boolean => {
+    if (filter === 'tones') return !!log.detectedTone || (!!toneOutIds && toneOutIds.has(log.id));
+    return true;
+};
+
+const monoFont = { fontFamily: '"Roboto Mono", ui-monospace, monospace' };
+const GOLD = '#f5c542';
+const HIGHLIGHT = status.warn;
+
+// Single indent scale for the history tree (collapses on small screens).
+const indent = (depth: number) => ({ pl: { xs: Math.min(depth, 2) * 2, sm: depth * 2 } });
+const rowBorder = { borderBottom: '1px solid', borderColor: 'surface.border' } as const;
 
 interface LogNodeProps {
     playingId: string | null;
-    onPlay: (id: string, path: string, duration?: number) => void;
+    onPlay: (id: string, path: string, duration?: number, label?: string) => void;
     onDelete: (id: string) => void;
     onFavoriteToggle: () => void;
 }
@@ -53,17 +81,22 @@ const HighlightContext = createContext<HighlightRequest | null>(null);
 interface Props {
     liveLogs: CallLog[];
     playingId: string | null;
-    onPlay: (id: string, path: string, duration?: number) => void;
+    onPlay: (id: string, path: string, duration?: number, label?: string) => void;
     onDelete: (id: string) => void;
     highlight?: HighlightRequest | null;
+    /** False while the initial history fetch is in flight (drives skeletons). */
+    loaded?: boolean;
+    /** Recording ids referenced by fire tone-out events (for the Tone-outs filter). */
+    toneOutIds?: Set<string>;
 }
 
-const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelete, highlight }) => {
+const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelete, highlight, loaded = true, toneOutIds }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<CallLog[] | null>(null);
     const [years, setYears] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
-    const [recentOpen, setRecentOpen] = useState(true);
+    const [tab, setTab] = useState<LogTab>('recent');
+    const [filter, setFilter] = useState<LogFilter>('all');
     const [favoritesRefreshKey, setFavoritesRefreshKey] = useState(0);
     const [powerDmsDept, setPowerDmsDept] = useState<string | null>(null);
     const [linkedLog, setLinkedLog] = useState<CallLog | null>(null);
@@ -77,7 +110,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     const [lastHighlightSeq, setLastHighlightSeq] = useState<number | undefined>(highlight?.seq);
     if (highlight && highlight.seq !== lastHighlightSeq) {
         setLastHighlightSeq(highlight.seq);
-        setRecentOpen(true);
+        setTab('recent');
         setSearchQuery('');
     }
 
@@ -151,13 +184,13 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
 
     return (
         <HighlightContext.Provider value={highlight ?? null}>
-        <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <Box sx={{ p: 2, borderBottom: '1px solid #222' }}>
-                <TextField 
-                    fullWidth 
-                    variant="outlined" 
-                    size="small" 
-                    placeholder="Search logs..." 
+        <Box data-testid="transmission-log" sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <Box sx={{ p: 1.5, borderBottom: '1px solid', borderColor: 'surface.border', display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+                <TextField
+                    fullWidth
+                    variant="outlined"
+                    size="small"
+                    placeholder="Search logs…"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     slotProps={{
@@ -167,76 +200,100 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                                     <Search sx={{ color: 'text.secondary' }} />
                                 </InputAdornment>
                             ),
-                            sx: { color: 'white' }
-                        }
+                        },
                     }}
                     sx={{
                         '& .MuiOutlinedInput-root': {
-                            bgcolor: '#151515',
-                            '& fieldset': { borderColor: '#333' },
-                            '&:hover fieldset': { borderColor: '#555' },
-                            '&.Mui-focused fieldset': { borderColor: '#00ff00' },
-                        }
+                            bgcolor: 'surface.base',
+                            '&.Mui-focused fieldset': { borderColor: 'primary.main' },
+                        },
                     }}
                 />
+                {!searchResults && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
+                        <SegmentedControl<LogTab>
+                            aria-label="Recording view"
+                            size="small"
+                            segments={[
+                                { value: 'recent', label: 'Recent', icon: <HistoryIcon /> },
+                                { value: 'favorites', label: 'Favorites', icon: <Star /> },
+                                { value: 'browse', label: 'Browse', icon: <Folder /> },
+                            ]}
+                            value={tab}
+                            onChange={setTab}
+                        />
+                        {tab !== 'browse' && (
+                            <Box sx={{ display: 'flex', gap: 0.75 }}>
+                                {([
+                                    { value: 'all', label: 'All' },
+                                    { value: 'tones', label: 'Tone-outs', icon: <Campaign sx={{ fontSize: 15 }} /> },
+                                ] as { value: LogFilter; label: string; icon?: React.ReactNode }[]).map(f => (
+                                    <Chip
+                                        key={f.value}
+                                        label={f.label}
+                                        icon={f.icon as React.ReactElement | undefined}
+                                        size="small"
+                                        variant={filter === f.value ? 'filled' : 'outlined'}
+                                        color={filter === f.value ? 'primary' : 'default'}
+                                        onClick={() => setFilter(f.value)}
+                                        sx={{ cursor: 'pointer' }}
+                                    />
+                                ))}
+                            </Box>
+                        )}
+                    </Box>
+                )}
             </Box>
 
-            <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
+            <Box data-log-scroll sx={{ flexGrow: 1, minHeight: 0, overflowY: 'auto' }}>
                 {loading && <Box sx={{ p: 2, textAlign: 'center' }}><CircularProgress size={20} /></Box>}
-                
+
                 {searchResults ? (
                     <List dense>
                         {searchResults.length === 0 && !loading && (
-                            <Typography variant="body2" sx={{ p: 2, textAlign: 'center', color: '#666' }}>
-                                No results found.
-                            </Typography>
+                            <EmptyState icon={<SearchOff />} title="No results found" hint="Try a different search term." />
                         )}
                         {searchResults.map(log => (
                             <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={handleFavoriteToggle} />
                         ))}
                     </List>
-                ) : (
-                    <List dense component="nav">
+                ) : tab === 'recent' ? (
+                    <List dense disablePadding>
                         {/* Linked Recording — a tone-out target that isn't in the recent list */}
                         {showLinked && linkedLog && (
-                            <Box sx={{ borderBottom: '1px solid #1a1a1a' }}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', px: 2, py: 1, bgcolor: 'rgba(255,183,77,0.06)' }}>
-                                    <LinkIcon sx={{ mr: 2, color: '#ffb74d', fontSize: 20 }} />
-                                    <Typography sx={{ fontWeight: 'bold', color: '#ffb74d', fontSize: '0.9rem' }}>
+                            <Box sx={{ ...rowBorder }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', px: 2, py: 1, bgcolor: alpha(HIGHLIGHT, 0.06) }}>
+                                    <LinkIcon sx={{ mr: 2, color: HIGHLIGHT, fontSize: 20 }} />
+                                    <Typography sx={{ fontWeight: 'bold', color: HIGHLIGHT, fontSize: '0.9rem' }}>
                                         Linked Recording
                                     </Typography>
                                 </Box>
                                 <LogItem log={linkedLog} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
                             </Box>
                         )}
-
-                        {/* Recent Activity Node */}
-                        <ListItemButton onClick={() => setRecentOpen(!recentOpen)} sx={{ borderBottom: '1px solid #1a1a1a', bgcolor: 'rgba(0, 255, 0, 0.05)' }}>
-                            <HistoryIcon sx={{ mr: 2, color: '#00ff00', fontSize: 20 }} />
-                            <ListItemText primary="Recent Activity" primaryTypographyProps={{ fontWeight: 'bold', color: '#00ff00' }} />
-                            {recentOpen ? <ExpandLess /> : <ExpandMore />}
-                        </ListItemButton>
-                        <Collapse in={recentOpen} timeout="auto" unmountOnExit>
-                            <List component="div" disablePadding>
-                                {liveLogs.length === 0 && (
-                                    <Typography variant="body2" sx={{ p: 2, textAlign: 'center', color: '#666' }}>
-                                        No recent activity.
-                                    </Typography>
-                                )}
-                                {liveLogs.map(log => (
-                                    <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
-                                ))}
-                            </List>
-                        </Collapse>
-
-                        {/* Favorites Node */}
-                        <FavoritesNode refreshKey={favoritesRefreshKey} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
-
-                        {/* Historical Tree */}
-                        {years.map(year => (
-                            <YearNode key={year} year={year} powerDmsDept={powerDmsDept} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
-                        ))}
+                        {!loaded ? (
+                            <Box sx={{ p: 2 }}><PanelSkeleton rows={6} rowHeight={44} /></Box>
+                        ) : liveLogs.filter(l => matchesFilter(l, filter, toneOutIds)).length === 0 ? (
+                            <EmptyState icon={<Inbox />} title="No recent activity" hint={filter === 'all' ? 'Live transmissions will appear here as they are received.' : 'No recordings match this filter.'} />
+                        ) : (
+                            liveLogs.filter(l => matchesFilter(l, filter, toneOutIds)).map(log => (
+                                <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
+                            ))
+                        )}
                     </List>
+                ) : tab === 'favorites' ? (
+                    <FavoritesList key={favoritesRefreshKey} filter={filter} toneOutIds={toneOutIds} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
+                ) : (
+                    <>
+                        {liveLogs.length > 0 && <ActivityHeatmap logs={liveLogs} />}
+                        <List dense component="nav">
+                            {years.length === 0 ? (
+                                <EmptyState icon={<Folder />} title="No archived recordings" hint="Older recordings are grouped by date here." />
+                            ) : years.map(year => (
+                                <YearNode key={year} year={year} powerDmsDept={powerDmsDept} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
+                            ))}
+                        </List>
+                    </>
                 )}
             </Box>
         </Box>
@@ -244,43 +301,38 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     );
 };
 
-const FavoritesNode = ({ refreshKey, playingId, onPlay, onDelete, onFavoriteToggle }: { refreshKey: number } & LogNodeProps) => {
-    const [open, setOpen] = useState(false);
+// Remounted (via `key`) whenever favorites should refresh, so `loaded` starts
+// false naturally and the effect only sets state in its async callbacks.
+const FavoritesList = ({ filter, toneOutIds, playingId, onPlay, onDelete, onFavoriteToggle }: { filter: LogFilter; toneOutIds?: Set<string> } & LogNodeProps) => {
     const [logs, setLogs] = useState<CallLog[]>([]);
+    const [loaded, setLoaded] = useState(false);
 
     useEffect(() => {
-        if (!open) return;
+        let cancelled = false;
         fetch('/api/history/favorites')
             .then(res => res.json())
-            .then(data => setLogs(data))
-            .catch(err => console.error('Failed to fetch favorites:', err));
-    }, [open, refreshKey]);
+            .then(data => { if (!cancelled) setLogs(data); })
+            .catch(err => console.error('Failed to fetch favorites:', err))
+            .finally(() => { if (!cancelled) setLoaded(true); });
+        return () => { cancelled = true; };
+    }, []);
 
     const handleDelete = (id: string) => {
         setLogs(prev => prev.filter(log => log.id !== id));
         onDelete(id);
     };
 
+    const visible = logs.filter(l => matchesFilter(l, filter, toneOutIds));
+    if (!loaded) return <Box sx={{ p: 2 }}><PanelSkeleton rows={5} rowHeight={44} /></Box>;
+    if (visible.length === 0) {
+        return <EmptyState icon={<StarBorder />} title="No favorites yet" hint="Star a recording to add it here." />;
+    }
     return (
-        <>
-            <ListItemButton onClick={() => setOpen(!open)} sx={{ borderBottom: '1px solid #1a1a1a', bgcolor: 'rgba(255, 204, 0, 0.05)' }}>
-                <Star sx={{ mr: 2, color: '#ffcc00', fontSize: 20 }} />
-                <ListItemText primary="Favorites" primaryTypographyProps={{ fontWeight: 'bold', color: '#ffcc00' }} />
-                {open ? <ExpandLess /> : <ExpandMore />}
-            </ListItemButton>
-            <Collapse in={open} timeout="auto" unmountOnExit>
-                <List component="div" disablePadding>
-                    {logs.length === 0 && (
-                        <Typography variant="body2" sx={{ p: 2, textAlign: 'center', color: '#666' }}>
-                            No favorites yet. Star a recording to add it here.
-                        </Typography>
-                    )}
-                    {logs.map(log => (
-                        <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={onFavoriteToggle} />
-                    ))}
-                </List>
-            </Collapse>
-        </>
+        <List dense disablePadding>
+            {visible.map(log => (
+                <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={onFavoriteToggle} />
+            ))}
+        </List>
     );
 };
 
@@ -304,8 +356,8 @@ const YearNode = ({ year, powerDmsDept, playingId, onPlay, onDelete, onFavoriteT
 
     return (
         <>
-            <ListItemButton onClick={handleToggle} sx={{ pl: 2, borderBottom: '1px solid #1a1a1a' }}>
-                <Folder sx={{ mr: 2, color: '#444', fontSize: 20 }} />
+            <ListItemButton onClick={handleToggle} sx={{ ...indent(1), ...rowBorder }}>
+                <Folder sx={{ mr: 2, color: 'text.disabled', fontSize: 20 }} />
                 <ListItemText primary={year} primaryTypographyProps={{ fontWeight: 'bold' }} />
                 {open ? <ExpandLess /> : <ExpandMore />}
             </ListItemButton>
@@ -343,8 +395,8 @@ const MonthNode = ({ year, month, powerDmsDept, playingId, onPlay, onDelete, onF
 
     return (
         <>
-            <ListItemButton onClick={handleToggle} sx={{ pl: 4, borderBottom: '1px solid #1a1a1a' }}>
-                <CalendarMonth sx={{ mr: 2, color: '#444', fontSize: 18 }} />
+            <ListItemButton onClick={handleToggle} sx={{ ...indent(2), ...rowBorder }}>
+                <CalendarMonth sx={{ mr: 2, color: 'text.disabled', fontSize: 18 }} />
                 <ListItemText primary={monthName} />
                 {open ? <ExpandLess /> : <ExpandMore />}
             </ListItemButton>
@@ -394,8 +446,8 @@ const DayNode = ({ year, month, day, powerDmsDept, playingId, onPlay, onDelete, 
 
     return (
         <>
-            <ListItemButton onClick={handleToggle} sx={{ pl: 6, borderBottom: '1px solid #1a1a1a' }}>
-                <Today sx={{ mr: 2, color: '#444', fontSize: 18 }} />
+            <ListItemButton onClick={handleToggle} sx={{ ...indent(3), ...rowBorder }}>
+                <Today sx={{ mr: 2, color: 'text.disabled', fontSize: 18 }} />
                 <ListItemText primary={`Day ${day}`} />
                 {powerDmsDept && logExists !== null && (
                     <Tooltip title={logExists ? 'Open PowerDMS Daily Log' : 'No daily log available for this date'} arrow>
@@ -405,8 +457,9 @@ const DayNode = ({ year, month, day, powerDmsDept, playingId, onPlay, onDelete, 
                                 onClick={handleOpenDailyLog}
                                 disabled={!logExists}
                                 sx={{ mr: 0.5 }}
+                                aria-label="Open PowerDMS daily log"
                             >
-                                <Article sx={{ color: logExists ? '#4a90d9' : '#444', fontSize: 18 }} />
+                                <Article sx={{ color: logExists ? status.info : 'text.disabled', fontSize: 18 }} />
                             </IconButton>
                         </span>
                     </Tooltip>
@@ -416,10 +469,10 @@ const DayNode = ({ year, month, day, powerDmsDept, playingId, onPlay, onDelete, 
             <Collapse in={open} timeout="auto" unmountOnExit>
                 <List component="div" disablePadding>
                     {channels.map((ch, idx) => (
-                        <ChannelNode 
-                            key={`${ch.frequency}-${idx}`} 
-                            year={year} month={month} day={day} 
-                            channel={ch} 
+                        <ChannelNode
+                            key={`${ch.frequency}-${idx}`}
+                            year={year} month={month} day={day}
+                            channel={ch}
                             playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle}
                         />
                     ))}
@@ -454,20 +507,20 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete, o
 
     return (
         <>
-            <ListItemButton onClick={handleToggle} sx={{ pl: { xs: 4, sm: 8 }, borderBottom: '1px solid #1a1a1a', bgcolor: open ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
-                <Radio sx={{ mr: 2, color: '#00ff00', fontSize: 16 }} />
-                <ListItemText 
-                    primary={channel.alphaTag || `${channel.frequency} MHz`} 
+            <ListItemButton onClick={handleToggle} sx={{ ...indent(4), ...rowBorder, bgcolor: open ? alpha('#ffffff', 0.02) : 'transparent' }}>
+                <Radio sx={{ mr: 2, color: 'primary.main', fontSize: 16 }} />
+                <ListItemText
+                    primary={channel.alphaTag || `${channel.frequency} MHz`}
                     secondary={channel.alphaTag ? `${channel.frequency} MHz` : null}
-                    primaryTypographyProps={{ fontSize: '0.9rem', color: '#eee' }}
-                    secondaryTypographyProps={{ fontSize: '0.75rem', color: '#888' }}
+                    primaryTypographyProps={{ fontSize: '0.9rem', color: 'text.primary' }}
+                    secondaryTypographyProps={{ fontSize: '0.75rem', color: 'text.secondary' }}
                 />
                 {open ? <ExpandLess /> : <ExpandMore />}
             </ListItemButton>
             <Collapse in={open} timeout="auto" unmountOnExit>
                 <List component="div" disablePadding>
                     {logs.map(log => (
-                        <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={onFavoriteToggle} />
+                        <LogItem key={log.id} log={log} tree playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={onFavoriteToggle} />
                     ))}
                 </List>
             </Collapse>
@@ -475,7 +528,7 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete, o
     );
 };
 
-const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: CallLog } & LogNodeProps) => {
+const LogItem =({ log, tree, playingId, onPlay, onDelete, onFavoriteToggle }: { log: CallLog; tree?: boolean } & LogNodeProps) => {
     const [isFavorite, setIsFavorite] = useState(log.isFavorite ?? false);
     const highlight = useContext(HighlightContext);
     const itemRef = useRef<HTMLLIElement>(null);
@@ -487,13 +540,23 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
         if (!highlight || highlight.id !== log.id) return;
         const el = itemRef.current;
         if (!el) return;
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Scroll ONLY the log's own scroll container — using el.scrollIntoView()
+        // would also scroll ancestor containers (pushing the fire tone-out panel
+        // out of view with no way to scroll back). Center the row within it.
+        const container = el.closest('[data-log-scroll]') as HTMLElement | null;
+        if (container) {
+            const cRect = container.getBoundingClientRect();
+            const eRect = el.getBoundingClientRect();
+            const delta = (eRect.top - cRect.top) - (container.clientHeight - el.clientHeight) / 2;
+            container.scrollBy({ top: delta, behavior: 'smooth' });
+        }
         if (typeof el.animate !== 'function') return;
+        const flash = alpha(HIGHLIGHT, 0.28);
         const anim = el.animate(
             [
-                { backgroundColor: 'rgba(255,183,77,0.28)', boxShadow: 'inset 3px 0 0 #ffb74d' },
-                { backgroundColor: 'rgba(255,183,77,0.28)', boxShadow: 'inset 3px 0 0 #ffb74d', offset: 0.7 },
-                { backgroundColor: 'rgba(0,0,0,0)', boxShadow: 'inset 3px 0 0 rgba(255,183,77,0)' },
+                { backgroundColor: flash, boxShadow: `inset 3px 0 0 ${HIGHLIGHT}` },
+                { backgroundColor: flash, boxShadow: `inset 3px 0 0 ${HIGHLIGHT}`, offset: 0.7 },
+                { backgroundColor: 'rgba(0,0,0,0)', boxShadow: `inset 3px 0 0 ${alpha(HIGHLIGHT, 0)}` },
             ],
             { duration: 2000, easing: 'ease-out' }
         );
@@ -521,78 +584,74 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
             <ListItem
                 ref={itemRef}
                 sx={{
-                    pl: { xs: 4, sm: 10 },
+                    // Flat contexts (Recent/Favorites/Search) left-justify; only the
+                    // history tree indents rows to sit under their channel node.
+                    ...(tree ? indent(5) : { pl: 2 }),
                     pr: 2,
                     py: 1,
-                    '& .MuiListItemSecondaryAction-root': {
-                        right: 8
-                    },
-                    bgcolor: 'rgba(0,0,0,0.2)'
+                    '& .MuiListItemSecondaryAction-root': { right: 8 },
+                    bgcolor: alpha('#000000', 0.2),
+                    animation: 'rowEnter 220ms ease',
                 }}
                 secondaryAction={
                     <Box sx={{ display: 'flex', gap: 0.5 }}>
-                        <IconButton size="small" onClick={handleFavoriteClick} title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}>
+                        <IconButton size="small" onClick={handleFavoriteClick} aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'} title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}>
                             {isFavorite
-                                ? <Star sx={{ color: '#ffcc00', fontSize: 18 }} />
-                                : <StarBorder sx={{ color: '#444', fontSize: 18 }} />
+                                ? <Star sx={{ color: GOLD, fontSize: 18 }} />
+                                : <StarBorder sx={{ color: 'text.disabled', fontSize: 18 }} />
                             }
                         </IconButton>
                         {log.audio_path && (
                             <>
-                                <IconButton size="small" onClick={() => onPlay(log.id, log.audio_path!, log.duration)}>
-                                    {playingId === log.id 
+                                <IconButton size="small" onClick={() => onPlay(log.id, log.audio_path!, log.duration, log.alphaTag)} aria-label={playingId === log.id ? 'Stop playback' : 'Play recording'}>
+                                    {playingId === log.id
                                         ? <StopCircle sx={{ color: 'error.main', fontSize: 20 }} />
                                         : <PlayCircleOutline sx={{ color: 'primary.main', fontSize: 20 }} />
                                     }
                                 </IconButton>
-                                <IconButton 
-                                    size="small" 
-                                    component="a" 
-                                    href={`/audio/${log.audio_path}`} 
+                                <IconButton
+                                    size="small"
+                                    component="a"
+                                    href={`/audio/${log.audio_path}`}
                                     download={log.audio_path.split('/').pop() || 'recording.wav'}
+                                    aria-label="Download recording"
                                     title="Download recording"
                                 >
                                     <Download sx={{ color: 'primary.main', fontSize: 20, opacity: 0.7 }} />
                                 </IconButton>
                             </>
                         )}
-                        <IconButton size="small" onClick={() => onDelete(log.id)}>
-                            <Delete sx={{ color: '#444', fontSize: 18 }} />
+                        <IconButton size="small" onClick={() => onDelete(log.id)} aria-label="Delete recording">
+                            <Delete sx={{ color: 'text.disabled', fontSize: 18 }} />
                         </IconButton>
                     </Box>
                 }
             >
-                <ListItemText 
-                    sx={{ pr: 20 }}
+                <ListItemText
+                    sx={{ pr: 14 }}
                     primary={
                         <Box display="flex" alignItems="center" justifyContent="space-between" gap={1}>
-                            <Typography sx={{ color: '#eee', fontWeight: 'bold', fontSize: '0.85rem', lineHeight: 1.2 }}>
+                            <Typography sx={{ color: 'text.primary', fontWeight: 'bold', fontSize: '0.85rem', lineHeight: 1.2 }}>
                                 {log.alphaTag}
                             </Typography>
                             <Box display="flex" alignItems="center" gap={0.75} flexShrink={0}>
                                 {log.detectedTone && (
                                     log.detectedTone === 'EMRG' ? (
                                         <Typography variant="caption" sx={{
-                                            color: '#ffffff',
-                                            fontWeight: 'bold',
-                                            fontSize: '9px',
-                                            bgcolor: '#cc0000',
-                                            border: '1px solid #ff4444',
-                                            px: 0.6,
-                                            py: 0.1,
-                                            borderRadius: 0.5,
-                                            letterSpacing: 0.5,
+                                            color: '#fff', fontWeight: 'bold', fontSize: '9px',
+                                            bgcolor: status.error, border: `1px solid ${alpha(status.error, 0.6)}`,
+                                            px: 0.6, py: 0.1, borderRadius: 0.5, letterSpacing: 0.5,
                                         }}>
                                             ! EMRG
                                         </Typography>
                                     ) : (
-                                        <Typography variant="caption" sx={{ color: '#ff0000', fontWeight: 'bold', fontSize: '9px', border: '1px solid #ff0000', px: 0.5, borderRadius: 0.5 }}>
+                                        <Typography variant="caption" sx={{ color: status.error, fontWeight: 'bold', fontSize: '9px', border: `1px solid ${status.error}`, px: 0.5, borderRadius: 0.5 }}>
                                             {log.detectedTone}
                                         </Typography>
                                     )
                                 )}
                                 {log.duration && (
-                                    <Typography variant="caption" sx={{ color: '#555', fontSize: '0.7rem', fontFamily: 'monospace' }}>
+                                    <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.7rem', ...monoFont }}>
                                         {log.duration.toFixed(1)}s
                                     </Typography>
                                 )}
@@ -602,7 +661,7 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                     secondary={
                         <Box component="span" display="block">
                             <Box display="flex" alignItems="center" gap={0.75} mt={0.3} flexWrap="wrap">
-                                <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#555', fontSize: '0.68rem' }}>
+                                <Typography variant="caption" sx={{ ...monoFont, color: 'text.disabled', fontSize: '0.68rem' }}>
                                     {(() => {
                                         const d = new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z');
                                         const now = new Date();
@@ -612,40 +671,38 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                                             : `${d.toLocaleDateString([], { month: '2-digit', day: '2-digit' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
                                     })()}
                                 </Typography>
-                                <Typography variant="caption" sx={{ color: '#333', fontSize: '0.65rem' }}>·</Typography>
-                                <Typography variant="caption" sx={{ fontFamily: 'monospace', color: '#444', fontSize: '0.68rem' }}>
+                                <Typography variant="caption" sx={{ color: 'surface.borderStrong', fontSize: '0.65rem' }}>·</Typography>
+                                <Typography variant="caption" sx={{ ...monoFont, color: 'text.disabled', fontSize: '0.68rem' }}>
                                     {log.frequency.toFixed(3)} MHz
                                 </Typography>
                                 {(log.speakerChain || log.sourceID || log.targetID) && (
                                     <>
-                                        <Typography variant="caption" sx={{ color: '#333', fontSize: '0.65rem' }}>·</Typography>
+                                        <Typography variant="caption" sx={{ color: 'surface.borderStrong', fontSize: '0.65rem' }}>·</Typography>
                                         <Box display="flex" alignItems="center" gap={0.4}>
                                             {log.speakerChain ? (
-                                                // Multi-speaker chain: "12345 → 67890 → 12345 → TG 763901"
                                                 <>
-                                                    <Typography variant="caption" sx={{ color: '#ffaa00', fontSize: '0.7rem', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                                                    <Typography variant="caption" sx={{ color: status.warn, fontSize: '0.7rem', ...monoFont, fontWeight: 'bold' }}>
                                                         {log.speakerChain}
                                                     </Typography>
                                                     {log.targetID && (
                                                         <>
-                                                            <Typography variant="caption" sx={{ color: '#444', fontSize: '0.65rem' }}>→</Typography>
-                                                            <Typography variant="caption" sx={{ color: '#555', fontSize: '0.65rem', fontFamily: 'monospace' }}>TG</Typography>
-                                                            <Typography variant="caption" sx={{ color: '#00bfff', fontSize: '0.7rem', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                                                            <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem' }}>→</Typography>
+                                                            <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem', ...monoFont }}>TG</Typography>
+                                                            <Typography variant="caption" sx={{ color: status.info, fontSize: '0.7rem', ...monoFont, fontWeight: 'bold' }}>
                                                                 {log.targetID}
                                                             </Typography>
                                                         </>
                                                     )}
                                                 </>
                                             ) : (
-                                                // Single speaker: "SRC 12345 → TG 763901"
                                                 <>
-                                                    <Typography variant="caption" sx={{ color: '#555', fontSize: '0.65rem', fontFamily: 'monospace' }}>SRC</Typography>
-                                                    <Typography variant="caption" sx={{ color: '#ffaa00', fontSize: '0.7rem', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                                                    <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem', ...monoFont }}>SRC</Typography>
+                                                    <Typography variant="caption" sx={{ color: status.warn, fontSize: '0.7rem', ...monoFont, fontWeight: 'bold' }}>
                                                         {log.sourceID ?? '?'}
                                                     </Typography>
-                                                    <Typography variant="caption" sx={{ color: '#444', fontSize: '0.65rem' }}>→</Typography>
-                                                    <Typography variant="caption" sx={{ color: '#555', fontSize: '0.65rem', fontFamily: 'monospace' }}>TG</Typography>
-                                                    <Typography variant="caption" sx={{ color: '#00bfff', fontSize: '0.7rem', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                                                    <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem' }}>→</Typography>
+                                                    <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem', ...monoFont }}>TG</Typography>
+                                                    <Typography variant="caption" sx={{ color: status.info, fontSize: '0.7rem', ...monoFont, fontWeight: 'bold' }}>
                                                         {log.targetID ?? '?'}
                                                     </Typography>
                                                 </>
@@ -655,15 +712,15 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                                 )}
                                 {log.lat && log.lat !== 0 && (
                                     <>
-                                        <Typography variant="caption" sx={{ color: '#333', fontSize: '0.65rem' }}>·</Typography>
-                                        <Typography variant="caption" sx={{ color: '#444', fontSize: '0.68rem', fontFamily: 'monospace' }}>
+                                        <Typography variant="caption" sx={{ color: 'surface.borderStrong', fontSize: '0.65rem' }}>·</Typography>
+                                        <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.68rem', ...monoFont }}>
                                             {log.lat.toFixed(3)}, {log.lon?.toFixed(3)}
                                         </Typography>
                                     </>
                                 )}
                             </Box>
                             {log.transcription && (
-                                <Typography variant="body2" sx={{ color: '#999', fontStyle: 'italic', fontSize: '0.72rem', mt: 0.4, lineHeight: 1.3 }}>
+                                <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic', fontSize: '0.72rem', mt: 0.4, lineHeight: 1.3 }}>
                                     "{log.transcription}"
                                 </Typography>
                             )}
@@ -672,7 +729,7 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
                     secondaryTypographyProps={{ component: 'div' }}
                 />
             </ListItem>
-            <Divider component="li" sx={{ borderColor: '#111' }} />
+            <Divider component="li" sx={{ borderColor: 'surface.border' }} />
         </React.Fragment>
     );
 };

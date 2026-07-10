@@ -1,11 +1,12 @@
 :root {
-  font-family: 'Roboto Mono', monospace;
+  /* Mirrors client/src/theme/tokens.ts (surface.base / text.primary). */
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
   color-scheme: dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #050505; 
+  color: #e7ecf2;
+  background-color: #08090b;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -19,7 +20,7 @@ body {
   width: 100vw;
   height: 100vh;
   overflow: hidden; /* App will handle scrolling */
-  background-color: #000;
+  background-color: #08090b;
   overscroll-behavior-y: none; /* Disable pull-to-refresh */
   -webkit-tap-highlight-color: transparent;
 }
@@ -42,17 +43,4 @@ body {
   }
 }
 
-/* Scrollbar Styling */
-::-webkit-scrollbar {
-  width: 8px;
-}
-::-webkit-scrollbar-track {
-  background: #111; 
-}
-::-webkit-scrollbar-thumb {
-  background: #333; 
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #555; 
-}
+/* Scrollbar styling is applied globally via the MUI theme (CssBaseline). */

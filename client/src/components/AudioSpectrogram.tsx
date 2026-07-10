@@ -1,10 +1,13 @@
 import React, { useEffect, useRef } from 'react';
 import { Box } from '@mui/material';
+import { viridisRGB } from '../viz/ramp';
 
 interface Props {
     analyser?: AnalyserNode;
     height?: number;
 }
+
+const WIDTH = 800;
 
 const AudioSpectrogram: React.FC<Props> = ({ analyser, height = 150 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -14,71 +17,64 @@ const AudioSpectrogram: React.FC<Props> = ({ analyser, height = 150 }) => {
         if (!canvasRef.current || !analyser) return;
 
         const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const H = canvas.height;
+        const ctx = canvas.getContext('2d');
         if (!ctx) return;
+        ctx.imageSmoothingEnabled = false;
 
-        // Configuration
-        // const fftSize = 1024; // Resolution of frequency bars
-        // analyser.fftSize = fftSize; // Removed to avoid prop mutation
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
 
-        // Off-screen buffer for scrolling effect
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = canvas.width;
-        tempCanvas.height = canvas.height;
-        const tempCtx = tempCanvas.getContext('2d');
+        // Offscreen ring-buffer history: we only ever write ONE new row per frame
+        // (at a moving top pointer) and render the scroll with two cheap blits.
+        // This avoids copying the whole canvas onto itself every frame, which is
+        // what made the old approach janky.
+        const hist = document.createElement('canvas');
+        hist.width = WIDTH;
+        hist.height = H;
+        const histCtx = hist.getContext('2d');
+
+        // A reusable 1px-tall row we putImageData into, then blit into the history.
+        const rowCanvas = document.createElement('canvas');
+        rowCanvas.width = WIDTH;
+        rowCanvas.height = 1;
+        const rowCtx = rowCanvas.getContext('2d');
+        const rowData = rowCtx ? rowCtx.createImageData(WIDTH, 1) : null;
+
+        let top = 0; // ring y-index that maps to the newest row (visible y=0)
 
         const draw = () => {
-            if (!ctx || !tempCtx) return;
+            if (!ctx || !histCtx || !rowCtx || !rowData) return;
 
-            // 1. Get Audio Data
             analyser.getByteFrequencyData(dataArray);
 
-            // 2. Shift existing image down by 1 pixel
-            tempCtx.drawImage(canvas, 0, 0);
-            ctx.fillStyle = '#000'; // Background color
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(tempCanvas, 0, 1); // Draw old image 1px lower
-
-            // 3. Draw new row at the top (y=0)
-            const imageData = ctx.createImageData(canvas.width, 1);
-            
-            // Map FFT bins to Canvas Width
-            // bufferLength (512) -> canvas.width
-            for (let x = 0; x < canvas.width; x++) {
-                // Logarithmic scale for better audio visualization
-                // or Linear scale for simplicity. Let's do linear for raw PCM.
-                const i = Math.floor((x / canvas.width) * (bufferLength / 2)); // Use lower half of spectrum (0-4khz)
+            const FLOOR = 18;
+            for (let x = 0; x < WIDTH; x++) {
+                // Lower half of the spectrum (~0–4 kHz voice band).
+                const i = Math.floor((x / WIDTH) * (bufferLength / 2));
                 const value = dataArray[i];
-
-                // Heatmap Color Map: Black -> Blue -> Green -> Yellow -> Red
                 let r = 0, g = 0, b = 0;
-                
-                if (value < 20) { // Silence/Noise floor
-                    r = 0; g = 0; b = 0; // Black
-                } else if (value < 60) {
-                    b = (value - 20) * 6; // Blue-ish
-                } else if (value < 120) {
-                    b = 255;
-                    g = (value - 60) * 4; // Cyan/Green
-                } else if (value < 180) {
-                    g = 255;
-                    r = (value - 120) * 4; // Yellow
-                    b = 255 - r;
-                } else {
-                    r = 255;
-                    g = 255 - (value - 180) * 4; // Red
+                if (value >= FLOOR) {
+                    [r, g, b] = viridisRGB((value - FLOOR) / (255 - FLOOR));
                 }
-
-                const pixelIndex = x * 4;
-                imageData.data[pixelIndex] = r;
-                imageData.data[pixelIndex + 1] = g;
-                imageData.data[pixelIndex + 2] = b;
-                imageData.data[pixelIndex + 3] = 255; // Alpha
+                const p = x * 4;
+                rowData.data[p] = r;
+                rowData.data[p + 1] = g;
+                rowData.data[p + 2] = b;
+                rowData.data[p + 3] = 255;
             }
-            
-            ctx.putImageData(imageData, 0, 0);
+            rowCtx.putImageData(rowData, 0, 0);
+
+            // Advance the ring up by one and write the newest row there.
+            top = (top - 1 + H) % H;
+            histCtx.drawImage(rowCanvas, 0, top);
+
+            // Render newest-at-top: [top..H] then [0..top].
+            const lower = H - top;
+            ctx.drawImage(hist, 0, top, WIDTH, lower, 0, 0, WIDTH, lower);
+            if (top > 0) {
+                ctx.drawImage(hist, 0, 0, WIDTH, top, 0, lower, WIDTH, top);
+            }
 
             animationRef.current = requestAnimationFrame(draw);
         };
@@ -91,20 +87,21 @@ const AudioSpectrogram: React.FC<Props> = ({ analyser, height = 150 }) => {
     }, [analyser]);
 
     return (
-        <Box sx={{ 
-            width: '100%', 
-            height: height, 
-            border: '1px solid #333', 
-            borderRadius: 1, 
+        <Box sx={{
+            width: '100%',
+            height: height,
+            border: '1px solid',
+            borderColor: 'surface.border',
+            borderRadius: 1,
             overflow: 'hidden',
             bgcolor: '#000',
             position: 'relative'
         }}>
-            <canvas 
-                ref={canvasRef} 
-                width={800} 
-                height={height} 
-                style={{ width: '100%', height: '100%', display: 'block' }} 
+            <canvas
+                ref={canvasRef}
+                width={WIDTH}
+                height={height}
+                style={{ width: '100%', height: '100%', display: 'block' }}
             />
             <div style={{
                 position: 'absolute',
