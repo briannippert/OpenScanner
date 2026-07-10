@@ -33,6 +33,34 @@ public class HistoryControllerTests
     }
 
     [Fact]
+    public async Task GetById_ReturnsLog_WhenFound()
+    {
+        // Arrange
+        var log = new CallLog { Id = "log_123" };
+        _dbMock.Setup(db => db.GetTransmissionByIdAsync("log_123")).ReturnsAsync(log);
+
+        // Act
+        var result = await _controller.GetById("log_123");
+
+        // Assert
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Same(log, ok.Value);
+    }
+
+    [Fact]
+    public async Task GetById_Returns404_WhenMissing()
+    {
+        // Arrange
+        _dbMock.Setup(db => db.GetTransmissionByIdAsync("nope")).ReturnsAsync((CallLog?)null);
+
+        // Act
+        var result = await _controller.GetById("nope");
+
+        // Assert
+        Assert.IsType<NotFoundResult>(result.Result);
+    }
+
+    [Fact]
     public async Task GetYears_ReturnsYears()
     {
         // Arrange

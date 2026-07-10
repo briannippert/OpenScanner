@@ -31,6 +31,20 @@ public class HistoryController : ControllerBase
     }
 
     /// <summary>
+    /// Retrieves a single transmission log by its ID.
+    /// </summary>
+    /// <param name="id">The transmission ID.</param>
+    /// <returns>The matching call log, or 404 if it no longer exists.</returns>
+    [HttpGet("entry/{id}")]
+    [ProducesResponseType(typeof(CallLog), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<CallLog>> GetById(string id)
+    {
+        var log = await _db.GetTransmissionByIdAsync(id);
+        return log is null ? NotFound() : Ok(log);
+    }
+
+    /// <summary>
     /// Gets all years for which transmission data exists.
     /// </summary>
     /// <returns>List of years (e.g., ["2023", "2024"]).</returns>

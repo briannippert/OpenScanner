@@ -29,7 +29,8 @@ import {
     Today,
     Radio,
     History as HistoryIcon,
-    Article
+    Article,
+    Link as LinkIcon
 } from '@mui/icons-material';
 import type { CallLog, Channel } from '../types';
 
@@ -65,21 +66,43 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     const [recentOpen, setRecentOpen] = useState(true);
     const [favoritesRefreshKey, setFavoritesRefreshKey] = useState(0);
     const [powerDmsDept, setPowerDmsDept] = useState<string | null>(null);
+    const [linkedLog, setLinkedLog] = useState<CallLog | null>(null);
 
     const handleFavoriteToggle = () => setFavoritesRefreshKey(k => k + 1);
 
-    // When a new highlight targets a recent log, make sure the Recent Activity
-    // section is expanded and any active search is cleared so the item is rendered
-    // and can be scrolled into view. This adjusts state during render in response to
-    // a changed prop (React's recommended pattern) rather than in an effect.
+    // When a new highlight arrives, expand Recent Activity and clear any active
+    // search so the target item is rendered and can be scrolled into view. This
+    // adjusts state during render in response to a changed prop (React's
+    // recommended pattern) rather than in an effect.
     const [lastHighlightSeq, setLastHighlightSeq] = useState<number | undefined>(highlight?.seq);
     if (highlight && highlight.seq !== lastHighlightSeq) {
         setLastHighlightSeq(highlight.seq);
-        if (liveLogs.some(l => l.id === highlight.id)) {
-            setRecentOpen(true);
-            setSearchQuery('');
-        }
+        setRecentOpen(true);
+        setSearchQuery('');
     }
+
+    // The target recording may not be in the live "Recent Activity" list — e.g.
+    // an older tone-out whose recording has scrolled out of the recent window,
+    // or after a page reload. In that case fetch it directly so we can pin it at
+    // the top and scroll to it, making the tone-out link always work. setState
+    // only happens in the async callback (never synchronously in the effect).
+    useEffect(() => {
+        if (!highlight) return;
+        if (liveLogs.some(l => l.id === highlight.id)) return; // already rendered in Recent
+        if (linkedLog?.id === highlight.id) return;            // already pinned
+        const targetId = highlight.id;
+        let cancelled = false;
+        fetch(`/api/history/entry/${encodeURIComponent(targetId)}`)
+            .then(res => (res.ok ? res.json() : null))
+            .then((data: CallLog | null) => { if (!cancelled && data) setLinkedLog(data); })
+            .catch(err => console.error('Failed to fetch linked recording:', err));
+        return () => { cancelled = true; };
+    }, [highlight, liveLogs, linkedLog]);
+
+    // Only show the pinned recording while it is the active target and isn't
+    // already present in the live list (avoids showing it twice).
+    const showLinked = !!linkedLog && highlight?.id === linkedLog.id
+        && !liveLogs.some(l => l.id === linkedLog.id);
 
     const handleDelete = (id: string) => {
         setSearchResults(prev => prev ? prev.filter(log => log.id !== id) : null);
@@ -174,6 +197,19 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                     </List>
                 ) : (
                     <List dense component="nav">
+                        {/* Linked Recording — a tone-out target that isn't in the recent list */}
+                        {showLinked && linkedLog && (
+                            <Box sx={{ borderBottom: '1px solid #1a1a1a' }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', px: 2, py: 1, bgcolor: 'rgba(255,183,77,0.06)' }}>
+                                    <LinkIcon sx={{ mr: 2, color: '#ffb74d', fontSize: 20 }} />
+                                    <Typography sx={{ fontWeight: 'bold', color: '#ffb74d', fontSize: '0.9rem' }}>
+                                        Linked Recording
+                                    </Typography>
+                                </Box>
+                                <LogItem log={linkedLog} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
+                            </Box>
+                        )}
+
                         {/* Recent Activity Node */}
                         <ListItemButton onClick={() => setRecentOpen(!recentOpen)} sx={{ borderBottom: '1px solid #1a1a1a', bgcolor: 'rgba(0, 255, 0, 0.05)' }}>
                             <HistoryIcon sx={{ mr: 2, color: '#00ff00', fontSize: 20 }} />
