@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Typography, Paper, LinearProgress, Chip, ThemeProvider } from '@mui/material';
+import { Box, Typography, Paper, Chip, ThemeProvider } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import type { ScannerState, Channel } from '../types';
 import RadioIcon from '@mui/icons-material/Radio';
@@ -7,7 +7,6 @@ import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import AudioSpectrogram from './AudioSpectrogram';
 import VuMeter from './VuMeter';
-import SignalSparkline from './SignalSparkline';
 import { accent, surface, status, text } from '../theme/tokens';
 import { readoutTheme } from '../theme/theme';
 
@@ -266,23 +265,6 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                     )}
                 </Box>
 
-                {/* Signal bar + sparkline history */}
-                <Box mt={1}>
-                    <LinearProgress
-                        variant="determinate"
-                        value={state.signalStrength}
-                        sx={{
-                            height: 4, borderRadius: 2, bgcolor: 'surface.border',
-                            '& .MuiLinearProgress-bar': { bgcolor: activeColor, boxShadow: `0 0 8px ${activeColor}` },
-                        }}
-                    />
-                    <Box sx={{ mt: 0.75, display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography variant="caption" sx={{ color: text.disabled, fontSize: '0.6rem', letterSpacing: 1, minWidth: 34 }}>
-                            SIG
-                        </Typography>
-                        <SignalSparkline value={state.signalStrength} color={activeColor} height={22} />
-                    </Box>
-                </Box>
             </Box>
         </Paper>
       </ThemeProvider>
