@@ -210,7 +210,7 @@ sudo apt-get update -qq || log_warn "apt-get update encountered errors. Attempti
 sudo apt-get install -y -qq git cmake build-essential \
     libitpp-dev libsndfile1-dev libusb-1.0-0-dev libncurses-dev \
     rtl-sdr librtlsdr-dev libcodec2-dev libpulse-dev libasound2-dev \
-    gpsd gpsd-clients ffmpeg multimon-ng > /dev/null
+    gpsd gpsd-clients ffmpeg multimon-ng openssl > /dev/null
 log_success "Libraries installed."
 
 # --- Whisper.cpp Setup ---
@@ -369,12 +369,62 @@ if [ "${SKIP_POWERDMS:-false}" = false ]; then
 fi
 
 
+# ----------------------------------------------------------------
+# HTTPS self-signed certificate
+# ----------------------------------------------------------------
+# Serving over HTTPS gives the browser a "secure context", which unlocks
+# AudioWorklet (smoother live audio) and other secure-only web APIs. The cert is
+# self-signed, so browsers show a one-time warning to accept — that's expected
+# for a LAN device. Kept outside git (see .gitignore) so the pre-pull hard reset
+# can't delete it, and reused across installs.
+log_step "Configuring HTTPS certificate..."
+CERT_DIR="$PROJECT_ROOT/certs"
+CERT_PFX="$CERT_DIR/openscanner.pfx"
+CERT_PASSWORD="openscanner"
+mkdir -p "$CERT_DIR"
+
+if [ -f "$CERT_PFX" ]; then
+    log_info "Reusing existing certificate at $CERT_PFX"
+else
+    LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    SAN="DNS:localhost,DNS:$(hostname)"
+    [ -n "$LOCAL_IP" ] && SAN="$SAN,IP:$LOCAL_IP"
+    SAN="$SAN,IP:127.0.0.1"
+
+    if openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
+        -keyout "$CERT_DIR/key.pem" -out "$CERT_DIR/cert.pem" \
+        -subj "/CN=openscanner" -addext "subjectAltName=$SAN" 2>/dev/null \
+       && openssl pkcs12 -export -out "$CERT_PFX" \
+        -inkey "$CERT_DIR/key.pem" -in "$CERT_DIR/cert.pem" \
+        -passout "pass:$CERT_PASSWORD" 2>/dev/null; then
+        rm -f "$CERT_DIR/key.pem" "$CERT_DIR/cert.pem"
+        chmod 640 "$CERT_PFX"
+        log_success "Generated self-signed certificate ($SAN)."
+    else
+        log_warn "Certificate generation failed — the service will run HTTP-only."
+        CERT_PFX=""
+    fi
+fi
+
 log_step "Configuring Systemd Service..."
 SERVICE_FILE="/etc/systemd/system/openscanner.service"
 NET_EXEC="$PROJECT_ROOT/server/OpenScanner.Server/bin/Release/net10.0/publish/OpenScanner.Server"
 
 # Ensure executable permission
 chmod +x "$NET_EXEC"
+
+# Bind HTTPS (443) alongside HTTP (80) when a certificate is available, and point
+# Kestrel at the self-signed PFX via environment variables (no server code needed).
+if [ -n "$CERT_PFX" ]; then
+    BIND_URLS="http://0.0.0.0:80;https://0.0.0.0:443"
+    CERT_ENV="Environment=ASPNETCORE_Kestrel__Certificates__Default__Path=$CERT_PFX
+Environment=ASPNETCORE_Kestrel__Certificates__Default__Password=$CERT_PASSWORD"
+    log_info "Service will listen on http://:80 and https://:443"
+else
+    BIND_URLS="http://0.0.0.0:80"
+    CERT_ENV=""
+    log_info "Service will listen on http://:80"
+fi
 
 # Create temp file for service config
 TEMP_SERVICE_FILE=$(mktemp)
@@ -387,11 +437,12 @@ After=network.target sound.target
 Type=simple
 User=root
 WorkingDirectory=$PROJECT_ROOT/server/OpenScanner.Server
-ExecStart=$NET_EXEC --urls "http://0.0.0.0:80"
+ExecStart=$NET_EXEC --urls "$BIND_URLS"
 Restart=always
 RestartSec=5
 Environment=DOTNET_ENVIRONMENT=Production
-Environment=ASPNETCORE_URLS=http://0.0.0.0:80
+Environment=ASPNETCORE_URLS=$BIND_URLS
+$CERT_ENV
 
 [Install]
 WantedBy=multi-user.target
@@ -422,4 +473,7 @@ echo "================================================="
 echo -e "   ${BOLD}Status:${NC} systemctl status openscanner"
 echo -e "   ${BOLD}Logs:${NC}   journalctl -u openscanner -f"
 echo -e "   ${BOLD}Web UI:${NC} http://$IP_ADDR"
+if [ -n "$CERT_PFX" ]; then
+    echo -e "   ${BOLD}Secure:${NC} https://$IP_ADDR  (self-signed — accept the browser warning; enables smoother live audio)"
+fi
 echo "================================================="

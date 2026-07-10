@@ -46,3 +46,6 @@ obj/
 *.userprefs
 
 whisper.cpp/
+
+# Installer-generated HTTPS cert (self-signed, per-device)
+/certs/
