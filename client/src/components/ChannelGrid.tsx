@@ -12,8 +12,6 @@ import PanelSkeleton from './common/PanelSkeleton';
 interface Props {
   channels: Channel[];
   manualHold?: number;
-  /** Frequencies currently transmitting — shown with a pulsing on-air dot. */
-  activeFrequencies?: Set<number>;
   loaded: boolean;
   onEdit: () => void;
   onToggleAvoid: (ch: Channel) => void;
@@ -23,10 +21,8 @@ interface Props {
 const EXPERIMENTAL_MODES = ['FM', 'AM', 'WFM'];
 const MONO = '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
-const ChannelGrid: React.FC<Props> = ({ channels, manualHold, activeFrequencies, loaded, onEdit, onToggleAvoid, onHold }) => {
+const ChannelGrid: React.FC<Props> = ({ channels, manualHold, loaded, onEdit, onToggleAvoid, onHold }) => {
   const isHeld = (ch: Channel) => manualHold === ch.frequency;
-  const isOnAir = (ch: Channel) =>
-    !!activeFrequencies && [...activeFrequencies].some(f => Math.abs(f - ch.frequency) < 0.0001);
 
   return (
     <SectionCard
@@ -53,36 +49,22 @@ const ChannelGrid: React.FC<Props> = ({ channels, manualHold, activeFrequencies,
         <Grid container spacing={1.5}>
           {channels.map((ch) => {
             const held = isHeld(ch);
-            const onAir = isOnAir(ch);
             return (
               <Grid size={{ xs: 12, sm: 6, md: 12 }} key={ch.frequency}>
                 <Card
                   sx={{
-                    borderColor: onAir ? 'error.main' : held ? 'warning.main' : 'surface.border',
+                    borderColor: held ? 'warning.main' : 'surface.border',
                     backgroundColor: 'surface.raised',
-                    boxShadow: onAir ? (t) => `0 0 0 1px ${t.palette.error.main}, 0 0 16px ${alpha(t.palette.error.main, 0.35)}` : undefined,
-                    transition: (t) => `border-color ${t.transitions.duration.short}ms, background-color ${t.transitions.duration.short}ms, box-shadow ${t.transitions.duration.short}ms`,
+                    transition: (t) => `border-color ${t.transitions.duration.short}ms, background-color ${t.transitions.duration.short}ms`,
                     '&:hover': { backgroundColor: 'surface.overlay' },
                   }}
                 >
                   <Box sx={{ p: 1.75 }}>
                     <Box display="flex" justifyContent="space-between" alignItems="flex-start" gap={1}>
                       <Box sx={{ minWidth: 0 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                          {onAir && (
-                            <Box
-                              component="span"
-                              aria-label="On air"
-                              sx={{
-                                width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                                bgcolor: 'error.main', animation: 'onair 1.6s infinite',
-                              }}
-                            />
-                          )}
-                          <Typography variant="subtitle1" fontWeight={700} color={onAir ? 'error.main' : held ? 'warning.main' : 'text.primary'} noWrap>
-                            {ch.alphaTag}
-                          </Typography>
-                        </Box>
+                        <Typography variant="subtitle1" fontWeight={700} color={held ? 'warning.main' : 'text.primary'} noWrap>
+                          {ch.alphaTag}
+                        </Typography>
                         <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
                           {ch.description}
                         </Typography>

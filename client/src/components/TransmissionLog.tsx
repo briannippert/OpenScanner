@@ -184,7 +184,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
 
     return (
         <HighlightContext.Provider value={highlight ?? null}>
-        <Box data-testid="transmission-log" sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Box data-testid="transmission-log" sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <Box sx={{ p: 1.5, borderBottom: '1px solid', borderColor: 'surface.border', display: 'flex', flexDirection: 'column', gap: 1.25 }}>
                 <TextField
                     fullWidth
@@ -245,7 +245,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                 )}
             </Box>
 
-            <Box sx={{ flexGrow: 1, overflowY: 'auto' }}>
+            <Box data-log-scroll sx={{ flexGrow: 1, minHeight: 0, overflowY: 'auto' }}>
                 {loading && <Box sx={{ p: 2, textAlign: 'center' }}><CircularProgress size={20} /></Box>}
 
                 {searchResults ? (
@@ -520,7 +520,7 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete, o
             <Collapse in={open} timeout="auto" unmountOnExit>
                 <List component="div" disablePadding>
                     {logs.map(log => (
-                        <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={onFavoriteToggle} />
+                        <LogItem key={log.id} log={log} tree playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={onFavoriteToggle} />
                     ))}
                 </List>
             </Collapse>
@@ -528,7 +528,7 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete, o
     );
 };
 
-const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: CallLog } & LogNodeProps) => {
+const LogItem =({ log, tree, playingId, onPlay, onDelete, onFavoriteToggle }: { log: CallLog; tree?: boolean } & LogNodeProps) => {
     const [isFavorite, setIsFavorite] = useState(log.isFavorite ?? false);
     const highlight = useContext(HighlightContext);
     const itemRef = useRef<HTMLLIElement>(null);
@@ -540,7 +540,16 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
         if (!highlight || highlight.id !== log.id) return;
         const el = itemRef.current;
         if (!el) return;
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Scroll ONLY the log's own scroll container — using el.scrollIntoView()
+        // would also scroll ancestor containers (pushing the fire tone-out panel
+        // out of view with no way to scroll back). Center the row within it.
+        const container = el.closest('[data-log-scroll]') as HTMLElement | null;
+        if (container) {
+            const cRect = container.getBoundingClientRect();
+            const eRect = el.getBoundingClientRect();
+            const delta = (eRect.top - cRect.top) - (container.clientHeight - el.clientHeight) / 2;
+            container.scrollBy({ top: delta, behavior: 'smooth' });
+        }
         if (typeof el.animate !== 'function') return;
         const flash = alpha(HIGHLIGHT, 0.28);
         const anim = el.animate(
@@ -575,7 +584,9 @@ const LogItem = ({ log, playingId, onPlay, onDelete, onFavoriteToggle }: { log: 
             <ListItem
                 ref={itemRef}
                 sx={{
-                    ...indent(5),
+                    // Flat contexts (Recent/Favorites/Search) left-justify; only the
+                    // history tree indents rows to sit under their channel node.
+                    ...(tree ? indent(5) : { pl: 2 }),
                     pr: 2,
                     py: 1,
                     '& .MuiListItemSecondaryAction-root': { right: 8 },

@@ -37,14 +37,6 @@ function App() {
   const { scannerState } = scanner;
   const manualHold = scannerState.manualHoldFrequency;
 
-  // Frequencies currently transmitting (for the channel-grid on-air indicator).
-  const activeFrequencies = useMemo(() => {
-    const s = new Set<number>();
-    if (scannerState.status === 'RECEIVING' && scannerState.currentFrequency) s.add(scannerState.currentFrequency);
-    scannerState.parallelChannels?.forEach(pc => { if (pc.isActive) s.add(pc.channel.frequency); });
-    return s;
-  }, [scannerState.status, scannerState.currentFrequency, scannerState.parallelChannels]);
-
   // Clock.
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -217,7 +209,6 @@ function App() {
               <ChannelGrid
                 channels={scanner.channels}
                 manualHold={manualHold}
-                activeFrequencies={activeFrequencies}
                 loaded={scanner.channelsLoaded}
                 onEdit={() => setIsManagerOpen(true)}
                 onToggleAvoid={handleToggleAvoid}
