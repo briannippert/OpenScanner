@@ -59,6 +59,9 @@ log_info "Cleaning previous application builds..."
 rm -rf client/node_modules client/dist
 rm -rf server/OpenScanner.Server/bin server/OpenScanner.Server/obj
 
+# --- HTTPS cert (force regeneration so the test exercises cert creation) ---
+rm -rf certs
+
 # 1. Run Installer
 log_info "Step 1: Running install_service.sh..."
 # Pipe an empty newline to skip the PowerDMS department prompt so the test runs non-interactively
@@ -94,6 +97,28 @@ if command -v curl &> /dev/null; then
     fi
 else
     log_info "curl not found, skipping HTTP check."
+fi
+
+# 3b. HTTPS: verify the self-signed cert was generated and the server serves it.
+log_info "Step 3b: Checking HTTPS certificate and response on port 443..."
+if [ -f "$PROJECT_ROOT/certs/openscanner.pfx" ]; then
+    log_success "Self-signed certificate generated at certs/openscanner.pfx."
+else
+    log_error "Expected certs/openscanner.pfx was not generated."
+    exit 1
+fi
+
+if command -v curl &> /dev/null; then
+    # -k: accept the self-signed cert.
+    HTTPS_CODE=$(curl -sk -o /dev/null -w "%{http_code}" https://localhost:443/ || true)
+    if [ "$HTTPS_CODE" -ne "000" ]; then
+        log_success "Server responded over HTTPS with $HTTPS_CODE."
+    else
+        log_error "Server did not respond on port 443 (HTTPS $HTTPS_CODE)."
+        exit 1
+    fi
+else
+    log_info "curl not found, skipping HTTPS check."
 fi
 
 # 4. Teardown
