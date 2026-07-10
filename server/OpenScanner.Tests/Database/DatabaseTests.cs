@@ -78,6 +78,21 @@ public class DatabaseTests : IDisposable
     }
 
     [Fact]
+    public async Task GetTransmissionById_ShouldReturnMatchingLog()
+    {
+        var log = new CallLog("target_id", DateTime.UtcNow.ToString("o"), 155.0, "Tag", "Desc", 45.0, -122.0, "audio.raw", 5.0, "Linked transcription", 1234, 5678);
+        await _db.SaveTransmissionAsync(log);
+
+        var found = await _db.GetTransmissionByIdAsync("target_id");
+        Assert.NotNull(found);
+        Assert.Equal("target_id", found!.Id);
+        Assert.Equal("Linked transcription", found.Transcription);
+
+        var missing = await _db.GetTransmissionByIdAsync("does_not_exist");
+        Assert.Null(missing);
+    }
+
+    [Fact]
     public async Task HierarchicalNavigation_ShouldReturnCorrectNodes()
     {
         var date1 = "2023-01-15T10:00:00";

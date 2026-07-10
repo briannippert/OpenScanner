@@ -254,7 +254,9 @@ if ! command -v dsd-fme &> /dev/null || ! ldconfig -p | grep -q libmbe; then
         cd mbelib
         rm -rf build
         mkdir -p build && cd build
-        cmake ..
+        # mbelib/dsd-fme ship an ancient cmake_minimum_required (<3.5), which
+        # CMake 4+ (Ubuntu 26.04) refuses to configure. Allow the old policy.
+        cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ..
         make -j$(nproc)
         sudo make install
         sudo ldconfig
@@ -271,7 +273,7 @@ if ! command -v dsd-fme &> /dev/null || ! ldconfig -p | grep -q libmbe; then
         git pull origin $(git branch --show-current) || true
         rm -rf build
         mkdir -p build && cd build
-        cmake ..
+        cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ..
         make -j$(nproc)
         sudo make install
         sudo ldconfig

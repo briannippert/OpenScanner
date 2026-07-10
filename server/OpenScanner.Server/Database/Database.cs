@@ -209,6 +209,13 @@ public class Database : IDatabase
     }
     
     /// <inheritdoc />
+    public async Task<CallLog?> GetTransmissionByIdAsync(string id)
+    {
+        using var conn = GetConnection();
+        return await conn.QueryFirstOrDefaultAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetById.sql"), new { Id = id });
+    }
+
+    /// <inheritdoc />
     public async Task<IEnumerable<string>> GetTransmissionYearsAsync()
     {
         using var conn = GetConnection();
