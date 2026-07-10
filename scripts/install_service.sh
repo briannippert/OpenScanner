@@ -19,6 +19,10 @@ log_success() { echo -e "${GREEN}[OK] $1${NC}"; }
 log_warn() { echo -e "${YELLOW}[WARN] $1${NC}"; }
 log_error() { echo -e "${RED}[ERROR] $1${NC}"; }
 
+# Preserve the original invocation args so we can re-exec the script verbatim
+# if it updates itself during the git pull below.
+INSTALLER_ARGS=("$@")
+
 # Parse Arguments
 DEPS_ONLY=false
 for arg in "$@"; do
@@ -80,8 +84,23 @@ if git remote get-url origin &> /dev/null; then
         fi
     fi
 
+    # Record the installer's committed version before the pull so we can tell
+    # whether the update changed the installer itself.
+    PRE_PULL_INSTALLER=$(git rev-parse "HEAD:scripts/install_service.sh" 2>/dev/null || echo "")
+
     if git pull origin main; then
         log_success "Code pulled successfully."
+
+        # If the pull updated this installer, re-exec the new version once so the
+        # rest of the setup runs from the latest script. The guard env var stops
+        # this from looping.
+        POST_PULL_INSTALLER=$(git rev-parse "HEAD:scripts/install_service.sh" 2>/dev/null || echo "")
+        if [ -n "$PRE_PULL_INSTALLER" ] && [ "$PRE_PULL_INSTALLER" != "$POST_PULL_INSTALLER" ] \
+           && [ -z "$OPENSCANNER_INSTALLER_RELOADED" ]; then
+            log_warn "Installer was updated by the pull — restarting with the new version..."
+            export OPENSCANNER_INSTALLER_RELOADED=1
+            exec bash "$PROJECT_ROOT/scripts/install_service.sh" "${INSTALLER_ARGS[@]}"
+        fi
     else
         log_warn "Git pull failed. Continuing with local files..."
     fi

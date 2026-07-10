@@ -31,7 +31,13 @@
     </Content>
   </ItemGroup>
 
-  <Target Name="BuildFrontend" BeforeTargets="Build">
+  <!--
+    Bundles the React client into the server build. Skip with
+    -p:SkipFrontendBuild=true where the frontend is built/validated separately
+    (e.g. the .NET CI job, which is covered by the Frontend workflow) to avoid
+    building the client twice and needing Node in that job.
+  -->
+  <Target Name="BuildFrontend" BeforeTargets="Build" Condition="'$(SkipFrontendBuild)' != 'true'">
     <PropertyGroup>
       <ClientDir>$(MSBuildProjectDirectory)/../../client</ClientDir>
     </PropertyGroup>
