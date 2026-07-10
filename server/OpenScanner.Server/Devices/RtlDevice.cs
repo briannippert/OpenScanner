@@ -67,6 +67,17 @@ public class RtlDevice : BackgroundService, IRadioSource
     // Stereo pan positions for parallel channels: maps frequency -> (leftGain, rightGain)
     private Dictionary<double, (double Left, double Right)> _parallelPanMap = new();
 
+    // Real-time stereo mixer for parallel mode. Each channel's mono audio is enqueued here,
+    // and a periodic timer sums all active channels sample-aligned into one panned stereo
+    // stream. Without this, simultaneous channels would broadcast independent stereo chunks
+    // that the browser scheduler serializes end-to-end (garbled overlapping audio).
+    private readonly Dictionary<double, Queue<short>> _mixQueues = new();
+    private readonly object _mixLock = new();
+    private System.Threading.Timer? _mixTimer;
+    private const int MixIntervalMs = 20;
+    private const int MixBlockSamples = 48000 * MixIntervalMs / 1000; // 960 samples @ 48kHz
+    private const int MixQueueMaxSamples = 48000 / 2; // ~500ms backlog cap to bound latency
+
     /// <summary>
     /// Initializes a new instance of the <see cref="RtlDevice"/> class.
     /// </summary>
@@ -433,6 +444,14 @@ public class RtlDevice : BackgroundService, IRadioSource
 
     private void StopParallelPipelines()
     {
+        // Stop the mixer first so no tick fires after the pipelines are gone.
+        _mixTimer?.Dispose();
+        _mixTimer = null;
+        lock (_mixLock)
+        {
+            _mixQueues.Clear();
+        }
+
         if (_parallelPipelines != null)
         {
             foreach (var pipeline in _parallelPipelines)
@@ -597,6 +616,15 @@ public class RtlDevice : BackgroundService, IRadioSource
                 $"Parallel pan: {pipelines.First(p => p.Channel.Frequency == sortedFreqs[i]).Channel.AlphaTag} " +
                 $"({sortedFreqs[i]} MHz) -> L={leftGain:F2} R={rightGain:F2}");
         }
+
+        // Initialize the stereo mixer: one jitter queue per channel + periodic mix timer.
+        lock (_mixLock)
+        {
+            _mixQueues.Clear();
+            foreach (var freq in _parallelPanMap.Keys)
+                _mixQueues[freq] = new Queue<short>();
+        }
+        _mixTimer = new System.Threading.Timer(MixTick, null, MixIntervalMs, MixIntervalMs);
 
         // Build initial parallel channel states for the UI
         UpdateParallelState();
@@ -784,32 +812,29 @@ public class RtlDevice : BackgroundService, IRadioSource
     }
 
     /// <summary>
-    /// Handle audio from a parallel channel pipeline. Pan to stereo L/R and send to browser.
+    /// Handle audio from a parallel channel pipeline. Enqueue the channel's mono samples for
+    /// the stereo mixer (which sums all active channels into one panned stream) and route the
+    /// untouched mono audio to per-channel recording.
     /// </summary>
     private void HandleParallelAudio(Channel channel, byte[] audio)
     {
         _toneDetector.ProcessAudio(audio);
         _mdc.ProcessAudio(audio);
 
-        // Convert mono s16le to stereo s16le with per-channel panning
-        var (leftGain, rightGain) = _parallelPanMap.GetValueOrDefault(channel.Frequency, (0.5, 0.5));
+        // Enqueue mono samples for the mixer instead of broadcasting per-channel stereo.
         int monoSamples = audio.Length / 2;
-        var stereo = new byte[monoSamples * 4]; // 2 channels * 2 bytes per sample
-
-        for (int i = 0; i < monoSamples; i++)
+        lock (_mixLock)
         {
-            short mono = (short)(audio[i * 2] | (audio[i * 2 + 1] << 8));
-            short left = (short)(mono * leftGain);
-            short right = (short)(mono * rightGain);
+            if (_mixQueues.TryGetValue(channel.Frequency, out var queue))
+            {
+                for (int i = 0; i < monoSamples; i++)
+                    queue.Enqueue((short)(audio[i * 2] | (audio[i * 2 + 1] << 8)));
 
-            int outIdx = i * 4;
-            stereo[outIdx] = (byte)(left & 0xFF);
-            stereo[outIdx + 1] = (byte)((left >> 8) & 0xFF);
-            stereo[outIdx + 2] = (byte)(right & 0xFF);
-            stereo[outIdx + 3] = (byte)((right >> 8) & 0xFF);
+                // Bound latency: if this channel ran ahead, drop the oldest samples.
+                while (queue.Count > MixQueueMaxSamples)
+                    queue.Dequeue();
+            }
         }
-
-        OnAudio?.Invoke(stereo);
 
         // Route mono to multi-channel recording (recordings stay mono per channel)
         var rs = _recordingService as RecordingService;
@@ -819,6 +844,59 @@ public class RtlDevice : BackgroundService, IRadioSource
         }
 
         UpdateParallelState();
+    }
+
+    /// <summary>
+    /// Periodic mixer tick. Pulls an equal-length block from every parallel channel's queue,
+    /// applies each channel's pan gains, sums them sample-aligned into a single interleaved
+    /// stereo buffer, and broadcasts it. Channels with no buffered audio contribute silence.
+    /// Produces one continuous stereo stream so overlapping transmissions play concurrently.
+    /// </summary>
+    private void MixTick(object? _)
+    {
+        // No-op if the parallel scan has stopped (guards a late-firing timer tick).
+        if (_parallelPipelines == null) return;
+
+        var mixLeft = new int[MixBlockSamples];
+        var mixRight = new int[MixBlockSamples];
+        bool anyAudio = false;
+
+        lock (_mixLock)
+        {
+            foreach (var (freq, gains) in _parallelPanMap)
+            {
+                if (!_mixQueues.TryGetValue(freq, out var queue) || queue.Count == 0)
+                    continue;
+
+                int count = Math.Min(queue.Count, MixBlockSamples);
+                for (int i = 0; i < count; i++)
+                {
+                    short sample = queue.Dequeue();
+                    mixLeft[i] += (int)(sample * gains.Left);
+                    mixRight[i] += (int)(sample * gains.Right);
+                }
+                anyAudio = true;
+            }
+        }
+
+        // If every channel was silent this tick, skip the broadcast (preserves the
+        // "only stream when active" behavior; the client resumes cleanly on underrun).
+        if (!anyAudio) return;
+
+        var stereo = new byte[MixBlockSamples * 4];
+        for (int i = 0; i < MixBlockSamples; i++)
+        {
+            short left = (short)Math.Clamp(mixLeft[i], short.MinValue, short.MaxValue);
+            short right = (short)Math.Clamp(mixRight[i], short.MinValue, short.MaxValue);
+
+            int outIdx = i * 4;
+            stereo[outIdx] = (byte)(left & 0xFF);
+            stereo[outIdx + 1] = (byte)((left >> 8) & 0xFF);
+            stereo[outIdx + 2] = (byte)(right & 0xFF);
+            stereo[outIdx + 3] = (byte)((right >> 8) & 0xFF);
+        }
+
+        OnAudio?.Invoke(stereo);
     }
 
     /// <summary>
