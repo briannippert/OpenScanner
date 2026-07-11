@@ -156,6 +156,15 @@ function App() {
     [scanner.radioEvents],
   );
 
+  // Recording id → transcription for the fire tone-out event log. Value is null
+  // while the recording is present but its transcription hasn't streamed in yet,
+  // so EventLog can show a "Transcribing…" placeholder until it arrives.
+  const eventTranscriptions = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const log of scanner.callLog) map.set(log.id, log.transcription ?? null);
+    return map;
+  }, [scanner.callLog]);
+
   return (
       <Box sx={{
         display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw',
@@ -224,6 +233,7 @@ function App() {
                 {scanner.fireTones.length > 0 && (
                   <EventLog
                     events={scanner.radioEvents}
+                    transcriptions={eventTranscriptions}
                     onClear={scanner.clearEvents}
                     onEventClick={(e) => {
                       if (e.transmissionId) {

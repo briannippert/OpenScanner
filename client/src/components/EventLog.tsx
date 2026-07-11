@@ -14,6 +14,13 @@ interface EventLogProps {
     events: RadioEvent[];
     onClear: () => void;
     onEventClick?: (event: RadioEvent) => void;
+    /**
+     * Lookup of a tone-out's recording id → its transcription. A present key with a
+     * null value means the recording exists but isn't transcribed yet (shows a
+     * "Transcribing…" placeholder); a missing key means the recording isn't in the
+     * recent window so no transcription is shown.
+     */
+    transcriptions?: Map<string, string | null>;
 }
 
 const formatDetail = (e: RadioEvent): string => {
@@ -22,7 +29,7 @@ const formatDetail = (e: RadioEvent): string => {
     return '';
 };
 
-export default function EventLog({ events, onClear, onEventClick }: EventLogProps) {
+export default function EventLog({ events, onClear, onEventClick, transcriptions }: EventLogProps) {
     const [open, setOpen] = useState(true);
 
     return (
@@ -61,6 +68,8 @@ export default function EventLog({ events, onClear, onEventClick }: EventLogProp
                     <List dense disablePadding sx={{ maxHeight: 200, overflowY: 'auto' }}>
                         {events.map(e => {
                             const clickable = !!e.transmissionId && !!onEventClick;
+                            const transcription = e.transmissionId ? transcriptions?.get(e.transmissionId) : undefined;
+                            const pending = !transcription && !!e.transmissionId && !!transcriptions?.has(e.transmissionId);
                             return (
                                 <ListItemButton
                                     key={e.id}
@@ -92,6 +101,19 @@ export default function EventLog({ events, onClear, onEventClick }: EventLogProp
                                                 {formatDetail(e)}
                                                 {e.alphaTag ? ` · ${e.alphaTag}` : e.frequency ? ` · ${e.frequency.toFixed(4)} MHz` : ''}
                                             </Typography>
+                                            {transcription ? (
+                                                <Typography
+                                                    sx={{ color: 'text.secondary', fontStyle: 'italic', fontSize: '0.7rem', lineHeight: 1.25, mt: 0.25 }}
+                                                    noWrap
+                                                    title={transcription}
+                                                >
+                                                    “{transcription}”
+                                                </Typography>
+                                            ) : pending ? (
+                                                <Typography sx={{ color: 'text.disabled', fontStyle: 'italic', fontSize: '0.7rem', lineHeight: 1.25, mt: 0.25 }}>
+                                                    Transcribing…
+                                                </Typography>
+                                            ) : null}
                                         </Box>
                                         {clickable && <LaunchIcon sx={{ color: alpha(status.warn, 0.6), fontSize: 14, flexShrink: 0 }} />}
                                         <Typography sx={{ color: 'text.disabled', fontSize: '0.7rem', flexShrink: 0 }}>
