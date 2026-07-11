@@ -69,6 +69,9 @@ public class RtlDevice : BackgroundService, IRadioSource
     // Parallel FastScan mode
     private List<ChannelPipeline>? _parallelPipelines;
     private readonly ConcurrentDictionary<double, CancellationTokenSource> _parallelActivityTimeouts = new();
+    // Per-channel throttle for the audio-driven activity-timeout reset (mirrors
+    // the single-channel _lastActivityReset throttle) to avoid task churn.
+    private readonly ConcurrentDictionary<double, DateTime> _parallelLastAudioReset = new();
     private readonly ConcurrentDictionary<double, string?> _parallelLastTones = new();
     // Stereo pan positions for parallel channels: maps frequency -> (leftGain, rightGain)
     private Dictionary<double, (double Left, double Right)> _parallelPanMap = new();
@@ -477,6 +480,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             kvp.Value.Cancel();
         }
         _parallelActivityTimeouts.Clear();
+        _parallelLastAudioReset.Clear();
         _parallelLastTones.Clear();
     }
 
@@ -851,6 +855,19 @@ public class RtlDevice : BackgroundService, IRadioSource
         if (rs != null && rs.IsChannelRecording(channel.Frequency))
         {
             _recordingService.ProcessAudio(channel.Frequency, audio);
+
+            // Keep the recording alive while audio is still flowing, not only on
+            // decoder metadata/activity events. Otherwise a gap in metadata longer
+            // than the 2s activity timeout finalizes the clip mid-transmission and
+            // the next event starts a new one, splitting one over into ~2s chunks.
+            // Throttled per channel to avoid re-arming the timer on every chunk.
+            var now = DateTime.UtcNow;
+            var last = _parallelLastAudioReset.TryGetValue(channel.Frequency, out var l) ? l : DateTime.MinValue;
+            if ((now - last).TotalMilliseconds >= 500)
+            {
+                _parallelLastAudioReset[channel.Frequency] = now;
+                ResetParallelActivityTimeout(channel);
+            }
         }
 
         UpdateParallelState();
