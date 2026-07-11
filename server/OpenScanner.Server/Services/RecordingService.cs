@@ -323,10 +323,15 @@ public class RecordingService : IRecordingService
                                     int? sourceID, int? targetID,
                                     string? lastDetectedTone, string? speakerChain)
     {
-        var duration = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
-        _logger.LogInformation($"Recording duration: {duration:F1}s. Raw file exists: {File.Exists(recordingPath)}");
+        // Wall-clock elapsed is used only as a coarse liveness gate. The stored
+        // duration is derived from the audio actually written (below) so it
+        // matches the playable clip, since wall-clock over-counts the silent
+        // finalize hang time (2s, or up to 6s after a tone-out) and under-counts
+        // the pre-roll buffer prepended at the start.
+        var elapsed = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - startTime) / 1000.0;
+        _logger.LogInformation($"Recording elapsed: {elapsed:F1}s. Raw file exists: {File.Exists(recordingPath)}");
 
-        if (duration >= 0.5 && recordingPath != null && File.Exists(recordingPath) && channel != null)
+        if (elapsed >= 0.5 && recordingPath != null && File.Exists(recordingPath) && channel != null)
         {
             var fileInfo = new FileInfo(recordingPath);
             if (fileInfo.Length < 4096)
@@ -335,6 +340,11 @@ public class RecordingService : IRecordingService
                 _logger.LogInformation("Deleted small recording file (less than 4KB).");
                 return;
             }
+
+            // Raw audio is 48 kHz mono 16-bit PCM = 96000 bytes/sec. Deriving the
+            // duration from the byte count matches the actual MP3 length.
+            const double RawBytesPerSecond = 48000.0 * 2.0;
+            var duration = fileInfo.Length / RawBytesPerSecond;
 
             // Convert RAW to compressed MP3 (mono, 32 kbps) to save disk space.
             var mp3Path = Path.ChangeExtension(recordingPath, ".mp3");
