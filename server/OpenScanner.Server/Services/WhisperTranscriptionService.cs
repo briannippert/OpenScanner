@@ -477,8 +477,9 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
                 var stderrTask = proc.StandardError.ReadToEndAsync();
 
                 // A large accuracy-first model on a Pi can be well below real time;
-                // allow more headroom than the old fixed 120s. Configurable.
-                var timeoutMs = (int.TryParse(_config["Transcription:TimeoutSeconds"], out var ts) && ts > 0 ? ts : 300) * 1000;
+                // allow generous headroom (measured from when whisper starts, not
+                // from when the clip was queued). Configurable.
+                var timeoutMs = (int.TryParse(_config["Transcription:TimeoutSeconds"], out var ts) && ts > 0 ? ts : 600) * 1000;
                 if (!proc.WaitForExit(timeoutMs))
                 {
                     _logger.LogError("Whisper timed out");
