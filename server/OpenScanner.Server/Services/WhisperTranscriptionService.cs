@@ -191,13 +191,41 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
         }
     }
 
+    // Default generic radio/dispatch prompt. Biases Whisper toward scanner
+    // terminology and style. Overridable via Transcription:Prompt config.
+    private const string DefaultPrompt = "Dispatch, Unit 1, 10-4, copy, over. Priority traffic, code 3 response to street intersection. Suspect description: white male, blue jeans. License plate, vehicle registration, bolo. Structure fire, medical emergency, staging area. Status check, affirmative, negative, stand by. Channel 2, tac channel, command post. Kilo, Tango, Zulu, X-ray. 10-20 location, 10-8 in service, 10-7 out of service.";
+
+    // Voice-tuned ffmpeg filter chain applied before handing audio to Whisper:
+    // band-limit to the narrowband voice range, denoise, and adaptively normalize
+    // loudness (replaces a flat gain that clipped hot clips and under-boosted
+    // quiet ones). Overridable via Transcription:AudioFilters config.
+    private const string DefaultAudioFilters = "highpass=f=200,lowpass=f=3500,afftdn,dynaudnorm=f=200:g=5,alimiter=limit=0.95";
+
+    // Build the whisper-cli argument string. Kept pure/static so it can be unit
+    // tested without a real whisper binary or audio file.
+    internal static string BuildWhisperArgs(string modelPath, string wavPath, string prompt, int beamSize, int threads, string? extraArgs)
+    {
+        // -nt: no timestamps, -otxt: write .txt, -l en: force English.
+        // -bs/-bo: beam search (accuracy-first). -t: internal threads.
+        // -mc 0: don't carry text context across 30s windows — radio clips are
+        //   short/independent, so this removes a common hallucination/repetition
+        //   path (equivalent to condition_on_previous_text=false).
+        // -et 2.8: entropy threshold that keeps the temperature fallback which
+        //   reduces garbage output on hard audio.
+        var args = $"-m \"{modelPath}\" -f \"{wavPath}\" -nt -otxt -l en" +
+                   $" -bs {beamSize} -bo {beamSize} -t {threads} -mc 0 -et 2.8" +
+                   $" --prompt \"{prompt}\"";
+        if (!string.IsNullOrWhiteSpace(extraArgs)) args += " " + extraArgs.Trim();
+        return args;
+    }
+
     public string? TranscribeAudio(string audioPath)
     {
         // Check setting
         var enabled = _db.GetSettingAsync("EnableTranscription").GetAwaiter().GetResult();
         if (enabled != "true") return null;
 
-        // Get model name from config (e.g. "small.en")
+        // Get model name from config (e.g. "large-v3-turbo-q5_0")
         var modelName = _config["Transcription:Model"] ?? "small.en";
 
         // Temp file for resampling to 16k
@@ -262,8 +290,10 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
 
         convertStart.ArgumentList.Add("-i");
         convertStart.ArgumentList.Add(audioPath);
+        var audioFilters = _config["Transcription:AudioFilters"];
+        if (string.IsNullOrWhiteSpace(audioFilters)) audioFilters = DefaultAudioFilters;
         convertStart.ArgumentList.Add("-af");
-        convertStart.ArgumentList.Add("volume=15dB");
+        convertStart.ArgumentList.Add(audioFilters);
         convertStart.ArgumentList.Add("-ar");
         convertStart.ArgumentList.Add("16000");
         convertStart.ArgumentList.Add("-ac");
@@ -286,10 +316,15 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
 
         if (!File.Exists(tempWavPath)) return null;
 
-        // 2. Run Whisper with Radio Context
-        // Prompt helps Whisper bias towards radio terminology and style
-        var prompt = "Dispatch, Unit 1, 10-4, copy, over. Priority traffic, code 3 response to street intersection. Suspect description: white male, blue jeans. License plate, vehicle registration, bolo. Structure fire, medical emergency, staging area. Status check, affirmative, negative, stand by. Channel 2, tac channel, command post. Kilo, Tango, Zulu, X-ray. 10-20 location, 10-8 in service, 10-7 out of service.";
-        var whisperArgs = $"-m \"{modelPath}\" -f \"{tempWavPath}\" -nt -otxt -l en --prompt \"{prompt}\"";
+        // 2. Run Whisper with radio context + accuracy-oriented decode settings.
+        var prompt = _config["Transcription:Prompt"];
+        if (string.IsNullOrWhiteSpace(prompt)) prompt = DefaultPrompt;
+        var beamSize = int.TryParse(_config["Transcription:BeamSize"], out var bs) && bs > 0 ? bs : 5;
+        var threads = int.TryParse(_config["Transcription:WhisperThreads"], out var t) && t > 0
+            ? t
+            : Math.Max(1, Environment.ProcessorCount);
+        var extraArgs = _config["Transcription:ExtraArgs"];
+        var whisperArgs = BuildWhisperArgs(modelPath, tempWavPath, prompt, beamSize, threads, extraArgs);
 
         var whisperStart = new ProcessStartInfo(whisperBin, whisperArgs)
         {
@@ -308,7 +343,10 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
                 var stdoutTask = proc.StandardOutput.ReadToEndAsync();
                 var stderrTask = proc.StandardError.ReadToEndAsync();
 
-                if (!proc.WaitForExit(120000)) // 120s timeout
+                // A large accuracy-first model on a Pi can be well below real time;
+                // allow more headroom than the old fixed 120s. Configurable.
+                var timeoutMs = (int.TryParse(_config["Transcription:TimeoutSeconds"], out var ts) && ts > 0 ? ts : 300) * 1000;
+                if (!proc.WaitForExit(timeoutMs))
                 {
                     _logger.LogError("Whisper timed out");
                     proc.Kill();

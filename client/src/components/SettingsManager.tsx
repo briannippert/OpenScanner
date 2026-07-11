@@ -248,7 +248,7 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
                             {settings['EnableTranscription'] === 'true' && (
                                 <Row
                                     label="Transcription Threads"
-                                    description={`Parallel threads for AI transcription. CPU cores: ${systemInfo.CpuCores || 'Unknown'}`}
+                                    description={`Number of recordings transcribed at once. With a large model, 1 is recommended (each run already uses all cores). CPU cores: ${systemInfo.CpuCores || 'Unknown'}`}
                                     control={
                                         <TextField
                                             type="number"

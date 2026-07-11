@@ -122,8 +122,10 @@ public class Database : IDatabase
         var threadsCount = conn.ExecuteScalar<int>("SELECT count(*) FROM settings WHERE key = 'TranscriptionThreads'");
         if (threadsCount == 0)
         {
-            var defaultThreads = Math.Max(1, Environment.ProcessorCount / 2);
-            conn.Execute("INSERT INTO settings (key, value) VALUES ('TranscriptionThreads', @DefaultThreads)", new { DefaultThreads = defaultThreads.ToString() });
+            // Number of concurrent transcription processes. Default to 1: with a
+            // large accuracy-first model each run already uses all CPU cores
+            // (whisper -t), so running several at once just makes each slower.
+            conn.Execute("INSERT INTO settings (key, value) VALUES ('TranscriptionThreads', '1')");
         }
     }
 

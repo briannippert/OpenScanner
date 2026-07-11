@@ -53,4 +53,40 @@ public class WhisperTranscriptionServiceTests
         
         _dbMock.Verify(db => db.UpdateTranscriptionAsync("test_log_id", null), Times.Once);
     }
+
+    [Fact]
+    public void BuildWhisperArgs_IncludesAccuracyFlagsAndModelPromptWav()
+    {
+        var args = WhisperTranscriptionService.BuildWhisperArgs(
+            "/models/ggml-large-v3-turbo-q5_0.bin", "/tmp/clip.16k.wav", "radio prompt", 5, 4, null);
+
+        Assert.Contains("-m \"/models/ggml-large-v3-turbo-q5_0.bin\"", args);
+        Assert.Contains("-f \"/tmp/clip.16k.wav\"", args);
+        Assert.Contains("--prompt \"radio prompt\"", args);
+        Assert.Contains("-l en", args);
+        Assert.Contains("-nt", args);
+        // Accuracy / anti-hallucination flags.
+        Assert.Contains("-bs 5", args);
+        Assert.Contains("-bo 5", args);
+        Assert.Contains("-t 4", args);
+        Assert.Contains("-mc 0", args);
+        Assert.Contains("-et 2.8", args);
+    }
+
+    [Fact]
+    public void BuildWhisperArgs_AppendsExtraArgsWhenProvided()
+    {
+        var args = WhisperTranscriptionService.BuildWhisperArgs(
+            "/m.bin", "/a.wav", "p", 5, 4, "  --vad  ");
+
+        Assert.EndsWith("--vad", args);
+    }
+
+    [Fact]
+    public void BuildWhisperArgs_OmitsExtraArgsWhenNullOrBlank()
+    {
+        var args = WhisperTranscriptionService.BuildWhisperArgs("/m.bin", "/a.wav", "p", 5, 4, "   ");
+        // Blank ExtraArgs must not append anything after the prompt.
+        Assert.EndsWith("--prompt \"p\"", args);
+    }
 }
