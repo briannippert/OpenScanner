@@ -37,6 +37,11 @@ public class RtlDevice : BackgroundService, IRadioSource
 
     private ScannerState _state = new ScannerState("IDLE", 0);
     private bool _manualOverride = false;
+
+    // Capture-watchdog diagnostics surfaced on the debug page.
+    private int _restartCount;
+    private long _totalBytesRead;
+    private (DateTime When, long Bytes)? _lastThroughputSample;
     
     private string? _lastDetectedTone;
     // Normally 2s of silence ends a transmission. After a fire tone-out we use a
@@ -151,6 +156,22 @@ public class RtlDevice : BackgroundService, IRadioSource
 
     /// <inheritdoc />
     public ScannerState GetState() => _state;
+
+    /// <inheritdoc />
+    public RadioDiagnostics GetDiagnostics()
+    {
+        // Throughput = bytes read since the previous call, over elapsed wall time.
+        var now = DateTime.UtcNow;
+        var bytes = System.Threading.Interlocked.Read(ref _totalBytesRead);
+        double kbPerSec = 0;
+        if (_lastThroughputSample is { } prev)
+        {
+            var elapsed = (now - prev.When).TotalSeconds;
+            if (elapsed > 0) kbPerSec = (bytes - prev.Bytes) / 1024.0 / elapsed;
+        }
+        _lastThroughputSample = (now, bytes);
+        return new RadioDiagnostics(_restartCount, Math.Round(Math.Max(0, kbPerSec), 1));
+    }
 
     /// <inheritdoc />
     public void ReloadChannels()
@@ -722,6 +743,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                 {
                     bool isAlive = _scannerProcess != null && !_scannerProcess.HasExited;
                     _logger.LogWarning($"Parallel scanner stalled. Process alive: {isAlive}. Restarting...");
+                    System.Threading.Interlocked.Increment(ref _restartCount);
                     break;
                 }
 
@@ -730,6 +752,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                 if (bytesRead <= 0) break;
 
                 totalBytesRead += bytesRead;
+                System.Threading.Interlocked.Add(ref _totalBytesRead, bytesRead);
 
                 // Warm-up: skip first 50ms
                 if ((DateTime.UtcNow - segmentStartTime).TotalMilliseconds < 50) continue;
@@ -1106,7 +1129,8 @@ public class RtlDevice : BackgroundService, IRadioSource
                 {
                     bool isAlive = _scannerProcess != null && !_scannerProcess.HasExited;
                     _logger.LogWarning($"Scanner hardware stalled (No data for 5s). Process Alive: {isAlive}, Total Bytes: {totalBytesRead}. Restarting...");
-                    break; 
+                    System.Threading.Interlocked.Increment(ref _restartCount);
+                    break;
                 }
 
                 // Data received, cancel the watchdog task
@@ -1119,6 +1143,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                 }
 
                 totalBytesRead += bytesRead;
+                System.Threading.Interlocked.Add(ref _totalBytesRead, bytesRead);
 
 
                 // Rate limit FFT updates (approx 50Hz)

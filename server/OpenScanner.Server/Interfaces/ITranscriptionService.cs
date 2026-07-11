@@ -9,6 +9,11 @@ public interface ITranscriptionService
     void QueueTranscription(CallLog log, string audioPath);
 
     /// <summary>
+    /// Current depth of the transcription queue and the number of active workers.
+    /// </summary>
+    TranscriptionQueueStatus GetQueueStatus();
+
+    /// <summary>
     /// Ensure the given whisper model is downloaded, in the background. Safe to
     /// call when it already exists. Progress is surfaced via the
     /// TranscriptionModelStatus setting.

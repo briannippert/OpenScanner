@@ -75,17 +75,34 @@ public class SupportService : ISupportService
     private readonly IDatabase _db;
     private readonly IRadioSource _radio;
     private readonly GpsService _gps;
+    private readonly ITranscriptionService _transcription;
+    private readonly WebSocketBroadcaster _broadcaster;
+    private readonly IRecordingService _recording;
+    private readonly RecordingCleanupService _cleanup;
+
+    // Previous CPU samples, retained so a percentage can be computed from the
+    // delta between successive polls (this service is a singleton).
+    private readonly object _cpuLock = new();
+    private (long Idle, long Total)? _lastProcStat;
+    private (DateTime When, TimeSpan Cpu)? _lastProcessCpu;
+
+    // systemd units the debug page reports on, in display order.
+    private static readonly string[] MonitoredUnits = { "openscanner", "gpsd" };
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SupportService"/> class.
     /// </summary>
-    public SupportService(IConfiguration configuration, ILoggerProvider loggerProvider, IDatabase db, IRadioSource radio, GpsService gps)
+    public SupportService(IConfiguration configuration, ILoggerProvider loggerProvider, IDatabase db, IRadioSource radio, GpsService gps, ITranscriptionService transcription, WebSocketBroadcaster broadcaster, IRecordingService recording, RecordingCleanupService cleanup)
     {
         _configuration = configuration;
         _loggerProvider = (MemoryLoggerProvider)loggerProvider;
         _db = db;
         _radio = radio;
         _gps = gps;
+        _transcription = transcription;
+        _broadcaster = broadcaster;
+        _recording = recording;
+        _cleanup = cleanup;
     }
 
     /// <inheritdoc />
@@ -145,6 +162,365 @@ public class SupportService : ISupportService
 
         info["CpuCores"] = Environment.ProcessorCount.ToString();
         return info;
+    }
+
+    /// <inheritdoc />
+    public SystemStats GetSystemStats()
+    {
+        var cpu = GetCpuPercent();
+        var (usedBytes, totalBytes) = GetMemoryBytes();
+        var memPct = totalBytes > 0 ? (double)usedBytes / totalBytes * 100.0 : 0;
+
+        return new SystemStats(
+            Math.Round(cpu, 1),
+            Math.Round(memPct, 1),
+            usedBytes / 1024 / 1024,
+            totalBytes / 1024 / 1024,
+            _transcription.GetQueueStatus());
+    }
+
+    /// <inheritdoc />
+    public async Task<DiagnosticsSnapshot> GetDiagnosticsAsync()
+    {
+        var state = _radio.GetState();
+        var scanner = new ScannerSummary(
+            state.Status,
+            state.IsHardwareConnected,
+            state.CurrentFrequency,
+            state.CurrentSignalDb,
+            state.SignalStrength,
+            state.Gain,
+            state.Squelch,
+            state.IsAudioStreaming);
+
+        var gps = new GpsDiagnostics(
+            _gps.IsGpsdConnected,
+            _gps.SecondsSinceLastFix.HasValue ? Math.Round(_gps.SecondsSinceLastFix.Value, 1) : null,
+            _gps.LastKnownLocation);
+
+        DbStats dbStats;
+        try
+        {
+            dbStats = await _db.GetDbStatsAsync();
+        }
+        catch (Exception ex)
+        {
+            _loggerProvider.CreateLogger(nameof(SupportService)).LogDebug(ex, "Failed to read DB stats");
+            dbStats = new DbStats(0, 0, 0, null, null);
+        }
+
+        var connections = new ConnectionStats(_broadcaster.ControlClientCount, _broadcaster.AudioClientCount);
+        var recording = new RecordingActivity(_recording.ActiveRecordingCount, _recording.ActiveRecordingIds.ToList());
+        var cleanup = new CleanupStatus(
+            _cleanup.LastRunUtc?.ToString("o"),
+            _cleanup.LastFreeBytes,
+            _cleanup.TotalPurged);
+
+        string? modelStatus = null;
+        try { modelStatus = await _db.GetSettingAsync("TranscriptionModelStatus"); }
+        catch (Exception ex) { _loggerProvider.CreateLogger(nameof(SupportService)).LogDebug(ex, "Failed to read model status"); }
+
+        return new DiagnosticsSnapshot(
+            GetUptime(),
+            scanner,
+            gps,
+            dbStats,
+            connections,
+            recording,
+            _radio.GetDiagnostics(),
+            cleanup,
+            modelStatus);
+    }
+
+    // System-wide CPU utilisation (0-100). Uses /proc/stat deltas on Linux and
+    // falls back to this process's CPU time on other platforms (dev/macOS).
+    private double GetCpuPercent()
+    {
+        lock (_cpuLock)
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && File.Exists("/proc/stat"))
+            {
+                try
+                {
+                    var first = File.ReadLines("/proc/stat").FirstOrDefault();
+                    if (first != null && first.StartsWith("cpu "))
+                    {
+                        var parts = first.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        // parts[0]="cpu"; then user nice system idle iowait irq softirq steal ...
+                        var values = parts.Skip(1).Select(p => long.TryParse(p, out var v) ? v : 0).ToArray();
+                        long idle = values.Length > 3 ? values[3] + (values.Length > 4 ? values[4] : 0) : 0; // idle + iowait
+                        long total = values.Sum();
+
+                        double pct = 0;
+                        if (_lastProcStat is { } prev && total > prev.Total)
+                        {
+                            var dTotal = total - prev.Total;
+                            var dIdle = idle - prev.Idle;
+                            pct = (1.0 - (double)dIdle / dTotal) * 100.0;
+                        }
+                        _lastProcStat = (idle, total);
+                        return Math.Clamp(pct, 0, 100);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _loggerProvider.CreateLogger(nameof(SupportService)).LogDebug(ex, "Failed to read /proc/stat");
+                }
+            }
+
+            // Cross-platform fallback: this process's CPU usage across all cores.
+            try
+            {
+                using var proc = Process.GetCurrentProcess();
+                var now = DateTime.UtcNow;
+                var cpu = proc.TotalProcessorTime;
+                double pct = 0;
+                if (_lastProcessCpu is { } prev)
+                {
+                    var wallMs = (now - prev.When).TotalMilliseconds;
+                    var cpuMs = (cpu - prev.Cpu).TotalMilliseconds;
+                    if (wallMs > 0)
+                        pct = cpuMs / (wallMs * Environment.ProcessorCount) * 100.0;
+                }
+                _lastProcessCpu = (now, cpu);
+                return Math.Clamp(pct, 0, 100);
+            }
+            catch (Exception ex)
+            {
+                _loggerProvider.CreateLogger(nameof(SupportService)).LogDebug(ex, "Failed to compute process CPU");
+                return 0;
+            }
+        }
+    }
+
+    // Returns (usedBytes, totalBytes) of physical memory. Uses /proc/meminfo on
+    // Linux; elsewhere reports the managed heap against total available memory.
+    private (long Used, long Total) GetMemoryBytes()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && File.Exists("/proc/meminfo"))
+        {
+            try
+            {
+                long total = 0, available = 0;
+                foreach (var line in File.ReadLines("/proc/meminfo"))
+                {
+                    if (line.StartsWith("MemTotal:")) total = ParseMeminfoKb(line);
+                    else if (line.StartsWith("MemAvailable:")) available = ParseMeminfoKb(line);
+                    if (total > 0 && available > 0) break;
+                }
+                if (total > 0)
+                    return ((total - available) * 1024, total * 1024);
+            }
+            catch (Exception ex)
+            {
+                _loggerProvider.CreateLogger(nameof(SupportService)).LogDebug(ex, "Failed to read /proc/meminfo");
+            }
+        }
+
+        try
+        {
+            var totalAvail = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+            using var proc = Process.GetCurrentProcess();
+            var used = proc.WorkingSet64;
+            if (totalAvail <= 0) totalAvail = used;
+            return (used, totalAvail);
+        }
+        catch (Exception ex)
+        {
+            _loggerProvider.CreateLogger(nameof(SupportService)).LogDebug(ex, "Failed to read process memory");
+            return (0, 0);
+        }
+    }
+
+    // "MemTotal:       8123456 kB" -> 8123456
+    private static long ParseMeminfoKb(string line)
+    {
+        var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 && long.TryParse(parts[1], out var kb) ? kb : 0;
+    }
+
+    /// <inheritdoc />
+    public ServicesSnapshot GetServices()
+    {
+        return new ServicesSnapshot(GetServiceStatuses(), GetListeningPorts());
+    }
+
+    private List<ServiceStatus> GetServiceStatuses()
+    {
+        var result = new List<ServiceStatus>();
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            foreach (var unit in MonitoredUnits)
+            {
+                var output = RunCommand("systemctl", new[] { "show", unit, "-p", "ActiveState", "-p", "SubState", "-p", "MainPID", "-p", "Description" }, 4000);
+                if (output == null)
+                {
+                    // systemctl missing entirely: stop probing further units.
+                    break;
+                }
+
+                var props = ParseKeyValues(output);
+                var active = props.GetValueOrDefault("ActiveState", "unknown");
+                var sub = props.GetValueOrDefault("SubState", "");
+                var pid = props.GetValueOrDefault("MainPID", "0");
+                var desc = props.GetValueOrDefault("Description", unit);
+
+                // A never-installed unit shows LoadState=not-found / ActiveState=inactive.
+                var detail = pid != "0" && !string.IsNullOrEmpty(pid)
+                    ? $"{desc} (pid {pid})"
+                    : desc;
+                result.Add(new ServiceStatus(unit, string.IsNullOrEmpty(sub) ? active : $"{active} ({sub})", detail));
+            }
+        }
+
+        if (result.Count == 0)
+        {
+            // No systemd (e.g. macOS dev): report the app itself as the running service.
+            using var self = Process.GetCurrentProcess();
+            result.Add(new ServiceStatus("openscanner", "active (running)", $"OpenScanner Server (pid {self.Id})"));
+        }
+
+        return result;
+    }
+
+    private List<ListeningPort> GetListeningPorts()
+    {
+        var ports = new List<ListeningPort>();
+
+        // Prefer `ss` on Linux; fall back to `lsof` (available on macOS/dev).
+        var ss = RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
+            ? RunCommand("ss", new[] { "-H", "-ltnp" }, 4000)
+            : null;
+
+        if (ss != null)
+        {
+            foreach (var line in ss.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var cols = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                // State Recv-Q Send-Q Local:Port Peer:Port [users:(("proc",pid=..))]
+                if (cols.Length < 4) continue;
+                var port = ExtractPort(cols[3]);
+                if (port <= 0) continue;
+                var proc = cols.Length >= 6 ? ExtractSsProcess(cols[5]) : "";
+                ports.Add(new ListeningPort("tcp", port, proc));
+            }
+        }
+        else
+        {
+            var lsof = RunCommand("lsof", new[] { "-nP", "-iTCP", "-sTCP:LISTEN" }, 4000);
+            if (lsof != null)
+            {
+                foreach (var line in lsof.Split('\n', StringSplitOptions.RemoveEmptyEntries).Skip(1))
+                {
+                    var cols = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (cols.Length < 9) continue;
+                    var port = ExtractPort(cols[8]); // NAME column, e.g. *:8080
+                    if (port <= 0) continue;
+                    ports.Add(new ListeningPort("tcp", port, cols[0]));
+                }
+            }
+        }
+
+        // Distinct by port, sorted for a stable display.
+        return ports
+            .GroupBy(p => p.Port)
+            .Select(g => g.First())
+            .OrderBy(p => p.Port)
+            .ToList();
+    }
+
+    // Pull the trailing port out of an address token like "0.0.0.0:80", "[::]:443", "*:8080".
+    private static int ExtractPort(string addr)
+    {
+        var idx = addr.LastIndexOf(':');
+        if (idx < 0 || idx == addr.Length - 1) return -1;
+        return int.TryParse(addr[(idx + 1)..], out var port) ? port : -1;
+    }
+
+    // users:(("dotnet",pid=1234,fd=200)) -> "dotnet"
+    private static string ExtractSsProcess(string users)
+    {
+        var start = users.IndexOf("((\"", StringComparison.Ordinal);
+        if (start < 0) return "";
+        start += 3;
+        var end = users.IndexOf('"', start);
+        return end > start ? users[start..end] : "";
+    }
+
+    private static Dictionary<string, string> ParseKeyValues(string output)
+    {
+        var dict = new Dictionary<string, string>();
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var eq = line.IndexOf('=');
+            if (eq > 0) dict[line[..eq]] = line[(eq + 1)..].Trim();
+        }
+        return dict;
+    }
+
+    /// <inheritdoc />
+    public async Task<string> GetSystemdLogsAsync(int lines)
+    {
+        lines = Math.Clamp(lines, 1, 5000);
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            var output = await RunCommandAsync("journalctl", new[] { "-u", "openscanner", "-n", lines.ToString(), "--no-pager", "-o", "short-iso" }, 8000);
+            if (!string.IsNullOrWhiteSpace(output))
+                return output;
+        }
+
+        // Fallback (macOS dev, or journalctl unavailable): in-memory log buffer.
+        var buffered = _loggerProvider.GetLogs().ToArray();
+        var tail = buffered.Length > lines ? buffered[^lines..] : buffered;
+        return string.Join(Environment.NewLine, tail);
+    }
+
+    // Runs a command and returns stdout, or null if the executable is missing /
+    // fails to start. Non-zero exit codes still return whatever stdout was produced.
+    private string? RunCommand(string fileName, string[] args, int timeoutMs)
+    {
+        return RunCommandAsync(fileName, args, timeoutMs).GetAwaiter().GetResult();
+    }
+
+    private async Task<string?> RunCommandAsync(string fileName, string[] args, int timeoutMs)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(fileName)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+
+            using var proc = Process.Start(psi);
+            if (proc == null) return null;
+
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            _ = proc.StandardError.ReadToEndAsync();
+
+            using var cts = new CancellationTokenSource(timeoutMs);
+            try
+            {
+                await proc.WaitForExitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try { proc.Kill(true); } catch { }
+                return null;
+            }
+
+            return await stdoutTask;
+        }
+        catch (Exception ex)
+        {
+            _loggerProvider.CreateLogger(nameof(SupportService)).LogDebug(ex, "Command '{Cmd}' failed", fileName);
+            return null;
+        }
     }
 
     /// <summary>

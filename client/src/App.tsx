@@ -9,6 +9,7 @@ import ChannelManager from './components/ChannelManager';
 import FireToneManager from './components/FireToneManager';
 import SettingsManager from './components/SettingsManager';
 import RfDebugDialog from './components/RfDebugDialog';
+import SystemDebugDialog from './components/SystemDebugDialog';
 import NowPlayingBar from './components/NowPlayingBar';
 import CommandPalette from './components/CommandPalette';
 import { useAudioPipeline } from './hooks/useAudioPipeline';
@@ -28,6 +29,7 @@ function App() {
   const [isToneManagerOpen, setIsToneManagerOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
+  const [isSystemDebugOpen, setIsSystemDebugOpen] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [debugFreq, setDebugFreq] = useState<string>('155.500');
   const [debugGain, setDebugGain] = useState<number>(40);
@@ -191,7 +193,7 @@ function App() {
           onOpenFireTones={() => setIsToneManagerOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenDebug={openDebug}
-          onDownloadSupport={downloadSupportPackage}
+          onOpenSystemDebug={() => setIsSystemDebugOpen(true)}
         />
 
         <Box sx={{ flexGrow: 1, p: { xs: 1, sm: 2 }, height: '100%', overflowY: { xs: 'auto', md: 'hidden' } }}>
@@ -300,6 +302,12 @@ function App() {
           debugGain={debugGain}
           onDebugGainChange={setDebugGain}
           onTune={() => scanner.sendCommand('debug_spectrum', Number(debugFreq), debugGain)}
+        />
+
+        <SystemDebugDialog
+          open={isSystemDebugOpen}
+          onClose={() => setIsSystemDebugOpen(false)}
+          onDownloadSupport={downloadSupportPackage}
         />
 
         <Snackbar open={showAudioPrompt} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>

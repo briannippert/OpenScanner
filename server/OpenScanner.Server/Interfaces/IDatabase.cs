@@ -154,6 +154,12 @@ public interface IDatabase
     /// </summary>
     Task ClearHistoryAsync();
 
+    /// <summary>
+    /// Gets aggregate recording/transcription statistics for diagnostics:
+    /// total recordings, how many are transcribed, and the oldest/newest timestamps.
+    /// </summary>
+    Task<DbStats> GetDbStatsAsync();
+
     // Fire Tones
     
     /// <summary>

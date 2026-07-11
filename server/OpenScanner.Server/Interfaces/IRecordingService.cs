@@ -24,6 +24,12 @@ public interface IRecordingService
     /// </summary>
     string? CurrentRecordingId { get; }
 
+    /// <summary>Number of recordings currently in flight (parallel channels + legacy single).</summary>
+    int ActiveRecordingCount { get; }
+
+    /// <summary>Ids of the recordings currently in flight, newest first.</summary>
+    IReadOnlyCollection<string> ActiveRecordingIds { get; }
+
     void StartRecording(Channel channel, int? src, int? tgt, LinkedList<byte[]> preRollBuffer);
     void UpdateSourceTarget(int? src, int? tgt);
     void UpdateSourceTarget(double frequency, int? src, int? tgt);

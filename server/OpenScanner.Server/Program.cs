@@ -45,7 +45,8 @@ builder.Services.AddSingleton<IDecoderFactory, OpenScanner.Server.Decoders.Decod
 builder.Services.AddSingleton<ITranscriptionService, WhisperTranscriptionService>();
 builder.Services.AddSingleton<IRecordingService, RecordingService>();
 builder.Services.AddSingleton<IChannelService, ChannelService>();
-builder.Services.AddHostedService<RecordingCleanupService>();
+builder.Services.AddSingleton<RecordingCleanupService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RecordingCleanupService>());
 
 var radioProvider = builder.Configuration["Radio:Provider"] ?? "RTL-SDR";
 if (radioProvider == "Mock")

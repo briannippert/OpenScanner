@@ -209,6 +209,15 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
         _queueChannel.Writer.TryWrite((log, audioPath));
     }
 
+    public TranscriptionQueueStatus GetQueueStatus()
+    {
+        // Unbounded channels support Count; guard anyway in case that changes.
+        var queued = _queueChannel.Reader.CanCount ? _queueChannel.Reader.Count : 0;
+        int workers;
+        lock (_workersLock) { workers = _workers.Count; }
+        return new TranscriptionQueueStatus(queued, workers);
+    }
+
     public void Dispose()
     {
         _cts.Cancel();

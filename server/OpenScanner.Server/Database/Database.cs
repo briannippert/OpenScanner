@@ -226,6 +226,18 @@ public class Database : IDatabase
     }
     
     /// <inheritdoc />
+    public async Task<DbStats> GetDbStatsAsync()
+    {
+        using var conn = GetConnection();
+        var total = await conn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM transmissions");
+        var transcribed = await conn.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM transmissions WHERE transcription IS NOT NULL AND transcription != ''");
+        var oldest = await conn.ExecuteScalarAsync<string?>("SELECT MIN(timestamp) FROM transmissions");
+        var newest = await conn.ExecuteScalarAsync<string?>("SELECT MAX(timestamp) FROM transmissions");
+        return new DbStats(total, transcribed, Math.Max(0, total - transcribed), oldest, newest);
+    }
+
+    /// <inheritdoc />
     public async Task<CallLog?> GetTransmissionByIdAsync(string id)
     {
         using var conn = GetConnection();

@@ -17,12 +17,19 @@ public class SupportServiceTests
     private readonly Mock<ILoggerProvider> _loggerProviderMock = new();
     private readonly Mock<IDatabase> _dbMock = new();
     private readonly Mock<IRadioSource> _radioMock = new();
+    private readonly Mock<ITranscriptionService> _transcriptionMock = new();
+    private readonly Mock<IRecordingService> _recordingMock = new();
     private readonly Mock<GpsService> _gpsMock;
+    private readonly WebSocketBroadcaster _broadcaster;
+    private readonly RecordingCleanupService _cleanup;
 
     public SupportServiceTests()
     {
         _gpsMock = new Mock<GpsService>(new Mock<ILogger<GpsService>>().Object);
-        
+        _broadcaster = new WebSocketBroadcaster(_radioMock.Object, new Mock<ILogger<WebSocketBroadcaster>>().Object);
+        _cleanup = new RecordingCleanupService(_dbMock.Object, new Mock<ILogger<RecordingCleanupService>>().Object, new ConfigurationBuilder().Build());
+        _recordingMock.Setup(r => r.ActiveRecordingIds).Returns(new List<string>());
+
         // Setup Logger Provider
         var memLogger = new MemoryLoggerProvider();
         _loggerProviderMock.As<ILoggerProvider>(); // Just a placeholder, we'll pass concrete memLogger
@@ -33,7 +40,7 @@ public class SupportServiceTests
     {
         // Arrange
         var memLogger = new MemoryLoggerProvider();
-        var service = new SupportService(_configMock.Object, memLogger, _dbMock.Object, _radioMock.Object, _gpsMock.Object);
+        var service = new SupportService(_configMock.Object, memLogger, _dbMock.Object, _radioMock.Object, _gpsMock.Object, _transcriptionMock.Object, _broadcaster, _recordingMock.Object, _cleanup);
 
         // Act
         var info = service.GetVersionInfo();
@@ -60,7 +67,7 @@ public class SupportServiceTests
         _radioMock.Setup(r => r.GetState()).Returns(new ScannerState("IDLE", 0));
         _gpsMock.Object.OnGpsUpdate += (d) => { }; // trigger init
 
-        var service = new SupportService(_configMock.Object, memLogger, _dbMock.Object, _radioMock.Object, _gpsMock.Object);
+        var service = new SupportService(_configMock.Object, memLogger, _dbMock.Object, _radioMock.Object, _gpsMock.Object, _transcriptionMock.Object, _broadcaster, _recordingMock.Object, _cleanup);
 
         // Act
         var zipBytes = await service.CreateSupportPackageAsync();

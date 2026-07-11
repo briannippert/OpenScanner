@@ -122,6 +122,9 @@ public class MockRadioSource : BackgroundService, IRadioSource
 
     public ScannerState GetState() => _state;
 
+    /// <inheritdoc />
+    public RadioDiagnostics GetDiagnostics() => new RadioDiagnostics(0, 0);
+
     public void ReloadChannels() => _channelService.ReloadChannels();
 
     public void SetSquelch(double db) => UpdateState(_state with { Squelch = db });

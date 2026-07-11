@@ -19,6 +19,12 @@ public class WebSocketBroadcaster
     private readonly ConcurrentDictionary<string, SocketSession> _audioSessions = new();
     private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
+    /// <summary>Number of connected control (state/log) WebSocket clients.</summary>
+    public int ControlClientCount => _controlSessions.Count;
+
+    /// <summary>Number of connected audio-streaming WebSocket clients.</summary>
+    public int AudioClientCount => _audioSessions.Count;
+
     private class SocketSession
     {
         public WebSocket Socket { get; }

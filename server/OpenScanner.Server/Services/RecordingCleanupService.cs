@@ -21,6 +21,15 @@ public class RecordingCleanupService : BackgroundService
     private readonly long _minFreeBytes;
     private readonly string _recordingsPath;
 
+    /// <summary>UTC time of the last cleanup tick, or null before the first run.</summary>
+    public DateTime? LastRunUtc { get; private set; }
+
+    /// <summary>Free bytes on the recordings volume observed at the last tick.</summary>
+    public long? LastFreeBytes { get; private set; }
+
+    /// <summary>Total recordings purged since startup.</summary>
+    public int TotalPurged { get; private set; }
+
     public RecordingCleanupService(IDatabase db, ILogger<RecordingCleanupService> logger, IConfiguration config)
     {
         _db = db;
@@ -45,6 +54,8 @@ public class RecordingCleanupService : BackgroundService
             try
             {
                 await Task.Delay(CheckInterval, stoppingToken);
+                LastRunUtc = DateTime.UtcNow;
+                LastFreeBytes = GetFreeBytes();
                 await EnforceFreeSpaceAsync(stoppingToken);
             }
             catch (OperationCanceledException)
@@ -84,6 +95,7 @@ public class RecordingCleanupService : BackgroundService
             {
                 await _db.DeleteTransmissionAsync(id);
                 totalDeleted++;
+                TotalPurged++;
             }
 
             free = GetFreeBytes();

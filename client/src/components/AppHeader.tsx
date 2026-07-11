@@ -13,7 +13,7 @@ import UsbOffIcon from '@mui/icons-material/UsbOff';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
-import SupportAgentIcon from '@mui/icons-material/SupportAgent';
+import BugReportIcon from '@mui/icons-material/BugReport';
 import SettingsIcon from '@mui/icons-material/Settings';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import MonitorIcon from '@mui/icons-material/Monitor';
@@ -33,7 +33,7 @@ interface Props {
   onOpenFireTones: () => void;
   onOpenSettings: () => void;
   onOpenDebug: () => void;
-  onDownloadSupport: () => void;
+  onOpenSystemDebug: () => void;
 }
 
 const MONO = '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
@@ -41,7 +41,7 @@ const gpsMono = { fontFamily: MONO, color: 'text.primary' } as const;
 
 const AppHeader: React.FC<Props> = ({
   scannerState, currentTime, volume, onVolumeChange, manualHold, onResume,
-  isFullscreen, onToggleFullscreen, onOpenFireTones, onOpenSettings, onOpenDebug, onDownloadSupport,
+  isFullscreen, onToggleFullscreen, onOpenFireTones, onOpenSettings, onOpenDebug, onOpenSystemDebug,
 }) => {
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const gps = scannerState.gps;
@@ -53,7 +53,7 @@ const AppHeader: React.FC<Props> = ({
     { label: 'Settings', icon: <SettingsIcon />, onClick: onOpenSettings },
     { label: isFullscreen ? 'Exit Fullscreen' : 'Fullscreen', icon: isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />, onClick: onToggleFullscreen },
     { label: 'RF Spectrum Debug', icon: <MonitorIcon />, onClick: onOpenDebug },
-    { label: 'Download Support Package', icon: <SupportAgentIcon />, onClick: onDownloadSupport },
+    { label: 'System Debug', icon: <BugReportIcon />, onClick: onOpenSystemDebug },
   ];
 
   return (

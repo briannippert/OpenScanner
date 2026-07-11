@@ -39,6 +39,37 @@ public class RecordingService : IRecordingService
     public bool IsChannelRecording(double frequency) => _activeRecordings.ContainsKey(frequency);
 
     /// <inheritdoc />
+    public int ActiveRecordingCount
+    {
+        get
+        {
+            var count = _activeRecordings.Count;
+            lock (_audioLock)
+            {
+                if (_recordingStream != null) count++;
+            }
+            return count;
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyCollection<string> ActiveRecordingIds
+    {
+        get
+        {
+            var ids = _activeRecordings.Values
+                .OrderByDescending(r => r.StartTime)
+                .Select(r => $"log_{r.StartTime}")
+                .ToList();
+            lock (_audioLock)
+            {
+                if (_recordingStream != null) ids.Insert(0, $"log_{_recordingStartTime}");
+            }
+            return ids;
+        }
+    }
+
+    /// <inheritdoc />
     public string? CurrentRecordingId
     {
         get
