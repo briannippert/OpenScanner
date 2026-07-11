@@ -7,5 +7,13 @@ public interface ITranscriptionService
 {
     string? TranscribeAudio(string audioPath);
     void QueueTranscription(CallLog log, string audioPath);
+
+    /// <summary>
+    /// Ensure the given whisper model is downloaded, in the background. Safe to
+    /// call when it already exists. Progress is surfaced via the
+    /// TranscriptionModelStatus setting.
+    /// </summary>
+    void PrepareModel(string modelName);
+
     event Action<CallLog>? OnTranscriptionCompleted;
 }

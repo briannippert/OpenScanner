@@ -127,6 +127,21 @@ public class Database : IDatabase
             // (whisper -t), so running several at once just makes each slower.
             conn.Execute("INSERT INTO settings (key, value) VALUES ('TranscriptionThreads', '1')");
         }
+
+        // Whisper model, managed from the web-app settings. The server downloads
+        // the ggml weights on demand when this changes.
+        var modelCount = conn.ExecuteScalar<int>("SELECT count(*) FROM settings WHERE key = 'TranscriptionModel'");
+        if (modelCount == 0)
+        {
+            conn.Execute("INSERT INTO settings (key, value) VALUES ('TranscriptionModel', 'large-v3-turbo-q5_0')");
+        }
+
+        // PowerDMS department slug, managed from the web-app settings.
+        var powerDmsCount = conn.ExecuteScalar<int>("SELECT count(*) FROM settings WHERE key = 'PowerDmsDepartment'");
+        if (powerDmsCount == 0)
+        {
+            conn.Execute("INSERT INTO settings (key, value) VALUES ('PowerDmsDepartment', '')");
+        }
     }
 
     /// <inheritdoc />

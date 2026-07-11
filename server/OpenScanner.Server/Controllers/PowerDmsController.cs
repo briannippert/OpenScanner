@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using OpenScanner.Server.Interfaces;
 
 namespace OpenScanner.Server.Controllers;
 
@@ -19,15 +20,26 @@ public class PowerDmsController : ControllerBase
     private static readonly SemaphoreSlim _cacheLock = new(1, 1);
 
     private readonly IConfiguration _config;
+    private readonly IDatabase _db;
     private readonly ILogger<PowerDmsController> _logger;
 
-    public PowerDmsController(IConfiguration config, ILogger<PowerDmsController> logger)
+    public PowerDmsController(IConfiguration config, IDatabase db, ILogger<PowerDmsController> logger)
     {
         _config = config;
+        _db = db;
         _logger = logger;
     }
 
-    private string? Department => _config["PowerDMS:Department"] is { Length: > 0 } d ? d : null;
+    /// <summary>
+    /// The PowerDMS department slug, managed from the web-app settings (DB),
+    /// falling back to appsettings. Returns null when not configured.
+    /// </summary>
+    private async Task<string?> GetDepartmentAsync()
+    {
+        var fromDb = await _db.GetSettingAsync("PowerDmsDepartment");
+        if (!string.IsNullOrWhiteSpace(fromDb)) return fromDb.Trim();
+        return _config["PowerDMS:Department"] is { Length: > 0 } d ? d : null;
+    }
 
     /// <summary>
     /// Returns the configured PowerDMS department slug, or null if not configured.
@@ -35,9 +47,9 @@ public class PowerDmsController : ControllerBase
     /// </summary>
     [HttpGet("config")]
     [ProducesResponseType(typeof(PowerDmsConfigResponse), StatusCodes.Status200OK)]
-    public IActionResult GetConfig()
+    public async Task<IActionResult> GetConfig()
     {
-        return Ok(new PowerDmsConfigResponse(Department));
+        return Ok(new PowerDmsConfigResponse(await GetDepartmentAsync()));
     }
 
     /// <summary>
@@ -49,7 +61,7 @@ public class PowerDmsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> CheckDailyLog(int year, int month, int day)
     {
-        var dept = Department;
+        var dept = await GetDepartmentAsync();
         if (dept is null)
             return Ok(new PowerDmsCheckResponse(false));
 
@@ -85,7 +97,7 @@ public class PowerDmsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetDailyLog(int year, int month, int day)
     {
-        var dept = Department;
+        var dept = await GetDepartmentAsync();
         if (dept is null)
             return StatusCode(503, "PowerDMS integration is not configured.");
 
