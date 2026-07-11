@@ -342,9 +342,15 @@ export function useAudioPipeline(volume: number) {
 
     const connectAudioWs = () => {
       wsAudio.current = new WebSocket(wsAudioUrl);
+      // Receive frames as ArrayBuffer, not Blob. Blob forces a per-frame
+      // `await event.data.arrayBuffer()` in the handler below, and that async
+      // yield lets concurrently-arriving frames resolve out of order — which
+      // reorders PCM and produces high-frequency popping. ArrayBuffer frames
+      // are available synchronously, so enqueue order matches arrival order.
+      wsAudio.current.binaryType = 'arraybuffer';
       wsAudio.current.onclose = () => { if (!closed) setTimeout(connectAudioWs, 3000); };
       wsAudio.current.onmessage = async (event) => {
-        if (!(event.data instanceof Blob)) return;
+        if (!(event.data instanceof ArrayBuffer)) return;
         if (isPageHiddenRef.current) return;
 
         try {
@@ -354,8 +360,7 @@ export function useAudioPipeline(volume: number) {
           const analyser = audioAnalyserRef.current;
           if (!analyser) return;
 
-          const arrayBuffer = await event.data.arrayBuffer();
-          const int16Array = new Int16Array(arrayBuffer);
+          const int16Array = new Int16Array(event.data);
           const isStereo = isParallelRef.current;
 
           // Deinterleave Int16 → Float32.
@@ -388,6 +393,9 @@ export function useAudioPipeline(volume: number) {
             // into the analyser with a jitter buffer.
             const frames = left.length;
             const stereo = left !== right;
+            // Buffer rate is the source PCM rate (48000), not ctx.sampleRate:
+            // this declares the samples' true rate so the engine resamples
+            // correctly if the device context runs at a different rate.
             const audioBuffer = ctx.createBuffer(stereo ? 2 : 1, frames, 48000);
             audioBuffer.copyToChannel(left, 0);
             if (stereo) audioBuffer.copyToChannel(right, 1);
