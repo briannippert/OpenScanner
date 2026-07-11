@@ -232,6 +232,7 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
             onClose={onClose}
             title="System Settings"
             icon={<SettingsIcon />}
+            maxWidth="md"
             actions={<Button onClick={onClose} color="inherit">Close</Button>}
         >
                 {updateAvailable && (
