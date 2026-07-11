@@ -39,11 +39,12 @@ public class RtlDevice : BackgroundService, IRadioSource
     private bool _manualOverride = false;
     
     private string? _lastDetectedTone;
-    // After a fire tone-out we keep the recording open this long so the pause
-    // before the dispatch voice doesn't split it into a separate transmission.
+    // Normally 2s of silence ends a transmission. After a fire tone-out we use a
+    // longer inactivity timeout so the pause between the tone ending and the
+    // dispatch voice keying up doesn't split it into a separate transmission —
+    // the tone and the voice that follows stay one recording.
     private const int ActivityTimeoutMs = 2000;
     private const int ToneHoldMs = 6000;
-    private DateTime _toneHoldUntil = DateTime.MinValue;
 
     private DateTime _recordingLockoutUntil = DateTime.MinValue;
     private CancellationTokenSource? _scanCts;
@@ -116,9 +117,9 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         _toneDetector.OnToneDetected += (tone) => {
             _lastDetectedTone = tone.Name;
-            // Open the hold window and extend the current recording's stop timer so
-            // the tone and the dispatch voice that follows it stay one transmission.
-            _toneHoldUntil = DateTime.UtcNow.AddMilliseconds(ToneHoldMs);
+            // Extend the current recording's stop timer now so that if the tone is
+            // the last audio before the carrier drops, we still wait the full hold
+            // (measured from the tone ending) for the dispatch voice to follow.
             if (_recordingService.IsRecording) ScheduleStopTimeout();
             UpdateState(_state with { LastDetectedTone = tone.Name });
             RaiseRadioEvent(new RadioEvent
@@ -1543,9 +1544,12 @@ public class RtlDevice : BackgroundService, IRadioSource
     }
 
     // (Re)schedule the timer that finalizes the current transmission once audio
-    // stops. Normally 2s of silence ends a transmission; within the post-tone
-    // hold window we wait longer so the tone and the following dispatch voice are
-    // captured as a single transmission (with the speech available to transcribe).
+    // stops. Normally 2s of silence ends a transmission; once a fire tone-out has
+    // been detected for this transmission we wait ToneHoldMs of silence instead,
+    // so the tone and the following dispatch voice are captured as a single
+    // transmission (with the speech available to transcribe). Because this timer
+    // is re-armed on every audio chunk, the hold is measured from the last audio
+    // — i.e. from when the tone actually ends — not from when it was detected.
     private void ScheduleStopTimeout()
     {
         _activityTimeoutCts?.Cancel();
@@ -1557,7 +1561,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             RestartSessionTimeout(5000); // 5s hang time
         }
 
-        bool withinToneHold = _lastDetectedTone != null && DateTime.UtcNow < _toneHoldUntil;
+        bool withinToneHold = _lastDetectedTone != null;
         int stopDelayMs = withinToneHold ? ToneHoldMs : ActivityTimeoutMs;
 
         Task.Delay(stopDelayMs, token).ContinueWith(t =>
