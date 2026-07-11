@@ -160,6 +160,12 @@ public interface IDatabase
     /// </summary>
     Task<DbStats> GetDbStatsAsync();
 
+    /// <summary>
+    /// Gets recordings with a missing (null/empty) transcription whose timestamp is
+    /// at or after <paramref name="sinceUtc"/>. Used by the transcription backfill job.
+    /// </summary>
+    Task<IEnumerable<CallLog>> GetUntranscribedSinceAsync(DateTime sinceUtc);
+
     // Fire Tones
     
     /// <summary>

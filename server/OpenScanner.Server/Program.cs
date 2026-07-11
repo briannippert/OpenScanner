@@ -61,6 +61,7 @@ else
     builder.Services.AddHostedService(sp => (RtlDevice)sp.GetRequiredService<IRadioSource>());
 }
 
+builder.Services.AddSingleton<IBackfillService, BackfillTranscriptionService>();
 builder.Services.AddSingleton<ISupportService, SupportService>();
 builder.Services.AddSingleton<WebSocketBroadcaster>();
 builder.Services.AddCors();

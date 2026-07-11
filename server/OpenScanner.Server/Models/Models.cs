@@ -412,6 +412,22 @@ public record ListeningPort(string Protocol, int Port, string Process);
 /// <summary>Running services and open ports surfaced on the debug page.</summary>
 public record ServicesSnapshot(List<ServiceStatus> Services, List<ListeningPort> Ports);
 
+/// <summary>
+/// Progress/status of the on-demand transcription backfill job, which re-transcribes
+/// recordings from the last 24 hours that are missing a transcription.
+/// </summary>
+public record BackfillStatus(
+    bool Running,
+    int Total,
+    int Processed,
+    int Succeeded,
+    int Failed,
+    string? Current,
+    string? StartedUtc,
+    string? FinishedUtc,
+    string? Message
+);
+
 /// <summary>Compact SDR/scanner state for the debug page.</summary>
 public record ScannerSummary(
     string Status,

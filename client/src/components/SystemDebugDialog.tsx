@@ -6,6 +6,9 @@ import { useTheme } from '@mui/material/styles';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SupportAgentIcon from '@mui/icons-material/SupportAgent';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import StopIcon from '@mui/icons-material/Stop';
+import HistoryIcon from '@mui/icons-material/History';
 import FormDialog from './common/FormDialog';
 import StatusChip from './common/StatusChip';
 import type { StatusTone } from './common/StatusChip';
@@ -45,6 +48,17 @@ interface DiagnosticsSnapshot {
 interface StorageInfo {
   recordingsBytes: number; recordingsCount: number; databaseBytes: number;
   diskFreeBytes: number; diskTotalBytes: number;
+}
+interface BackfillStatus {
+  running: boolean;
+  total: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  current?: string | null;
+  startedUtc?: string | null;
+  finishedUtc?: string | null;
+  message?: string | null;
 }
 type SystemInfo = Record<string, string>;
 
@@ -226,6 +240,8 @@ const SystemDebugDialog: React.FC<Props> = ({ open, onClose, onDownloadSupport }
   const [diag, setDiag] = useState<DiagnosticsSnapshot | null>(null);
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   const [info, setInfo] = useState<SystemInfo | null>(null);
+  const [backfill, setBackfill] = useState<BackfillStatus | null>(null);
+  const [backfillBusy, setBackfillBusy] = useState(false);
   const [logs, setLogs] = useState<string>('');
   const [logsLoading, setLogsLoading] = useState(false);
   const theme = useTheme();
@@ -302,6 +318,29 @@ const SystemDebugDialog: React.FC<Props> = ({ open, onClose, onDownloadSupport }
     const id = setInterval(poll, 15000);
     return () => { cancelled = true; clearInterval(id); };
   }, [open]);
+
+  // Transcription backfill job status.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const poll = async () => {
+      const b = await apiJson<BackfillStatus>('/api/transcription/backfill');
+      if (!cancelled && b) setBackfill(b);
+    };
+    poll();
+    const id = setInterval(poll, 2000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [open]);
+
+  const controlBackfill = useCallback(async (action: 'start' | 'stop') => {
+    setBackfillBusy(true);
+    try {
+      const b = await apiJson<BackfillStatus>(`/api/transcription/backfill/${action}`, { method: 'POST' });
+      if (b) setBackfill(b);
+    } finally {
+      setBackfillBusy(false);
+    }
+  }, []);
 
   // Reset the graph buffer, load one-shot build info, and (re)load logs on open.
   useEffect(() => {
@@ -426,6 +465,61 @@ const SystemDebugDialog: React.FC<Props> = ({ open, onClose, onDownloadSupport }
               )}
             </Paper>
           </Box>
+        </Grid>
+
+        {/* Transcription backfill */}
+        <Grid size={12}>
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'surface.base' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
+              <HistoryIcon fontSize="small" sx={{ color: 'primary.main' }} />
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                Transcription Backfill <Box component="span" sx={{ color: 'text.secondary', fontWeight: 400 }}>· missing transcriptions, last 24h</Box>
+              </Typography>
+              <Box sx={{ flexGrow: 1 }} />
+              {backfill?.running ? (
+                <StatusChip label="RUNNING" tone="live" variant="filled" sx={{ fontSize: 10 }} />
+              ) : (
+                <StatusChip label="IDLE" tone="muted" sx={{ fontSize: 10 }} />
+              )}
+              <Button
+                size="small"
+                variant="contained"
+                color="primary"
+                startIcon={<PlayArrowIcon />}
+                disabled={backfillBusy || backfill?.running}
+                onClick={() => controlBackfill('start')}
+              >
+                Start
+              </Button>
+              <Button
+                size="small"
+                color="inherit"
+                startIcon={<StopIcon />}
+                disabled={backfillBusy || !backfill?.running}
+                onClick={() => controlBackfill('stop')}
+              >
+                Stop
+              </Button>
+            </Box>
+
+            {backfill && (backfill.running || backfill.total > 0) && (
+              <Box sx={{ mb: 1 }}>
+                <UsageBar fraction={backfill.total > 0 ? backfill.processed / backfill.total : 0} />
+              </Box>
+            )}
+
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: { xs: 2, md: 4 }, alignItems: 'baseline' }}>
+              <StatRow label="Progress" value={backfill ? `${backfill.processed} / ${backfill.total}` : '—'} />
+              <StatRow label="Transcribed" value={backfill?.succeeded ?? '—'} />
+              <StatRow label="Failed" value={backfill?.failed ?? '—'} />
+              {backfill?.current && <StatRow label="Current" value={backfill.current} title={backfill.current} />}
+            </Box>
+            {backfill?.message && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                {backfill.message}
+              </Typography>
+            )}
+          </Paper>
         </Grid>
 
         {/* SDR / Scanner */}

@@ -238,6 +238,17 @@ public class Database : IDatabase
     }
 
     /// <inheritdoc />
+    public async Task<IEnumerable<CallLog>> GetUntranscribedSinceAsync(DateTime sinceUtc)
+    {
+        using var conn = GetConnection();
+        // Timestamps are stored as round-trip ("o") UTC strings, so a lexicographic
+        // compare against the same format is chronological.
+        return await conn.QueryAsync<CallLog>(
+            SqlLoader.GetSql("Transmissions/GetUntranscribedSince.sql"),
+            new { Since = sinceUtc.ToUniversalTime().ToString("o") });
+    }
+
+    /// <inheritdoc />
     public async Task<CallLog?> GetTransmissionByIdAsync(string id)
     {
         using var conn = GetConnection();

@@ -14,6 +14,13 @@ public interface ITranscriptionService
     TranscriptionQueueStatus GetQueueStatus();
 
     /// <summary>
+    /// Transcribes an existing recording synchronously (not via the live queue),
+    /// persists the result, and raises <see cref="OnTranscriptionCompleted"/> so the
+    /// UI updates. Used by the backfill job. Returns true if text was produced.
+    /// </summary>
+    Task<bool> RetranscribeAsync(CallLog log, string audioPath);
+
+    /// <summary>
     /// Ensure the given whisper model is downloaded, in the background. Safe to
     /// call when it already exists. Progress is surfaced via the
     /// TranscriptionModelStatus setting.

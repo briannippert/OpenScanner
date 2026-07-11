@@ -209,6 +209,17 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
         _queueChannel.Writer.TryWrite((log, audioPath));
     }
 
+    public async Task<bool> RetranscribeAsync(CallLog log, string audioPath)
+    {
+        // Runs on the caller's (backfill) thread — it deliberately does not use the
+        // live worker queue, so live transmissions keep priority.
+        var transcription = TranscribeAudio(audioPath);
+        await _db.UpdateTranscriptionAsync(log.Id, transcription);
+        log.Transcription = transcription;
+        OnTranscriptionCompleted?.Invoke(log);
+        return !string.IsNullOrWhiteSpace(transcription);
+    }
+
     public TranscriptionQueueStatus GetQueueStatus()
     {
         // Unbounded channels support Count; guard anyway in case that changes.
