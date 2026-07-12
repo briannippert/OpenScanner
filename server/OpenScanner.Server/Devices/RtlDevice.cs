@@ -975,9 +975,13 @@ public class RtlDevice : BackgroundService, IRadioSource
         {
             rs.StartParallelRecording(channel, src, tgt, null);
         }
-        else if (rs != null && src.HasValue)
+        else if (rs != null)
         {
+            // Already recording this channel: update the current SRC/TGT and, on a
+            // talker change, append to the speaker chain (AppendSpeaker de-dupes
+            // consecutive repeats). Mirrors the single-channel HandleActivity path.
             rs.UpdateSourceTarget(channel.Frequency, src, tgt);
+            if (src.HasValue) rs.AppendSpeaker(channel.Frequency, src.Value);
         }
 
         // Reset per-channel activity timeout

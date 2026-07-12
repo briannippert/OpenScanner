@@ -171,6 +171,29 @@ public class RecordingServiceTests
     }
 
     [Fact]
+    public void ParallelRecording_AppendSpeaker_BuildsOrderedSpeakerChain()
+    {
+        CallLog? saved = null;
+        _db.Setup(d => d.SaveTransmissionAsync(It.IsAny<CallLog>()))
+           .Callback<CallLog>(l => saved = l)
+           .Returns(Task.CompletedTask);
+
+        // First talker seeded by StartParallelRecording; subsequent talkers appended.
+        _service.StartParallelRecording(Chan(155.0), 1, 2, new LinkedList<byte[]>());
+        _service.AppendSpeaker(155.0, 2);
+        _service.AppendSpeaker(155.0, 2); // consecutive repeat -> de-duped
+        _service.AppendSpeaker(155.0, 1);
+
+        // Feed enough audio to clear the 4KB minimum, then wait out the 0.5s floor.
+        _service.ProcessAudio(155.0, new byte[8192]);
+        Thread.Sleep(600);
+        _service.StopParallelRecording(155.0, null);
+
+        Assert.NotNull(saved);
+        Assert.Equal("1 → 2 → 1", saved!.SpeakerChain);
+    }
+
+    [Fact]
     public void StartParallelRecording_SameFrequencyTwice_IsIgnored()
     {
         _service.StartParallelRecording(Chan(155.0), 1, 2, new LinkedList<byte[]>());
