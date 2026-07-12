@@ -85,6 +85,35 @@ public class UpdateService : IUpdateService, IHostedService
         }
     }
 
+    // Prefixes git args with `-c safe.directory=*` so the root-run service can operate
+    // on a repo owned by another user (avoids git's "dubious ownership" refusal).
+    private static string[] Git(params string[] args) =>
+        new[] { "-c", "safe.directory=*" }.Concat(args).ToArray();
+
+    /// <summary>
+    /// True when <paramref name="latestTag"/> is a newer version than the running
+    /// <paramref name="current"/> build, comparing dotted numeric segments (leading
+    /// 'v' and any '+build'/'-prerelease' suffix stripped).
+    /// </summary>
+    internal static bool IsNewerRelease(string? current, string? latestTag)
+    {
+        if (string.IsNullOrWhiteSpace(current) || string.IsNullOrWhiteSpace(latestTag)) return false;
+        static int[] Parse(string v)
+        {
+            var core = v.TrimStart('v', 'V').Split('+', '-')[0];
+            return core.Split('.').Select(p => int.TryParse(p, out var n) ? n : 0).ToArray();
+        }
+        var c = Parse(current);
+        var l = Parse(latestTag);
+        for (int i = 0; i < Math.Max(c.Length, l.Length); i++)
+        {
+            var cv = i < c.Length ? c[i] : 0;
+            var lv = i < l.Length ? l[i] : 0;
+            if (lv != cv) return lv > cv;
+        }
+        return false;
+    }
+
     // MARK: - IHostedService (periodic availability check)
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -150,22 +179,23 @@ public class UpdateService : IUpdateService, IHostedService
         {
             var (tag, name, notes, url) = await FetchLatestReleaseAsync();
 
-            // Align local git metadata with the release tag.
-            await RunCaptureAsync("git", new[] { "fetch", "--tags", "--prune", "origin" }, RepoRoot, 60_000);
-            var head = (await RunCaptureAsync("git", new[] { "rev-parse", "HEAD" }, RepoRoot, 15_000))?.Trim() ?? "";
-            string? tagCommit = null;
+            // Availability is decided by comparing the running build version to the
+            // latest release tag. This is robust — it does not depend on the local git
+            // graph being in sync (git may be unavailable/blocked when the service runs
+            // as root on a differently-owned repo). The git steps below only provide the
+            // informational commits-behind count and the current HEAD.
+            var available = IsNewerRelease(currentVersion, tag);
+
+            // Best-effort git metadata (commits behind + HEAD); may be empty if git is
+            // unavailable, which is fine — availability is already decided above.
+            await RunCaptureAsync("git", Git("fetch", "--tags", "--prune", "origin"), RepoRoot, 60_000);
+            var head = (await RunCaptureAsync("git", Git("rev-parse", "HEAD"), RepoRoot, 15_000))?.Trim() ?? "";
             var behind = 0;
             if (!string.IsNullOrEmpty(tag))
             {
-                tagCommit = (await RunCaptureAsync("git", new[] { "rev-list", "-n", "1", tag! }, RepoRoot, 15_000))?.Trim();
-                var cnt = (await RunCaptureAsync("git", new[] { "rev-list", "--count", $"HEAD..{tag}" }, RepoRoot, 15_000))?.Trim();
+                var cnt = (await RunCaptureAsync("git", Git("rev-list", "--count", $"HEAD..{tag}"), RepoRoot, 15_000))?.Trim();
                 int.TryParse(cnt, out behind);
             }
-
-            var available = !string.IsNullOrEmpty(tagCommit)
-                            && !string.IsNullOrEmpty(head)
-                            && !string.Equals(tagCommit, head, StringComparison.OrdinalIgnoreCase)
-                            && behind > 0;
 
             lock (_lock)
             {
@@ -235,13 +265,13 @@ public class UpdateService : IUpdateService, IHostedService
 
             Emit("start", $"Updating to release {tag}…");
 
-            if (await RunStreamingAsync("git", new[] { "fetch", "--tags", "--prune", "origin" }, RepoRoot, "fetch", 120_000) != 0)
+            if (await RunStreamingAsync("git", Git("fetch", "--tags", "--prune", "origin"), RepoRoot, "fetch", 120_000) != 0)
             { Fail("git fetch failed."); return; }
 
             // Preserve the operator-configured PowerDMS department across the hard reset.
             var savedDept = TryReadPowerDmsDepartment();
 
-            if (await RunStreamingAsync("git", new[] { "reset", "--hard", tag! }, RepoRoot, "reset", 60_000) != 0)
+            if (await RunStreamingAsync("git", Git("reset", "--hard", tag!), RepoRoot, "reset", 60_000) != 0)
             { Fail("git reset failed."); return; }
 
             if (!string.IsNullOrEmpty(savedDept) && RestorePowerDmsDepartment(savedDept!))
