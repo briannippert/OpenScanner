@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ScannerState, Channel, CallLog, FireToneSet, RadioEvent } from '../types';
+import type { ScannerState, Channel, CallLog, FireToneSet, RadioEvent, UpdateProgress, UpdateState } from '../types';
 
 interface Options {
   /** Called when a state update indicates whether the live stream is stereo. */
@@ -17,6 +17,14 @@ export function useScannerSocket({ onParallel }: Options = {}) {
   const [fireTones, setFireTones] = useState<FireToneSet[]>([]);
   const [callLog, setCallLog] = useState<CallLog[]>([]);
   const [radioEvents, setRadioEvents] = useState<RadioEvent[]>([]);
+  const [updateLog, setUpdateLog] = useState<string[]>([]);
+  const [updateState, setUpdateState] = useState<UpdateState>('idle');
+
+  // Seed/replace the update console (from a status snapshot on open, or clear on start).
+  const seedUpdate = useCallback((lines: string[], state: UpdateState) => {
+    setUpdateLog(lines);
+    setUpdateState(state);
+  }, []);
   const [isConnected, setIsConnected] = useState(false);
   const [reconnectAt, setReconnectAt] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -173,6 +181,10 @@ export function useScannerSocket({ onParallel }: Options = {}) {
               if (events.some(x => x.id === newEvent.id)) return events;
               return [newEvent, ...events].slice(0, 100);
             });
+          } else if (message.type === 'UPDATE_PROGRESS') {
+            const p = message.payload as UpdateProgress;
+            if (p.state) setUpdateState(p.state);
+            if (p.line) setUpdateLog(prev => [...prev, p.line]);
           } else if (message.type === 'ERROR') {
             setErrorMsg(message.payload);
           }
@@ -195,6 +207,9 @@ export function useScannerSocket({ onParallel }: Options = {}) {
     fireTones,
     callLog,
     radioEvents,
+    updateLog,
+    updateState,
+    seedUpdate,
     isConnected,
     reconnectAt,
     errorMsg,
