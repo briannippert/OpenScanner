@@ -83,7 +83,7 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "PrepareModel failed for '{Model}'", modelName);
+                _logger.LogWarning(ex, "PrepareModel failed for '{Model}'", SafeForLog(modelName));
             }
         });
     }
@@ -282,6 +282,12 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
         !string.IsNullOrWhiteSpace(name) &&
         System.Text.RegularExpressions.Regex.IsMatch(name, "^[A-Za-z0-9._-]+$");
 
+    // Strips line breaks from a user-influenced value before it is written to a log,
+    // preventing forged/injected log entries (CWE-117). Model names come from the
+    // web-app settings, so they are treated as untrusted at log sites.
+    private static string SafeForLog(string? value) =>
+        (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+
     // Walk up from the working directory to locate the cloned whisper.cpp folder.
     private static string FindWhisperRoot()
     {
@@ -328,7 +334,7 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
                 return false;
             }
 
-            _logger.LogInformation("Downloading Whisper model '{Model}'...", modelName);
+            _logger.LogInformation("Downloading Whisper model '{Model}'...", SafeForLog(modelName));
             SetModelStatus($"downloading:{modelName}");
 
             var psi = new ProcessStartInfo("bash")
@@ -356,25 +362,25 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
                 if (!proc.WaitForExit(30 * 60 * 1000))
                 {
                     proc.Kill(true);
-                    _logger.LogError("Model download for '{Model}' timed out.", modelName);
+                    _logger.LogError("Model download for '{Model}' timed out.", SafeForLog(modelName));
                     SetModelStatus("error: download timed out");
                     return false;
                 }
 
                 if (proc.ExitCode != 0 || !File.Exists(modelPath))
                 {
-                    _logger.LogError("Model download for '{Model}' failed (exit {Code}).\n{Err}", modelName, proc.ExitCode, stderr.Result);
+                    _logger.LogError("Model download for '{Model}' failed (exit {Code}).\n{Err}", SafeForLog(modelName), proc.ExitCode, stderr.Result);
                     SetModelStatus($"error: download failed");
                     return false;
                 }
 
-                _logger.LogInformation("Whisper model '{Model}' downloaded.", modelName);
+                _logger.LogInformation("Whisper model '{Model}' downloaded.", SafeForLog(modelName));
                 SetModelStatus($"ready:{modelName}");
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error downloading Whisper model '{Model}'", modelName);
+                _logger.LogError(ex, "Error downloading Whisper model '{Model}'", SafeForLog(modelName));
                 SetModelStatus($"error: {ex.Message}");
                 return false;
             }
@@ -398,7 +404,7 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
         if (string.IsNullOrWhiteSpace(modelName)) modelName = "small.en";
         if (!IsValidModelName(modelName))
         {
-            _logger.LogError("Invalid transcription model name '{Model}'; refusing to use it.", modelName);
+            _logger.LogError("Invalid transcription model name '{Model}'; refusing to use it.", SafeForLog(modelName));
             return null;
         }
 
@@ -419,7 +425,7 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
         // there is nothing else to do meanwhile).
         if (!EnsureModelAvailable(whisperRoot, modelName))
         {
-            _logger.LogError("Transcription model '{Model}' is not available and could not be downloaded.", modelName);
+            _logger.LogError("Transcription model '{Model}' is not available and could not be downloaded.", SafeForLog(modelName));
             return null;
         }
 
