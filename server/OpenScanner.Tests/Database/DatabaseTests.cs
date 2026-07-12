@@ -78,6 +78,32 @@ public class DatabaseTests : IDisposable
     }
 
     [Fact]
+    public async Task ConcurrentReadsAndWrites_ShouldNotThrowDatabaseLocked()
+    {
+        // Regression guard for "SQLite Error 5: 'database is locked'": with WAL
+        // journaling plus a busy_timeout, many concurrent writers and readers on
+        // separate connections must all succeed rather than failing on lock
+        // contention (as they did in the default rollback-journal mode).
+        var now = DateTime.UtcNow.ToString("o");
+        var tasks = new List<Task>();
+        for (int i = 0; i < 50; i++)
+        {
+            var id = $"concurrent_{i}";
+            tasks.Add(_db.SaveTransmissionAsync(
+                new CallLog(id, now, 155.0, "PD", "d", null, null, null, 1.0, null, i, 4021)));
+            tasks.Add(_db.AddAliasAsync(
+                new RadioAlias { Kind = "SRC", Value = i, Name = $"Unit {i}", AlphaTag = "PD", Frequency = 155.0 }));
+            tasks.Add(_db.GetHistoryAsync(100));
+        }
+
+        // Any lock contention would surface as a faulted task here.
+        await Task.WhenAll(tasks);
+
+        Assert.Equal(50, (await _db.GetHistoryAsync(1000)).Count());
+        Assert.Equal(50, (await _db.GetAliasesAsync()).Count());
+    }
+
+    [Fact]
     public async Task AddAlias_ShouldPersist_AndUpsertOnConflict()
     {
         var id = await _db.AddAliasAsync(new RadioAlias { Kind = "SRC", Value = 101, Name = "Car 1", AlphaTag = "PD", Frequency = 155.0 });
