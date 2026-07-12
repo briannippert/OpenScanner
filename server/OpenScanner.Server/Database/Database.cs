@@ -64,6 +64,13 @@ public class Database : IDatabase
     private void Initialize()
     {
         using var conn = GetConnection();
+        // Enable Write-Ahead Logging so readers and a single writer don't block
+        // each other. This is a persistent property of the database file, so
+        // setting it once here applies to every subsequent connection. Without
+        // it, the constant transmission writes serialize against user-triggered
+        // writes (e.g. saving an alias) and surface as "database is locked".
+        conn.Execute("PRAGMA journal_mode=WAL;");
+
         var sql = SqlLoader.GetSql("Initialize.sql");
         conn.Execute(sql);
         
@@ -145,7 +152,18 @@ public class Database : IDatabase
     }
 
     /// <inheritdoc />
-    public SqliteConnection GetConnection() => new SqliteConnection(_connectionString);
+    public SqliteConnection GetConnection()
+    {
+        var conn = new SqliteConnection(_connectionString);
+        conn.Open();
+        // busy_timeout is per-connection-handle and resets when a pooled handle
+        // is reused, so set it on every open. Any transient SQLITE_BUSY now waits
+        // up to 5s for the lock instead of failing immediately.
+        using var pragma = conn.CreateCommand();
+        pragma.CommandText = "PRAGMA busy_timeout=5000;";
+        pragma.ExecuteNonQuery();
+        return conn;
+    }
 
     /// <inheritdoc />
     public async Task<IEnumerable<Channel>> GetAllChannelsAsync()
