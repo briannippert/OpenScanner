@@ -10,11 +10,13 @@ import FireToneManager from './components/FireToneManager';
 import SettingsManager from './components/SettingsManager';
 import RfDebugDialog from './components/RfDebugDialog';
 import SystemDebugDialog from './components/SystemDebugDialog';
+import UpdateManager from './components/UpdateManager';
 import NowPlayingBar from './components/NowPlayingBar';
 import CommandPalette from './components/CommandPalette';
 import { useAudioPipeline } from './hooks/useAudioPipeline';
 import { useScannerSocket } from './hooks/useScannerSocket';
-import type { Channel } from './types';
+import { apiJson } from './components/common/apiBase';
+import type { Channel, UpdateStatus } from './types';
 
 function App() {
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -30,6 +32,8 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
   const [isSystemDebugOpen, setIsSystemDebugOpen] = useState(false);
+  const [isUpdateOpen, setIsUpdateOpen] = useState(false);
+  const [polledAvailable, setPolledAvailable] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [debugFreq, setDebugFreq] = useState<string>('155.500');
   const [debugGain, setDebugGain] = useState<number>(40);
@@ -44,6 +48,24 @@ function App() {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // Poll update availability for the ribbon indicator.
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      const s = await apiJson<UpdateStatus>('/api/update/status');
+      if (!cancelled && s) setPolledAvailable(s.updateAvailable);
+    };
+    check();
+    const id = setInterval(check, 120000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  // Ribbon indicator: live WS state wins; otherwise fall back to the poll. Hidden
+  // while an update is running/done or when a check found nothing.
+  const updateState = scanner.updateState;
+  const updateAvailable = updateState === 'available'
+    || (polledAvailable && updateState !== 'updating' && updateState !== 'success' && updateState !== 'idle');
 
   // Command palette: Ctrl/⌘-K toggles it from anywhere.
   useEffect(() => {
@@ -203,6 +225,8 @@ function App() {
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenDebug={openDebug}
           onOpenSystemDebug={() => setIsSystemDebugOpen(true)}
+          updateAvailable={updateAvailable}
+          onOpenUpdate={() => setIsUpdateOpen(true)}
         />
 
         <Box sx={{ flexGrow: 1, p: { xs: 1, sm: 2 }, height: '100%', overflowY: { xs: 'auto', md: 'hidden' } }}>
@@ -287,6 +311,13 @@ function App() {
           open={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
           onRecordingsDeleted={() => scanner.setCallLog([])}
+        />
+        <UpdateManager
+          open={isUpdateOpen}
+          onClose={() => setIsUpdateOpen(false)}
+          log={scanner.updateLog}
+          state={scanner.updateState}
+          onSeed={scanner.seedUpdate}
         />
         <CommandPalette
           open={isPaletteOpen}

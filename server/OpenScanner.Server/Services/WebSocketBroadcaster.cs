@@ -185,6 +185,16 @@ public class WebSocketBroadcaster
         _ = BroadcastJson(msg);
     }
 
+    /// <summary>
+    /// Broadcasts a self-update progress line to control clients as
+    /// <c>{ type: "UPDATE_PROGRESS", payload: { phase, line, state } }</c>.
+    /// </summary>
+    public void BroadcastUpdateProgress(string phase, string line, string state)
+    {
+        var msg = new { type = "UPDATE_PROGRESS", payload = new { phase, line, state } };
+        _ = BroadcastJson(msg);
+    }
+
     private void BroadcastAudio(byte[] audioData)
     {
         // _logger.LogInformation($"Broadcasting audio: {audioData.Length} bytes to {_audioSessions.Count} clients");

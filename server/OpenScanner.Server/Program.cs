@@ -64,6 +64,9 @@ else
 builder.Services.AddSingleton<IBackfillService, BackfillTranscriptionService>();
 builder.Services.AddSingleton<ISupportService, SupportService>();
 builder.Services.AddSingleton<WebSocketBroadcaster>();
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<IUpdateService, UpdateService>();
+builder.Services.AddHostedService(sp => (UpdateService)sp.GetRequiredService<IUpdateService>());
 builder.Services.AddCors();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApiDocument(config => 

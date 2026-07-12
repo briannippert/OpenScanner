@@ -96,6 +96,31 @@ export interface RadioEvent {
     transmissionId?: string;
 }
 
+export type UpdateState = 'idle' | 'checking' | 'available' | 'updating' | 'success' | 'failed';
+
+export interface UpdateStatus {
+    state: UpdateState;
+    currentVersion: string;
+    currentCommit: string;
+    latestTag?: string;
+    latestName?: string;
+    releaseNotes?: string;
+    releaseUrl?: string;
+    commitsBehind: number;
+    updateAvailable: boolean;
+    phase?: string;
+    log: string[];
+    error?: string;
+    lastCheckedUtc?: string;
+}
+
+/** A single live self-update progress message from the control WebSocket. */
+export interface UpdateProgress {
+    phase: string;
+    line: string;
+    state: UpdateState;
+}
+
 declare global {
     interface Window {
         audioCtx?: AudioContext;

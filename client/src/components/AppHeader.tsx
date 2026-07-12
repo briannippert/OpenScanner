@@ -18,6 +18,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import MonitorIcon from '@mui/icons-material/Monitor';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
+import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
 import type { ScannerState } from '../types';
 import StatusChip from './common/StatusChip';
 
@@ -34,6 +35,8 @@ interface Props {
   onOpenSettings: () => void;
   onOpenDebug: () => void;
   onOpenSystemDebug: () => void;
+  updateAvailable?: boolean;
+  onOpenUpdate: () => void;
 }
 
 const MONO = '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
@@ -42,6 +45,7 @@ const gpsMono = { fontFamily: MONO, color: 'text.primary' } as const;
 const AppHeader: React.FC<Props> = ({
   scannerState, currentTime, volume, onVolumeChange, manualHold, onResume,
   isFullscreen, onToggleFullscreen, onOpenFireTones, onOpenSettings, onOpenDebug, onOpenSystemDebug,
+  updateAvailable, onOpenUpdate,
 }) => {
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const gps = scannerState.gps;
@@ -49,6 +53,7 @@ const AppHeader: React.FC<Props> = ({
 
   // The toolbar actions, shared between the desktop icon row and the mobile menu.
   const actions = [
+    ...(updateAvailable ? [{ label: 'Software Update', icon: <SystemUpdateIcon />, onClick: onOpenUpdate }] : []),
     { label: 'Fire Tone Outs', icon: <NotificationsActiveIcon />, onClick: onOpenFireTones },
     { label: 'Settings', icon: <SettingsIcon />, onClick: onOpenSettings },
     { label: isFullscreen ? 'Exit Fullscreen' : 'Fullscreen', icon: isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />, onClick: onToggleFullscreen },
@@ -136,6 +141,14 @@ const AppHeader: React.FC<Props> = ({
             <StatusChip label="HOLD" tone="warn" variant="filled" icon={<PauseIcon />} sx={{ display: { xs: 'none', sm: 'flex' } }} />
             <StatusChip label="RESUME" tone="live" variant="filled" icon={<PlayArrowIcon />} onClick={onResume} />
           </Box>
+        )}
+
+        {updateAvailable && (
+          <Tooltip title="A new version is available — click to update">
+            <Box sx={{ mr: { xs: 1, sm: 2 } }}>
+              <StatusChip label="UPDATE" tone="warn" variant="filled" icon={<SystemUpdateIcon />} onClick={onOpenUpdate} />
+            </Box>
+          </Tooltip>
         )}
 
         <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 2, width: { xs: 80, sm: 120, md: 150 } }}>

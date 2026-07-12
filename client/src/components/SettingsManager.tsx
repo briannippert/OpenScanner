@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
     Button, Switch,
-    Box, CircularProgress, Alert, AlertTitle, Link, TextField,
+    Box, CircularProgress, TextField,
     Typography, LinearProgress, Select, MenuItem,
 } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
-import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import FormDialog from './common/FormDialog';
 import { apiFetch } from './common/apiBase';
@@ -78,7 +77,6 @@ const Row: React.FC<{ label: string; description?: string; control: React.ReactN
 const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }) => {
     const [settings, setSettings] = useState<Record<string, string>>({});
     const [systemInfo, setSystemInfo] = useState<Record<string, string>>({});
-    const [updateInfo, setUpdateInfo] = useState<{ latestVersion: string, url: string, body?: string } | null>(null);
     const [loading, setLoading] = useState(false);
     const [storage, setStorage] = useState<StorageInfo | null>(null);
     const [confirmDelete, setConfirmDelete] = useState(false);
@@ -88,7 +86,6 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
         if (open) {
             fetchSettings();
             fetchSystemInfo();
-            fetchLatestVersion();
             fetchStorage();
         }
     }, [open]);
@@ -153,37 +150,6 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
         }
     };
 
-    const fetchLatestVersion = async () => {
-        try {
-            const res = await fetch('https://api.github.com/repos/briannippert/OpenScanner/releases/latest');
-            if (res.ok) {
-                const data = await res.json();
-                setUpdateInfo({
-                    latestVersion: data.tag_name,
-                    url: data.html_url,
-                    body: data.body
-                });
-            }
-        } catch (error) {
-            console.error("Failed to fetch latest version from GitHub", error);
-        }
-    };
-
-    const isNewer = (current: string, latest: string) => {
-        if (!current || !latest) return false;
-        const c = current.split('+')[0].replace(/^v/, '').split('.').map(Number);
-        const l = latest.replace(/^v/, '').split('.').map(Number);
-        for (let i = 0; i < Math.max(c.length, l.length); i++) {
-            const cv = c[i] || 0;
-            const lv = l[i] || 0;
-            if (lv > cv) return true;
-            if (cv > lv) return false;
-        }
-        return false;
-    };
-
-    const updateAvailable = updateInfo && isNewer(systemInfo.Version, updateInfo.latestVersion);
-
     const handleToggle = async (key: string, currentValue: string) => {
         const newValue = currentValue === 'true' ? 'false' : 'true';
         
@@ -235,28 +201,6 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
             maxWidth="md"
             actions={<Button onClick={onClose} color="inherit">Close</Button>}
         >
-                {updateAvailable && (
-                    <Alert
-                        severity="success"
-                        icon={<SystemUpdateIcon />}
-                        sx={{ mb: 2 }}
-                        action={
-                            <Button 
-                                color="inherit" 
-                                size="small" 
-                                component={Link} 
-                                href={updateInfo?.url} 
-                                target="_blank"
-                                rel="noopener"
-                            >
-                                VIEW
-                            </Button>
-                        }
-                    >
-                        <AlertTitle>Update Available: {updateInfo?.latestVersion}</AlertTitle>
-                        A newer version of OpenScanner is available on GitHub.
-                    </Alert>
-                )}
                 {loading ? (
                     <Box display="flex" justifyContent="center" p={4}>
                         <CircularProgress />
