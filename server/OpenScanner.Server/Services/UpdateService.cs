@@ -85,6 +85,44 @@ public class UpdateService : IUpdateService, IHostedService
         }
     }
 
+    /// <summary>
+    /// Directory containing the <c>npm</c> (and co-located <c>node</c>) binary, or null
+    /// if none can be found. The build's frontend step shells out to <c>npm</c>, but the
+    /// service typically runs with a minimal PATH that omits an nvm-managed Node, so we
+    /// resolve it explicitly and prepend it to the build process's PATH. Order: a
+    /// <c>Update:NpmPath</c> config override, then the newest nvm Node under any home
+    /// directory, then standard install locations.
+    /// </summary>
+    private string? ResolveNpmDir()
+    {
+        var configured = _config["Update:NpmPath"];
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            var dir = File.Exists(configured) ? Path.GetDirectoryName(configured) : configured;
+            if (!string.IsNullOrEmpty(dir) && File.Exists(Path.Combine(dir!, "npm"))) return dir;
+        }
+
+        var homes = new List<string>();
+        var userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrEmpty(userHome)) homes.Add(userHome);
+        if (Directory.Exists("/home"))
+            try { homes.AddRange(Directory.GetDirectories("/home")); } catch { /* unreadable */ }
+        homes.Add("/root");
+
+        var candidates = new List<string>();
+        foreach (var home in homes.Distinct())
+        {
+            var nvm = Path.Combine(home, ".nvm", "versions", "node");
+            if (Directory.Exists(nvm))
+                try { candidates.AddRange(Directory.GetDirectories(nvm).OrderByDescending(d => d, StringComparer.Ordinal).Select(d => Path.Combine(d, "bin"))); }
+                catch { /* unreadable */ }
+            candidates.Add(Path.Combine(home, ".local", "bin"));
+        }
+        candidates.AddRange(new[] { "/usr/local/bin", "/usr/bin", "/opt/homebrew/bin" });
+
+        return candidates.FirstOrDefault(d => File.Exists(Path.Combine(d, "npm")));
+    }
+
     // Prefixes git args with `-c safe.directory=*` so the root-run service can operate
     // on a repo owned by another user (avoids git's "dubious ownership" refusal).
     private static string[] Git(params string[] args) =>
@@ -278,7 +316,11 @@ public class UpdateService : IUpdateService, IHostedService
                 Emit("reset", $"Preserved PowerDMS department \"{savedDept}\".");
 
             Emit("build", "Building server and client (this can take several minutes)…");
-            if (await RunStreamingAsync(DotnetPath, new[] { "build", "-c", "Release", "-o", StagingDir }, ServerProjDir, "build", 20 * 60_000) != 0)
+            var npmDir = ResolveNpmDir();
+            Emit("build", npmDir != null
+                ? $"Using npm from {npmDir}"
+                : "Warning: could not locate npm; relying on the service PATH for the frontend build.");
+            if (await RunStreamingAsync(DotnetPath, new[] { "build", "-c", "Release", "-o", StagingDir }, ServerProjDir, "build", 20 * 60_000, npmDir) != 0)
             { Fail("Build failed. The running version is unchanged."); return; }
 
             if (IsLinux && HasSystemd())
@@ -398,7 +440,7 @@ public class UpdateService : IUpdateService, IHostedService
     // MARK: - Process helpers
 
     /// <summary>Runs a command, streaming each stdout/stderr line to clients and the log. Returns the exit code (-1 on timeout/failure to start).</summary>
-    private async Task<int> RunStreamingAsync(string file, string[] args, string workingDir, string phase, int timeoutMs)
+    private async Task<int> RunStreamingAsync(string file, string[] args, string workingDir, string phase, int timeoutMs, string? extraPathDir = null)
     {
         Emit(phase, $"$ {Path.GetFileName(file)} {string.Join(' ', args)}");
         try
@@ -412,6 +454,18 @@ public class UpdateService : IUpdateService, IHostedService
                 WorkingDirectory = workingDir,
             };
             foreach (var a in args) psi.ArgumentList.Add(a);
+
+            // Prepend a directory to PATH so child tools invoked by the build (npm/node)
+            // are found even when the service runs with a minimal PATH.
+            if (!string.IsNullOrEmpty(extraPathDir))
+            {
+                var existing = psi.Environment.TryGetValue("PATH", out var p) && !string.IsNullOrEmpty(p)
+                    ? p
+                    : Environment.GetEnvironmentVariable("PATH");
+                psi.Environment["PATH"] = string.IsNullOrEmpty(existing)
+                    ? extraPathDir
+                    : $"{extraPathDir}{Path.PathSeparator}{existing}";
+            }
 
             using var proc = new Process { StartInfo = psi };
             proc.OutputDataReceived += (_, e) => { if (e.Data != null) Emit(phase, e.Data); };
