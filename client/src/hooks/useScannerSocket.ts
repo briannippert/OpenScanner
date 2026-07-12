@@ -1,5 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ScannerState, Channel, CallLog, FireToneSet, RadioEvent, UpdateProgress, UpdateState } from '../types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ScannerState, Channel, CallLog, FireToneSet, RadioEvent, RadioAlias, AliasCandidate, UpdateProgress, UpdateState } from '../types';
+import type { NameFor } from '../lib/aliasLabels';
+
+// Channel-scoped alias key; toFixed(4) neutralizes REAL float equality on both sides.
+const aliasKey = (kind: string, value: number, alphaTag: string, frequency: number) =>
+  `${alphaTag}|${frequency.toFixed(4)}|${kind}|${value}`;
 
 interface Options {
   /** Called when a state update indicates whether the live stream is stereo. */
@@ -17,6 +22,8 @@ export function useScannerSocket({ onParallel }: Options = {}) {
   const [fireTones, setFireTones] = useState<FireToneSet[]>([]);
   const [callLog, setCallLog] = useState<CallLog[]>([]);
   const [radioEvents, setRadioEvents] = useState<RadioEvent[]>([]);
+  const [aliases, setAliases] = useState<RadioAlias[]>([]);
+  const [aliasCandidates, setAliasCandidates] = useState<AliasCandidate[]>([]);
   const [updateLog, setUpdateLog] = useState<string[]>([]);
   const [updateState, setUpdateState] = useState<UpdateState>('idle');
 
@@ -116,6 +123,71 @@ export function useScannerSocket({ onParallel }: Options = {}) {
     }
   }, [refreshFireTones]);
 
+  const refreshAliases = useCallback(() => {
+    fetch('/api/aliases')
+      .then(res => res.json())
+      .then(data => setAliases(data))
+      .catch(err => console.error('Failed to fetch aliases:', err));
+  }, []);
+
+  const refreshAliasCandidates = useCallback((days = 7) => {
+    fetch(`/api/aliases/candidates?days=${days}`)
+      .then(res => res.json())
+      .then(data => setAliasCandidates(data))
+      .catch(err => console.error('Failed to fetch alias candidates:', err));
+  }, []);
+
+  const handleSaveAlias = useCallback(async (alias: RadioAlias) => {
+    const method = alias.id ? 'PUT' : 'POST';
+    const url = alias.id ? `/api/aliases/${alias.id}` : '/api/aliases';
+    try {
+      await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(alias) });
+      refreshAliases();
+    } catch (e) {
+      console.error('Save alias failed:', e);
+    }
+  }, [refreshAliases]);
+
+  const handleDeleteAlias = useCallback(async (id: number) => {
+    try {
+      await fetch(`/api/aliases/${id}`, { method: 'DELETE' });
+      refreshAliases();
+    } catch (e) {
+      console.error('Delete alias failed:', e);
+    }
+  }, [refreshAliases]);
+
+  // Additive import: fills in blanks server-side without overwriting existing names.
+  // Returns the number of aliases added.
+  const importAliases = useCallback(async (list: RadioAlias[]): Promise<number> => {
+    try {
+      const res = await fetch('/api/aliases/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(list),
+      });
+      const data = await res.json().catch(() => ({ added: 0 }));
+      refreshAliases();
+      return data?.added ?? 0;
+    } catch (e) {
+      console.error('Import aliases failed:', e);
+      return 0;
+    }
+  }, [refreshAliases]);
+
+  // App-wide per-channel name lookup for SRC/TG, rebuilt when aliases change.
+  const aliasIndex = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of aliases) m.set(aliasKey(a.kind, a.value, a.alphaTag, a.frequency), a.name);
+    return m;
+  }, [aliases]);
+
+  const nameFor = useCallback<NameFor>(
+    (kind, value, alphaTag, frequency) =>
+      value == null ? undefined : aliasIndex.get(aliasKey(kind, value, alphaTag, frequency)),
+    [aliasIndex],
+  );
+
   const deleteEntry = useCallback(async (id: string) => {
     try {
       const response = await fetch(`/api/history/${id}`, { method: 'DELETE' });
@@ -149,6 +221,8 @@ export function useScannerSocket({ onParallel }: Options = {}) {
       .catch(err => console.error('Failed to fetch history:', err)).finally(() => setLogLoaded(true));
     fetch('/api/events').then(r => r.json()).then(setRadioEvents)
       .catch(err => console.error('Failed to fetch events:', err));
+    fetch('/api/aliases').then(r => r.json()).then(setAliases)
+      .catch(err => console.error('Failed to fetch aliases:', err));
 
     const connectControlWs = () => {
       wsControl.current = new WebSocket(wsControlUrl);
@@ -207,6 +281,13 @@ export function useScannerSocket({ onParallel }: Options = {}) {
     fireTones,
     callLog,
     radioEvents,
+    aliases,
+    aliasCandidates,
+    nameFor,
+    refreshAliasCandidates,
+    handleSaveAlias,
+    handleDeleteAlias,
+    importAliases,
     updateLog,
     updateState,
     seedUpdate,

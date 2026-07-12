@@ -200,6 +200,53 @@ public class Database : IDatabase
     }
 
     /// <inheritdoc />
+    public async Task<IEnumerable<RadioAlias>> GetAliasesAsync()
+    {
+        using var conn = GetConnection();
+        return await conn.QueryAsync<RadioAlias>(SqlLoader.GetSql("Aliases/GetAll.sql"));
+    }
+
+    /// <inheritdoc />
+    public async Task<int> AddAliasAsync(RadioAlias alias)
+    {
+        using var conn = GetConnection();
+        return await conn.ExecuteScalarAsync<int>(SqlLoader.GetSql("Aliases/Insert.sql"), alias);
+    }
+
+    /// <inheritdoc />
+    public async Task UpdateAliasAsync(RadioAlias alias)
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync(SqlLoader.GetSql("Aliases/Update.sql"), alias);
+    }
+
+    /// <inheritdoc />
+    public async Task DeleteAliasAsync(int id)
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync(SqlLoader.GetSql("Aliases/Delete.sql"), new { Id = id });
+    }
+
+    /// <inheritdoc />
+    public async Task<int> ImportAliasesAsync(IEnumerable<RadioAlias> aliases)
+    {
+        var list = aliases?.Where(a => !string.IsNullOrWhiteSpace(a.Name)).ToList() ?? new List<RadioAlias>();
+        if (list.Count == 0) return 0;
+        using var conn = GetConnection();
+        // ON CONFLICT DO NOTHING means conflicting rows affect 0; the sum is the number
+        // of blanks actually filled.
+        return await conn.ExecuteAsync(SqlLoader.GetSql("Aliases/InsertIfAbsent.sql"), list);
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<AliasCandidate>> GetAliasCandidatesAsync(int days)
+    {
+        using var conn = GetConnection();
+        var window = $"-{Math.Max(1, days)} days";
+        return await conn.QueryAsync<AliasCandidate>(SqlLoader.GetSql("Aliases/Candidates.sql"), new { Window = window });
+    }
+
+    /// <inheritdoc />
     public async Task SaveTransmissionAsync(CallLog log)
     {
         using var conn = GetConnection();

@@ -96,6 +96,26 @@ export interface RadioEvent {
     transmissionId?: string;
 }
 
+/** A per-channel display name for a source ID (SRC) or talkgroup (TG). */
+export interface RadioAlias {
+    id?: number;
+    kind: 'SRC' | 'TG';
+    value: number;
+    name: string;
+    alphaTag: string;
+    frequency: number;
+}
+
+/** A distinct SRC/TG seen on a channel within the lookback window. */
+export interface AliasCandidate {
+    alphaTag: string;
+    frequency: number;
+    kind: 'SRC' | 'TG';
+    value: number;
+    count: number;
+    lastSeen?: string;
+}
+
 export type UpdateState = 'idle' | 'checking' | 'available' | 'updating' | 'success' | 'failed';
 
 export interface UpdateStatus {

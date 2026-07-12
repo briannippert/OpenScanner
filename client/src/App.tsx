@@ -8,6 +8,7 @@ import TransmissionLog from './components/TransmissionLog';
 import ChannelManager from './components/ChannelManager';
 import FireToneManager from './components/FireToneManager';
 import SettingsManager from './components/SettingsManager';
+import AliasManager from './components/AliasManager';
 import RfDebugDialog from './components/RfDebugDialog';
 import SystemDebugDialog from './components/SystemDebugDialog';
 import UpdateManager from './components/UpdateManager';
@@ -32,6 +33,7 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
   const [isSystemDebugOpen, setIsSystemDebugOpen] = useState(false);
+  const [isAliasManagerOpen, setIsAliasManagerOpen] = useState(false);
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [polledAvailable, setPolledAvailable] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
@@ -225,6 +227,7 @@ function App() {
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenDebug={openDebug}
           onOpenSystemDebug={() => setIsSystemDebugOpen(true)}
+          onOpenAliases={() => setIsAliasManagerOpen(true)}
           updateAvailable={updateAvailable}
           onOpenUpdate={() => setIsUpdateOpen(true)}
         />
@@ -239,6 +242,7 @@ function App() {
                   analyser={audio.audioAnalyser}
                   channels={scanner.channels}
                   onScan={scanner.handleSkip}
+                  nameFor={scanner.nameFor}
                 />
               </Box>
               <ChannelGrid
@@ -274,6 +278,7 @@ function App() {
                   highlight={highlightLog}
                   loaded={scanner.logLoaded}
                   toneOutIds={toneOutIds}
+                  nameFor={scanner.nameFor}
                 />
               </Paper>
             </Grid>
@@ -312,6 +317,16 @@ function App() {
           onClose={() => setIsSettingsOpen(false)}
           onRecordingsDeleted={() => scanner.setCallLog([])}
         />
+        <AliasManager
+          open={isAliasManagerOpen}
+          onClose={() => setIsAliasManagerOpen(false)}
+          candidates={scanner.aliasCandidates}
+          aliases={scanner.aliases}
+          onSave={scanner.handleSaveAlias}
+          onDelete={scanner.handleDeleteAlias}
+          onImport={scanner.importAliases}
+          onOpened={() => scanner.refreshAliasCandidates(7)}
+        />
         <UpdateManager
           open={isUpdateOpen}
           onClose={() => setIsUpdateOpen(false)}
@@ -330,6 +345,7 @@ function App() {
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenFireTones={() => setIsToneManagerOpen(true)}
           onOpenChannels={() => setIsManagerOpen(true)}
+          onOpenAliases={() => setIsAliasManagerOpen(true)}
           onOpenDebug={openDebug}
           onToggleFullscreen={toggleFullscreen}
         />

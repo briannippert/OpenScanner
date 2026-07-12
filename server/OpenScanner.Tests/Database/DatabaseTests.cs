@@ -78,6 +78,74 @@ public class DatabaseTests : IDisposable
     }
 
     [Fact]
+    public async Task AddAlias_ShouldPersist_AndUpsertOnConflict()
+    {
+        var id = await _db.AddAliasAsync(new RadioAlias { Kind = "SRC", Value = 101, Name = "Car 1", AlphaTag = "PD", Frequency = 155.0 });
+        Assert.True(id > 0);
+
+        var all = await _db.GetAliasesAsync();
+        Assert.Single(all);
+        Assert.Equal("Car 1", all.First().Name);
+
+        // Same (kind, value, alphaTag, frequency) upserts the name rather than adding a row.
+        await _db.AddAliasAsync(new RadioAlias { Kind = "SRC", Value = 101, Name = "Engine 1", AlphaTag = "PD", Frequency = 155.0 });
+        all = await _db.GetAliasesAsync();
+        Assert.Single(all);
+        Assert.Equal("Engine 1", all.First().Name);
+    }
+
+    [Fact]
+    public async Task UpdateAndDeleteAlias_ShouldWork()
+    {
+        var id = await _db.AddAliasAsync(new RadioAlias { Kind = "TG", Value = 4021, Name = "Dispatch", AlphaTag = "FD", Frequency = 154.4 });
+
+        await _db.UpdateAliasAsync(new RadioAlias { Id = id, Kind = "TG", Value = 4021, Name = "Main Dispatch", AlphaTag = "FD", Frequency = 154.4 });
+        Assert.Equal("Main Dispatch", (await _db.GetAliasesAsync()).First().Name);
+
+        await _db.DeleteAliasAsync(id);
+        Assert.Empty(await _db.GetAliasesAsync());
+    }
+
+    [Fact]
+    public async Task ImportAliases_ShouldFillBlanks_WithoutOverwriting()
+    {
+        await _db.AddAliasAsync(new RadioAlias { Kind = "SRC", Value = 101, Name = "Original", AlphaTag = "PD", Frequency = 155.0 });
+
+        var added = await _db.ImportAliasesAsync(new[]
+        {
+            new RadioAlias { Kind = "SRC", Value = 101, Name = "Should Not Win", AlphaTag = "PD", Frequency = 155.0 }, // conflict → skipped
+            new RadioAlias { Kind = "TG", Value = 4021, Name = "Dispatch", AlphaTag = "PD", Frequency = 155.0 },        // new → added
+        });
+
+        Assert.Equal(1, added);
+        var all = (await _db.GetAliasesAsync()).ToList();
+        Assert.Equal(2, all.Count);
+        Assert.Equal("Original", all.First(a => a.Kind == "SRC" && a.Value == 101).Name); // not overwritten
+        Assert.Contains(all, a => a.Kind == "TG" && a.Value == 4021 && a.Name == "Dispatch");
+    }
+
+    [Fact]
+    public async Task GetAliasCandidates_ShouldGroupDistinctSrcAndTgPerChannel_WithinWindow()
+    {
+        var now = DateTime.UtcNow.ToString("o");
+        // Same channel + SRC 101 twice (count 2), SRC 202 once, TG 4021.
+        await _db.SaveTransmissionAsync(new CallLog("c1", now, 155.0, "PD", "d", null, null, null, 1.0, null, 101, 4021));
+        await _db.SaveTransmissionAsync(new CallLog("c2", now, 155.0, "PD", "d", null, null, null, 1.0, null, 101, 4021));
+        await _db.SaveTransmissionAsync(new CallLog("c3", now, 155.0, "PD", "d", null, null, null, 1.0, null, 202, null));
+        // Stale (30 days ago) must be excluded from the 7-day window.
+        var old = DateTime.UtcNow.AddDays(-30).ToString("o");
+        await _db.SaveTransmissionAsync(new CallLog("c4", old, 155.0, "PD", "d", null, null, null, 1.0, null, 999, null));
+
+        var cands = (await _db.GetAliasCandidatesAsync(7)).ToList();
+
+        var src = cands.Where(c => c.Kind == "SRC").ToList();
+        Assert.Contains(src, c => c.Value == 101 && c.Count == 2 && c.AlphaTag == "PD");
+        Assert.Contains(src, c => c.Value == 202 && c.Count == 1);
+        Assert.DoesNotContain(src, c => c.Value == 999);
+        Assert.Contains(cands, c => c.Kind == "TG" && c.Value == 4021);
+    }
+
+    [Fact]
     public async Task GetTransmissionById_ShouldReturnMatchingLog()
     {
         var log = new CallLog("target_id", DateTime.UtcNow.ToString("o"), 155.0, "Tag", "Desc", 45.0, -122.0, "audio.raw", 5.0, "Linked transcription", 1234, 5678);

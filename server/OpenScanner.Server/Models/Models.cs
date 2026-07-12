@@ -245,6 +245,46 @@ public class FireToneSet
 }
 
 /// <summary>
+/// A per-channel display name for a radio source ID (SRC) or talkgroup (TG).
+/// A "channel" is identified by the (AlphaTag, Frequency) pair, matching how
+/// transmissions are keyed in history.
+/// </summary>
+public class RadioAlias
+{
+    /// <summary>Unique identifier.</summary>
+    public int? Id { get; set; }
+
+    /// <summary>Namespace of <see cref="Value"/>: "SRC" (radio/unit ID) or "TG" (talkgroup).</summary>
+    public string Kind { get; set; } = "SRC";
+
+    /// <summary>The radio ID or talkgroup number being named.</summary>
+    public int Value { get; set; }
+
+    /// <summary>The display name to show instead of the raw number.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Channel alpha tag this alias applies to.</summary>
+    public string AlphaTag { get; set; } = string.Empty;
+
+    /// <summary>Channel frequency (MHz) this alias applies to.</summary>
+    public double Frequency { get; set; }
+}
+
+/// <summary>
+/// A distinct SRC or TG observed on a channel within a lookback window — the
+/// candidates a user can assign a <see cref="RadioAlias"/> name to.
+/// </summary>
+public class AliasCandidate
+{
+    public string AlphaTag { get; set; } = string.Empty;
+    public double Frequency { get; set; }
+    public string Kind { get; set; } = string.Empty;
+    public int Value { get; set; }
+    public int Count { get; set; }
+    public string? LastSeen { get; set; }
+}
+
+/// <summary>
 /// A decoded signaling event surfaced to the event log — either a fire tone-out
 /// (two-tone / Quick Call II) detection or an MDC1200 data packet.
 /// </summary>

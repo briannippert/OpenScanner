@@ -19,6 +19,7 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import MonitorIcon from '@mui/icons-material/Monitor';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
+import BadgeIcon from '@mui/icons-material/Badge';
 import type { ScannerState } from '../types';
 import StatusChip from './common/StatusChip';
 
@@ -35,6 +36,7 @@ interface Props {
   onOpenSettings: () => void;
   onOpenDebug: () => void;
   onOpenSystemDebug: () => void;
+  onOpenAliases: () => void;
   updateAvailable?: boolean;
   onOpenUpdate: () => void;
 }
@@ -45,7 +47,7 @@ const gpsMono = { fontFamily: MONO, color: 'text.primary' } as const;
 const AppHeader: React.FC<Props> = ({
   scannerState, currentTime, volume, onVolumeChange, manualHold, onResume,
   isFullscreen, onToggleFullscreen, onOpenFireTones, onOpenSettings, onOpenDebug, onOpenSystemDebug,
-  updateAvailable, onOpenUpdate,
+  onOpenAliases, updateAvailable, onOpenUpdate,
 }) => {
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const gps = scannerState.gps;
@@ -55,6 +57,7 @@ const AppHeader: React.FC<Props> = ({
   const actions = [
     ...(updateAvailable ? [{ label: 'Software Update', icon: <SystemUpdateIcon />, onClick: onOpenUpdate }] : []),
     { label: 'Fire Tone Outs', icon: <NotificationsActiveIcon />, onClick: onOpenFireTones },
+    { label: 'Radio Aliases', icon: <BadgeIcon />, onClick: onOpenAliases },
     { label: 'Settings', icon: <SettingsIcon />, onClick: onOpenSettings },
     { label: isFullscreen ? 'Exit Fullscreen' : 'Fullscreen', icon: isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />, onClick: onToggleFullscreen },
     { label: 'RF Spectrum Debug', icon: <MonitorIcon />, onClick: onOpenDebug },

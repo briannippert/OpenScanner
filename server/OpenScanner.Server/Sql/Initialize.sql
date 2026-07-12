@@ -23,6 +23,16 @@ CREATE TABLE IF NOT EXISTS fire_tones (
     description TEXT
 );
 
+CREATE TABLE IF NOT EXISTS aliases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,          -- 'SRC' | 'TG'
+    value INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    alphaTag TEXT NOT NULL,
+    frequency REAL NOT NULL,
+    UNIQUE(kind, value, alphaTag, frequency)
+);
+
 CREATE TABLE IF NOT EXISTS channels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     frequency REAL UNIQUE,
