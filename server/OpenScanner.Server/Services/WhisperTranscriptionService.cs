@@ -53,6 +53,39 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
 
         // Start background setting monitor
         _ = StartSettingsMonitor(_cts.Token);
+
+        // Proactively ensure the configured model is present (and reflect its
+        // status) so the first transmission isn't blocked on a large download.
+        PrepareModel(GetConfiguredModel());
+    }
+
+    private string GetConfiguredModel()
+    {
+        string? model = null;
+        try { model = _db.GetSettingAsync("TranscriptionModel").GetAwaiter().GetResult(); }
+        catch { /* fall through to config/default */ }
+        if (string.IsNullOrWhiteSpace(model)) model = _config["Transcription:Model"];
+        if (string.IsNullOrWhiteSpace(model)) model = "small.en";
+        return model;
+    }
+
+    public void PrepareModel(string modelName)
+    {
+        if (!IsValidModelName(modelName)) return;
+        Task.Run(() =>
+        {
+            try
+            {
+                var whisperRoot = FindWhisperRoot();
+                var modelPath = Path.Combine(whisperRoot, $"models/ggml-{modelName}.bin");
+                if (File.Exists(modelPath)) { SetModelStatus($"ready:{modelName}"); return; }
+                EnsureModelAvailable(whisperRoot, modelName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "PrepareModel failed for '{Model}'", SafeForLog(modelName));
+            }
+        });
     }
 
     private int GetTargetThreadCount()
@@ -176,6 +209,26 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
         _queueChannel.Writer.TryWrite((log, audioPath));
     }
 
+    public async Task<bool> RetranscribeAsync(CallLog log, string audioPath)
+    {
+        // Runs on the caller's (backfill) thread — it deliberately does not use the
+        // live worker queue, so live transmissions keep priority.
+        var transcription = TranscribeAudio(audioPath);
+        await _db.UpdateTranscriptionAsync(log.Id, transcription);
+        log.Transcription = transcription;
+        OnTranscriptionCompleted?.Invoke(log);
+        return !string.IsNullOrWhiteSpace(transcription);
+    }
+
+    public TranscriptionQueueStatus GetQueueStatus()
+    {
+        // Unbounded channels support Count; guard anyway in case that changes.
+        var queued = _queueChannel.Reader.CanCount ? _queueChannel.Reader.Count : 0;
+        int workers;
+        lock (_workersLock) { workers = _workers.Count; }
+        return new TranscriptionQueueStatus(queued, workers);
+    }
+
     public void Dispose()
     {
         _cts.Cancel();
@@ -191,54 +244,188 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
         }
     }
 
+    // Default generic radio/dispatch prompt. Biases Whisper toward scanner
+    // terminology and style. Overridable via Transcription:Prompt config.
+    private const string DefaultPrompt = "Dispatch, Unit 1, 10-4, copy, over. Priority traffic, code 3 response to street intersection. Suspect description: white male, blue jeans. License plate, vehicle registration, bolo. Structure fire, medical emergency, staging area. Status check, affirmative, negative, stand by. Channel 2, tac channel, command post. Kilo, Tango, Zulu, X-ray. 10-20 location, 10-8 in service, 10-7 out of service.";
+
+    // Voice-tuned ffmpeg filter chain applied before handing audio to Whisper:
+    // band-limit to the narrowband voice range, denoise, and adaptively normalize
+    // loudness (replaces a flat gain that clipped hot clips and under-boosted
+    // quiet ones). Overridable via Transcription:AudioFilters config.
+    private const string DefaultAudioFilters = "highpass=f=200,lowpass=f=3500,afftdn,dynaudnorm=f=200:g=5,alimiter=limit=0.95";
+
+    // Build the whisper-cli argument string. Kept pure/static so it can be unit
+    // tested without a real whisper binary or audio file.
+    internal static string BuildWhisperArgs(string modelPath, string wavPath, string prompt, int beamSize, int threads, string? extraArgs)
+    {
+        // -nt: no timestamps, -otxt: write .txt, -l en: force English.
+        // -bs/-bo: beam search (accuracy-first). -t: internal threads.
+        // -mc 0: don't carry text context across 30s windows — radio clips are
+        //   short/independent, so this removes a common hallucination/repetition
+        //   path (equivalent to condition_on_previous_text=false).
+        // -et 2.8: entropy threshold that keeps the temperature fallback which
+        //   reduces garbage output on hard audio.
+        var args = $"-m \"{modelPath}\" -f \"{wavPath}\" -nt -otxt -l en" +
+                   $" -bs {beamSize} -bo {beamSize} -t {threads} -mc 0 -et 2.8" +
+                   $" --prompt \"{prompt}\"";
+        if (!string.IsNullOrWhiteSpace(extraArgs)) args += " " + extraArgs.Trim();
+        return args;
+    }
+
+    // Serializes model downloads so concurrent workers don't fetch the same
+    // (or different) models at once.
+    private static readonly SemaphoreSlim _modelDownloadLock = new(1, 1);
+
+    // ggml model names are simple tokens (e.g. "large-v3-turbo-q5_0", "small.en").
+    // Validate before using in a path or passing to the download script.
+    internal static bool IsValidModelName(string name) =>
+        !string.IsNullOrWhiteSpace(name) &&
+        System.Text.RegularExpressions.Regex.IsMatch(name, "^[A-Za-z0-9._-]+$");
+
+    // Strips line breaks from a user-influenced value before it is written to a log,
+    // preventing forged/injected log entries (CWE-117). Model names come from the
+    // web-app settings, so they are treated as untrusted at log sites.
+    private static string SafeForLog(string? value) =>
+        (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+
+    // Walk up from the working directory to locate the cloned whisper.cpp folder.
+    private static string FindWhisperRoot()
+    {
+        var currentDir = new DirectoryInfo(Directory.GetCurrentDirectory());
+        for (int i = 0; i < 6 && currentDir != null; i++)
+        {
+            var probe = Path.Combine(currentDir.FullName, "whisper.cpp");
+            if (Directory.Exists(probe)) return probe;
+
+            probe = Path.Combine(currentDir.FullName, "../whisper.cpp");
+            if (Directory.Exists(probe)) return Path.GetFullPath(probe);
+
+            currentDir = currentDir.Parent;
+        }
+        return Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "../../whisper.cpp"));
+    }
+
+    private void SetModelStatus(string status)
+    {
+        try { _db.SetSettingAsync("TranscriptionModelStatus", status).GetAwaiter().GetResult(); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Failed to write TranscriptionModelStatus"); }
+    }
+
+    // Ensure the ggml model file for `modelName` exists under whisperRoot/models,
+    // downloading it via whisper.cpp's download-ggml-model.sh if missing. Returns
+    // true when the model is present. Surfaces progress via the
+    // TranscriptionModelStatus setting so the web UI can show it.
+    private bool EnsureModelAvailable(string whisperRoot, string modelName)
+    {
+        var modelPath = Path.Combine(whisperRoot, $"models/ggml-{modelName}.bin");
+        if (File.Exists(modelPath)) return true;
+
+        _modelDownloadLock.Wait();
+        try
+        {
+            // Re-check now that we hold the lock (another worker may have fetched it).
+            if (File.Exists(modelPath)) return true;
+
+            var script = Path.Combine(whisperRoot, "models/download-ggml-model.sh");
+            if (!File.Exists(script))
+            {
+                _logger.LogError("Model download script not found at {Script}", script);
+                SetModelStatus($"error: download script missing");
+                return false;
+            }
+
+            _logger.LogInformation("Downloading Whisper model '{Model}'...", SafeForLog(modelName));
+            SetModelStatus($"downloading:{modelName}");
+
+            var psi = new ProcessStartInfo("bash")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = whisperRoot
+            };
+            psi.ArgumentList.Add(script);
+            psi.ArgumentList.Add(modelName);
+
+            try
+            {
+                using var proc = Process.Start(psi);
+                if (proc == null)
+                {
+                    SetModelStatus("error: failed to start download");
+                    return false;
+                }
+                var stderr = proc.StandardError.ReadToEndAsync();
+                _ = proc.StandardOutput.ReadToEndAsync(); // drain stdout so the pipe can't fill
+                // Large models over a slow link can take a while; cap at 30 min.
+                if (!proc.WaitForExit(30 * 60 * 1000))
+                {
+                    proc.Kill(true);
+                    _logger.LogError("Model download for '{Model}' timed out.", SafeForLog(modelName));
+                    SetModelStatus("error: download timed out");
+                    return false;
+                }
+
+                if (proc.ExitCode != 0 || !File.Exists(modelPath))
+                {
+                    _logger.LogError("Model download for '{Model}' failed (exit {Code}).\n{Err}", SafeForLog(modelName), proc.ExitCode, stderr.Result);
+                    SetModelStatus($"error: download failed");
+                    return false;
+                }
+
+                _logger.LogInformation("Whisper model '{Model}' downloaded.", SafeForLog(modelName));
+                SetModelStatus($"ready:{modelName}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error downloading Whisper model '{Model}'", SafeForLog(modelName));
+                SetModelStatus($"error: {ex.Message}");
+                return false;
+            }
+        }
+        finally
+        {
+            _modelDownloadLock.Release();
+        }
+    }
+
     public string? TranscribeAudio(string audioPath)
     {
         // Check setting
         var enabled = _db.GetSettingAsync("EnableTranscription").GetAwaiter().GetResult();
         if (enabled != "true") return null;
 
-        // Get model name from config (e.g. "small.en")
-        var modelName = _config["Transcription:Model"] ?? "small.en";
+        // Model is managed from the web-app settings (DB), falling back to
+        // appsettings then a safe default.
+        var modelName = _db.GetSettingAsync("TranscriptionModel").GetAwaiter().GetResult();
+        if (string.IsNullOrWhiteSpace(modelName)) modelName = _config["Transcription:Model"];
+        if (string.IsNullOrWhiteSpace(modelName)) modelName = "small.en";
+        if (!IsValidModelName(modelName))
+        {
+            _logger.LogError("Invalid transcription model name '{Model}'; refusing to use it.", SafeForLog(modelName));
+            return null;
+        }
 
         // Temp file for resampling to 16k
         var tempWavPath = audioPath + ".16k.wav";
-        // Robustly find whisper.cpp root
-        var currentDir = new DirectoryInfo(Directory.GetCurrentDirectory());
-        string? whisperRoot = null;
-
-        // 1. Search up to find whisper.cpp
-        for (int i = 0; i < 6; i++)
-        {
-            if (currentDir == null) break;
-            var probe = Path.Combine(currentDir.FullName, "whisper.cpp");
-            if (Directory.Exists(probe))
-            {
-                whisperRoot = probe;
-                break;
-            }
-
-            probe = Path.Combine(currentDir.FullName, "../whisper.cpp");
-            if (Directory.Exists(probe))
-            {
-                whisperRoot = Path.GetFullPath(probe);
-                break;
-            }
-
-            currentDir = currentDir.Parent;
-        }
-
-        if (whisperRoot == null)
-        {
-            var projectRoot = Directory.GetCurrentDirectory();
-            whisperRoot = Path.GetFullPath(Path.Combine(projectRoot, "../../whisper.cpp"));
-        }
-
+        var whisperRoot = FindWhisperRoot();
         var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");
         var modelPath = Path.Combine(whisperRoot, $"models/ggml-{modelName}.bin");
 
-        if (!File.Exists(whisperBin) || !File.Exists(modelPath))
+        if (!File.Exists(whisperBin))
         {
-            _logger.LogError($"Whisper not found at {whisperBin} or model missing at {modelPath}. Search root was: {whisperRoot}");
+            _logger.LogError($"Whisper binary not found at {whisperBin}. Search root was: {whisperRoot}");
+            return null;
+        }
+
+        // Download the selected model on demand if it isn't present yet. Blocks
+        // this worker until ready (every queued clip needs the same model, so
+        // there is nothing else to do meanwhile).
+        if (!EnsureModelAvailable(whisperRoot, modelName))
+        {
+            _logger.LogError("Transcription model '{Model}' is not available and could not be downloaded.", SafeForLog(modelName));
             return null;
         }
 
@@ -262,8 +449,10 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
 
         convertStart.ArgumentList.Add("-i");
         convertStart.ArgumentList.Add(audioPath);
+        var audioFilters = _config["Transcription:AudioFilters"];
+        if (string.IsNullOrWhiteSpace(audioFilters)) audioFilters = DefaultAudioFilters;
         convertStart.ArgumentList.Add("-af");
-        convertStart.ArgumentList.Add("volume=15dB");
+        convertStart.ArgumentList.Add(audioFilters);
         convertStart.ArgumentList.Add("-ar");
         convertStart.ArgumentList.Add("16000");
         convertStart.ArgumentList.Add("-ac");
@@ -286,10 +475,15 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
 
         if (!File.Exists(tempWavPath)) return null;
 
-        // 2. Run Whisper with Radio Context
-        // Prompt helps Whisper bias towards radio terminology and style
-        var prompt = "Dispatch, Unit 1, 10-4, copy, over. Priority traffic, code 3 response to street intersection. Suspect description: white male, blue jeans. License plate, vehicle registration, bolo. Structure fire, medical emergency, staging area. Status check, affirmative, negative, stand by. Channel 2, tac channel, command post. Kilo, Tango, Zulu, X-ray. 10-20 location, 10-8 in service, 10-7 out of service.";
-        var whisperArgs = $"-m \"{modelPath}\" -f \"{tempWavPath}\" -nt -otxt -l en --prompt \"{prompt}\"";
+        // 2. Run Whisper with radio context + accuracy-oriented decode settings.
+        var prompt = _config["Transcription:Prompt"];
+        if (string.IsNullOrWhiteSpace(prompt)) prompt = DefaultPrompt;
+        var beamSize = int.TryParse(_config["Transcription:BeamSize"], out var bs) && bs > 0 ? bs : 5;
+        var threads = int.TryParse(_config["Transcription:WhisperThreads"], out var t) && t > 0
+            ? t
+            : Math.Max(1, Environment.ProcessorCount);
+        var extraArgs = _config["Transcription:ExtraArgs"];
+        var whisperArgs = BuildWhisperArgs(modelPath, tempWavPath, prompt, beamSize, threads, extraArgs);
 
         var whisperStart = new ProcessStartInfo(whisperBin, whisperArgs)
         {
@@ -308,7 +502,11 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
                 var stdoutTask = proc.StandardOutput.ReadToEndAsync();
                 var stderrTask = proc.StandardError.ReadToEndAsync();
 
-                if (!proc.WaitForExit(120000)) // 120s timeout
+                // A large accuracy-first model on a Pi can be well below real time;
+                // allow generous headroom (measured from when whisper starts, not
+                // from when the clip was queued). Configurable.
+                var timeoutMs = (int.TryParse(_config["Transcription:TimeoutSeconds"], out var ts) && ts > 0 ? ts : 600) * 1000;
+                if (!proc.WaitForExit(timeoutMs))
                 {
                     _logger.LogError("Whisper timed out");
                     proc.Kill();

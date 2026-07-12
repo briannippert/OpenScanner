@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
     Button, Switch,
     Box, CircularProgress, Alert, AlertTitle, Link, TextField,
-    Typography, LinearProgress,
+    Typography, LinearProgress, Select, MenuItem,
 } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
@@ -29,6 +29,29 @@ const formatBytes = (bytes: number): string => {
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
     return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+};
+
+// Whisper models offered in the UI. Larger = more accurate but slower on a Pi.
+const TRANSCRIPTION_MODELS: { value: string; label: string }[] = [
+    { value: 'large-v3-turbo-q5_0', label: 'Large v3 Turbo (q5) — most accurate, recommended' },
+    { value: 'large-v3-turbo', label: 'Large v3 Turbo — most accurate, larger' },
+    { value: 'medium.en', label: 'Medium (English) — accurate' },
+    { value: 'small.en', label: 'Small (English) — balanced' },
+    { value: 'base.en', label: 'Base (English) — fast' },
+    { value: 'tiny.en', label: 'Tiny (English) — fastest' },
+];
+
+// Format the raw TranscriptionModelStatus setting (e.g. "downloading:small.en",
+// "ready:small.en", "error: ...") into { text, downloading }.
+const parseModelStatus = (raw?: string): { text: string; downloading: boolean } => {
+    if (!raw) return { text: '', downloading: false };
+    if (raw.startsWith('downloading')) {
+        const m = raw.split(':')[1];
+        return { text: `Downloading${m ? ` ${m}` : ''}…`, downloading: true };
+    }
+    if (raw.startsWith('ready')) return { text: 'Ready', downloading: false };
+    if (raw.startsWith('error')) return { text: raw, downloading: false };
+    return { text: raw, downloading: false };
 };
 
 // A titled, bordered settings section (card).
@@ -69,6 +92,14 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
             fetchStorage();
         }
     }, [open]);
+
+    // While a model download is in progress, poll settings so the status updates.
+    const modelDownloading = parseModelStatus(settings['TranscriptionModelStatus']).downloading;
+    useEffect(() => {
+        if (!open || !modelDownloading) return;
+        const id = setInterval(fetchSettings, 3000);
+        return () => clearInterval(id);
+    }, [open, modelDownloading]);
 
     const fetchStorage = async () => {
         try {
@@ -201,6 +232,7 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
             onClose={onClose}
             title="System Settings"
             icon={<SettingsIcon />}
+            maxWidth="md"
             actions={<Button onClick={onClose} color="inherit">Close</Button>}
         >
                 {updateAvailable && (
@@ -246,22 +278,63 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
                                 />
                             ))}
                             {settings['EnableTranscription'] === 'true' && (
-                                <Row
-                                    label="Transcription Threads"
-                                    description={`Parallel threads for AI transcription. CPU cores: ${systemInfo.CpuCores || 'Unknown'}`}
-                                    control={
-                                        <TextField
-                                            type="number"
-                                            size="small"
-                                            variant="outlined"
-                                            style={{ width: '80px', minWidth: '80px' }}
-                                            value={settings['TranscriptionThreads'] || ''}
-                                            inputProps={{ min: 1, max: 32 }}
-                                            onChange={(e) => handleValueChange('TranscriptionThreads', e.target.value)}
-                                        />
-                                    }
-                                />
+                                <>
+                                    <Row
+                                        label="Model"
+                                        description={(() => {
+                                            const s = parseModelStatus(settings['TranscriptionModelStatus']);
+                                            return s.text
+                                                ? `Larger models are more accurate but slower on a Pi. Status: ${s.text}`
+                                                : 'Larger models are more accurate but slower on a Pi. Downloaded automatically when changed.';
+                                        })()}
+                                        control={
+                                            <Select
+                                                size="small"
+                                                variant="outlined"
+                                                style={{ minWidth: 260 }}
+                                                value={settings['TranscriptionModel'] || 'large-v3-turbo-q5_0'}
+                                                onChange={(e) => handleValueChange('TranscriptionModel', e.target.value)}
+                                            >
+                                                {TRANSCRIPTION_MODELS.map((m) => (
+                                                    <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
+                                                ))}
+                                            </Select>
+                                        }
+                                    />
+                                    <Row
+                                        label="Transcription Threads"
+                                        description={`Number of recordings transcribed at once. With a large model, 1 is recommended (each run already uses all cores). CPU cores: ${systemInfo.CpuCores || 'Unknown'}`}
+                                        control={
+                                            <TextField
+                                                type="number"
+                                                size="small"
+                                                variant="outlined"
+                                                style={{ width: '80px', minWidth: '80px' }}
+                                                value={settings['TranscriptionThreads'] || ''}
+                                                inputProps={{ min: 1, max: 32 }}
+                                                onChange={(e) => handleValueChange('TranscriptionThreads', e.target.value)}
+                                            />
+                                        }
+                                    />
+                                </>
                             )}
+                        </Section>
+
+                        <Section title="Integrations">
+                            <Row
+                                label="PowerDMS Department"
+                                description="Public PowerDMS department slug for daily-log links. Leave blank to disable."
+                                control={
+                                    <TextField
+                                        size="small"
+                                        variant="outlined"
+                                        placeholder="e.g. mytown-pd"
+                                        style={{ width: '180px' }}
+                                        value={settings['PowerDmsDepartment'] || ''}
+                                        onChange={(e) => handleValueChange('PowerDmsDepartment', e.target.value)}
+                                    />
+                                }
+                            />
                         </Section>
 
                         <Section title="Storage">

@@ -122,8 +122,25 @@ public class Database : IDatabase
         var threadsCount = conn.ExecuteScalar<int>("SELECT count(*) FROM settings WHERE key = 'TranscriptionThreads'");
         if (threadsCount == 0)
         {
-            var defaultThreads = Math.Max(1, Environment.ProcessorCount / 2);
-            conn.Execute("INSERT INTO settings (key, value) VALUES ('TranscriptionThreads', @DefaultThreads)", new { DefaultThreads = defaultThreads.ToString() });
+            // Number of concurrent transcription processes. Default to 1: with a
+            // large accuracy-first model each run already uses all CPU cores
+            // (whisper -t), so running several at once just makes each slower.
+            conn.Execute("INSERT INTO settings (key, value) VALUES ('TranscriptionThreads', '1')");
+        }
+
+        // Whisper model, managed from the web-app settings. The server downloads
+        // the ggml weights on demand when this changes.
+        var modelCount = conn.ExecuteScalar<int>("SELECT count(*) FROM settings WHERE key = 'TranscriptionModel'");
+        if (modelCount == 0)
+        {
+            conn.Execute("INSERT INTO settings (key, value) VALUES ('TranscriptionModel', 'large-v3-turbo-q5_0')");
+        }
+
+        // PowerDMS department slug, managed from the web-app settings.
+        var powerDmsCount = conn.ExecuteScalar<int>("SELECT count(*) FROM settings WHERE key = 'PowerDmsDepartment'");
+        if (powerDmsCount == 0)
+        {
+            conn.Execute("INSERT INTO settings (key, value) VALUES ('PowerDmsDepartment', '')");
         }
     }
 
@@ -208,6 +225,29 @@ public class Database : IDatabase
         return await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetHistory.sql"), new { Limit = limit });
     }
     
+    /// <inheritdoc />
+    public async Task<DbStats> GetDbStatsAsync()
+    {
+        using var conn = GetConnection();
+        var total = await conn.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM transmissions");
+        var transcribed = await conn.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM transmissions WHERE transcription IS NOT NULL AND transcription != ''");
+        var oldest = await conn.ExecuteScalarAsync<string?>("SELECT MIN(timestamp) FROM transmissions");
+        var newest = await conn.ExecuteScalarAsync<string?>("SELECT MAX(timestamp) FROM transmissions");
+        return new DbStats(total, transcribed, Math.Max(0, total - transcribed), oldest, newest);
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<CallLog>> GetUntranscribedSinceAsync(DateTime sinceUtc)
+    {
+        using var conn = GetConnection();
+        // Timestamps are stored as round-trip ("o") UTC strings, so a lexicographic
+        // compare against the same format is chronological.
+        return await conn.QueryAsync<CallLog>(
+            SqlLoader.GetSql("Transmissions/GetUntranscribedSince.sql"),
+            new { Since = sinceUtc.ToUniversalTime().ToString("o") });
+    }
+
     /// <inheritdoc />
     public async Task<CallLog?> GetTransmissionByIdAsync(string id)
     {

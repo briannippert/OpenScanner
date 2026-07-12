@@ -43,6 +43,55 @@ public class SupportController : ControllerBase
     }
 
     /// <summary>
+    /// Retrieves an instantaneous CPU/memory/transcription-queue sample. The debug
+    /// page polls this once per second to build rolling resource graphs.
+    /// </summary>
+    /// <returns>A <see cref="OpenScanner.Server.Models.SystemStats"/> sample.</returns>
+    [HttpGet("system/stats")]
+    [ProducesResponseType(typeof(OpenScanner.Server.Models.SystemStats), StatusCodes.Status200OK)]
+    public IActionResult GetSystemStats()
+    {
+        return Ok(_support.GetSystemStats());
+    }
+
+    /// <summary>
+    /// Retrieves the running services and the TCP ports the host is listening on.
+    /// </summary>
+    /// <returns>A <see cref="OpenScanner.Server.Models.ServicesSnapshot"/>.</returns>
+    [HttpGet("system/services")]
+    [ProducesResponseType(typeof(OpenScanner.Server.Models.ServicesSnapshot), StatusCodes.Status200OK)]
+    public IActionResult GetServices()
+    {
+        return Ok(_support.GetServices());
+    }
+
+    /// <summary>
+    /// Retrieves a composite diagnostics snapshot (scanner, GPS, database, connections,
+    /// recording activity, and reliability counters) for the debug page.
+    /// </summary>
+    /// <returns>A <see cref="OpenScanner.Server.Models.DiagnosticsSnapshot"/>.</returns>
+    [HttpGet("system/diagnostics")]
+    [ProducesResponseType(typeof(OpenScanner.Server.Models.DiagnosticsSnapshot), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetDiagnostics()
+    {
+        return Ok(await _support.GetDiagnosticsAsync());
+    }
+
+    /// <summary>
+    /// Retrieves the most recent OpenScanner systemd journal lines.
+    /// </summary>
+    /// <param name="lines">Number of trailing lines to return (default 500).</param>
+    /// <returns>Plain-text log content.</returns>
+    [HttpGet("system/logs")]
+    [Produces("text/plain")]
+    [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetLogs([FromQuery] int lines = 500)
+    {
+        var logs = await _support.GetSystemdLogsAsync(lines);
+        return Content(logs, "text/plain");
+    }
+
+    /// <summary>
     /// Generates and downloads a support package containing logs, configuration, and system info.
     /// </summary>
     /// <returns>A ZIP file containing diagnostic information.</returns>

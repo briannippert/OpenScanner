@@ -386,6 +386,95 @@ public record ParallelChannelState(
 public record SpectrumPoint(double Frequency, double Db);
 
 /// <summary>
+/// Snapshot of the transcription worker pool: how many clips are waiting and
+/// how many workers are draining the queue.
+/// </summary>
+public record TranscriptionQueueStatus(int Queued, int Workers);
+
+/// <summary>
+/// Instantaneous system resource sample surfaced on the debug page. The client
+/// polls this once per second to build the rolling CPU/memory graphs.
+/// </summary>
+public record SystemStats(
+    double CpuPercent,
+    double MemPercent,
+    long MemUsedMb,
+    long MemTotalMb,
+    TranscriptionQueueStatus Transcription
+);
+
+/// <summary>State of a systemd unit (or the process itself when systemd is absent).</summary>
+public record ServiceStatus(string Name, string State, string Detail);
+
+/// <summary>A TCP socket the host is listening on.</summary>
+public record ListeningPort(string Protocol, int Port, string Process);
+
+/// <summary>Running services and open ports surfaced on the debug page.</summary>
+public record ServicesSnapshot(List<ServiceStatus> Services, List<ListeningPort> Ports);
+
+/// <summary>
+/// Progress/status of the on-demand transcription backfill job, which re-transcribes
+/// recordings from the last 24 hours that are missing a transcription.
+/// </summary>
+public record BackfillStatus(
+    bool Running,
+    int Total,
+    int Processed,
+    int Succeeded,
+    int Failed,
+    string? Current,
+    string? StartedUtc,
+    string? FinishedUtc,
+    string? Message
+);
+
+/// <summary>Compact SDR/scanner state for the debug page.</summary>
+public record ScannerSummary(
+    string Status,
+    bool HardwareConnected,
+    double? Frequency,
+    double? SignalDb,
+    double SignalStrength,
+    double? Gain,
+    double? Squelch,
+    bool AudioStreaming
+);
+
+/// <summary>GPS link health: gpsd connectivity, fix age, and the last location.</summary>
+public record GpsDiagnostics(bool GpsdConnected, double? SecondsSinceFix, GpsData? Location);
+
+/// <summary>Aggregate recording/transcription counts from the database.</summary>
+public record DbStats(int TotalRecordings, int Transcribed, int Pending, string? OldestUtc, string? NewestUtc);
+
+/// <summary>Connected real-time WebSocket client counts.</summary>
+public record ConnectionStats(int ControlClients, int AudioClients);
+
+/// <summary>In-flight recording activity.</summary>
+public record RecordingActivity(int ActiveCount, List<string> ActiveIds);
+
+/// <summary>SDR reliability counters surfaced from the capture watchdog.</summary>
+public record RadioDiagnostics(int RestartCount, double ThroughputKbps);
+
+/// <summary>Status of the low-disk recording cleanup service.</summary>
+public record CleanupStatus(string? LastRunUtc, long? LastFreeBytes, int TotalPurged);
+
+/// <summary>
+/// Composite, slower-changing diagnostics surfaced on the System Debug page
+/// (polled less frequently than the per-second CPU/memory <see cref="SystemStats"/>).
+/// </summary>
+public record DiagnosticsSnapshot(
+    string Uptime,
+    ScannerSummary Scanner,
+    GpsDiagnostics Gps,
+    DbStats Database,
+    ConnectionStats Connections,
+    RecordingActivity Recording,
+    RadioDiagnostics Radio,
+    CleanupStatus Cleanup,
+    string? TranscriptionModelStatus
+);
+
+/// <summary>
 /// Storage usage statistics surfaced in the settings UI.
 /// </summary>
 public record StorageInfo(

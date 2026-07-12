@@ -9,6 +9,7 @@ import ChannelManager from './components/ChannelManager';
 import FireToneManager from './components/FireToneManager';
 import SettingsManager from './components/SettingsManager';
 import RfDebugDialog from './components/RfDebugDialog';
+import SystemDebugDialog from './components/SystemDebugDialog';
 import NowPlayingBar from './components/NowPlayingBar';
 import CommandPalette from './components/CommandPalette';
 import { useAudioPipeline } from './hooks/useAudioPipeline';
@@ -28,6 +29,7 @@ function App() {
   const [isToneManagerOpen, setIsToneManagerOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false);
+  const [isSystemDebugOpen, setIsSystemDebugOpen] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [debugFreq, setDebugFreq] = useState<string>('155.500');
   const [debugGain, setDebugGain] = useState<number>(40);
@@ -154,6 +156,15 @@ function App() {
     [scanner.radioEvents],
   );
 
+  // Recording id → transcription for the fire tone-out event log. Value is null
+  // while the recording is present but its transcription hasn't streamed in yet,
+  // so EventLog can show a "Transcribing…" placeholder until it arrives.
+  const eventTranscriptions = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const log of scanner.callLog) map.set(log.id, log.transcription ?? null);
+    return map;
+  }, [scanner.callLog]);
+
   return (
       <Box sx={{
         display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw',
@@ -191,7 +202,7 @@ function App() {
           onOpenFireTones={() => setIsToneManagerOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenDebug={openDebug}
-          onDownloadSupport={downloadSupportPackage}
+          onOpenSystemDebug={() => setIsSystemDebugOpen(true)}
         />
 
         <Box sx={{ flexGrow: 1, p: { xs: 1, sm: 2 }, height: '100%', overflowY: { xs: 'auto', md: 'hidden' } }}>
@@ -222,6 +233,7 @@ function App() {
                 {scanner.fireTones.length > 0 && (
                   <EventLog
                     events={scanner.radioEvents}
+                    transcriptions={eventTranscriptions}
                     onClear={scanner.clearEvents}
                     onEventClick={(e) => {
                       if (e.transmissionId) {
@@ -300,6 +312,12 @@ function App() {
           debugGain={debugGain}
           onDebugGainChange={setDebugGain}
           onTune={() => scanner.sendCommand('debug_spectrum', Number(debugFreq), debugGain)}
+        />
+
+        <SystemDebugDialog
+          open={isSystemDebugOpen}
+          onClose={() => setIsSystemDebugOpen(false)}
+          onDownloadSupport={downloadSupportPackage}
         />
 
         <Snackbar open={showAudioPrompt} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>

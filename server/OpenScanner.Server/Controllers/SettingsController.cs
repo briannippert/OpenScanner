@@ -12,10 +12,12 @@ namespace OpenScanner.Server.Controllers;
 public class SettingsController : ControllerBase
 {
     private readonly IDatabase _db;
+    private readonly ITranscriptionService _transcription;
 
-    public SettingsController(IDatabase db)
+    public SettingsController(IDatabase db, ITranscriptionService transcription)
     {
         _db = db;
+        _transcription = transcription;
     }
 
     /// <summary>
@@ -39,6 +41,14 @@ public class SettingsController : ControllerBase
     public async Task<IActionResult> UpdateSetting(string key, [FromBody] string value)
     {
         await _db.SetSettingAsync(key, value);
+
+        // Changing the transcription model kicks off a background download of
+        // the ggml weights if they aren't present yet.
+        if (key == "TranscriptionModel" && !string.IsNullOrWhiteSpace(value))
+        {
+            _transcription.PrepareModel(value);
+        }
+
         return Ok();
     }
 }

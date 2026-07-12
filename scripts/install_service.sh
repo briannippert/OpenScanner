@@ -229,7 +229,8 @@ if [ ! -f "$PROJECT_ROOT/whisper.cpp/build/bin/whisper-cli" ]; then
     log_success "Whisper.cpp built."
 fi
 
-# Get model from appsettings.json
+# Get model from appsettings.json (e.g. large-v3-turbo-q5_0). Turbo models
+# require a reasonably recent whisper.cpp; the clone above tracks master.
 WHISPER_MODEL=$(grep '"Model":' "$PROJECT_ROOT/server/OpenScanner.Server/appsettings.json" | head -n 1 | cut -d'"' -f4 || echo "small.en")
 log_info "Transcription Model: $WHISPER_MODEL"
 

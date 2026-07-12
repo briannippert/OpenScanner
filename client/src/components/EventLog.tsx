@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Box, Typography, IconButton, Collapse, List, ListItemButton, Tooltip, ButtonBase } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
@@ -6,7 +6,7 @@ import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import LaunchIcon from '@mui/icons-material/Launch';
-import type { RadioEvent } from '../types';
+import type { CallLog, RadioEvent } from '../types';
 import { status } from '../theme/tokens';
 import EmptyState from './common/EmptyState';
 
@@ -14,6 +14,13 @@ interface EventLogProps {
     events: RadioEvent[];
     onClear: () => void;
     onEventClick?: (event: RadioEvent) => void;
+    /**
+     * Lookup of a tone-out's recording id → its transcription. A present key with a
+     * null value means the recording exists but isn't transcribed yet (shows a
+     * "Transcribing…" placeholder); a missing key means the recording isn't in the
+     * recent window so no transcription is shown.
+     */
+    transcriptions?: Map<string, string | null>;
 }
 
 const formatDetail = (e: RadioEvent): string => {
@@ -22,8 +29,38 @@ const formatDetail = (e: RadioEvent): string => {
     return '';
 };
 
-export default function EventLog({ events, onClear, onEventClick }: EventLogProps) {
+export default function EventLog({ events, onClear, onEventClick, transcriptions }: EventLogProps) {
     const [open, setOpen] = useState(true);
+
+    // Transcriptions for older tone-outs whose recording has scrolled out of the
+    // live window: fetched on demand by recording id (null = fetched, no text).
+    // Mirrors TransmissionLog's linked-recording fetch — setState happens only in
+    // the async callback, never synchronously in the effect.
+    const [fetched, setFetched] = useState<Map<string, string | null>>(new Map());
+    const attempted = useRef<Set<string>>(new Set());
+
+    useEffect(() => {
+        const missing = events
+            .map(e => e.transmissionId)
+            .filter((id): id is string => !!id && !transcriptions?.has(id) && !attempted.current.has(id));
+        if (missing.length === 0) return;
+        let cancelled = false;
+        for (const id of missing) {
+            attempted.current.add(id);
+            fetch(`/api/history/entry/${encodeURIComponent(id)}`)
+                .then(res => (res.ok ? res.json() : null))
+                .then((data: CallLog | null) => {
+                    if (cancelled) return;
+                    setFetched(prev => {
+                        const next = new Map(prev);
+                        next.set(id, data?.transcription ?? null);
+                        return next;
+                    });
+                })
+                .catch(() => { /* leave unfetched; row simply shows no transcription */ });
+        }
+        return () => { cancelled = true; };
+    }, [events, transcriptions]);
 
     return (
         <Box sx={{ borderBottom: '1px solid', borderColor: 'surface.border', flexShrink: 0 }}>
@@ -61,6 +98,13 @@ export default function EventLog({ events, onClear, onEventClick }: EventLogProp
                     <List dense disablePadding sx={{ maxHeight: 200, overflowY: 'auto' }}>
                         {events.map(e => {
                             const clickable = !!e.transmissionId && !!onEventClick;
+                            const inLiveWindow = !!e.transmissionId && !!transcriptions?.has(e.transmissionId);
+                            const transcription = e.transmissionId
+                                ? (transcriptions?.get(e.transmissionId) ?? fetched.get(e.transmissionId) ?? undefined)
+                                : undefined;
+                            // Only recent (live-window) recordings show a "Transcribing…" state;
+                            // an older fetched recording with no text just renders nothing.
+                            const pending = !transcription && inLiveWindow;
                             return (
                                 <ListItemButton
                                     key={e.id}
@@ -92,6 +136,19 @@ export default function EventLog({ events, onClear, onEventClick }: EventLogProp
                                                 {formatDetail(e)}
                                                 {e.alphaTag ? ` · ${e.alphaTag}` : e.frequency ? ` · ${e.frequency.toFixed(4)} MHz` : ''}
                                             </Typography>
+                                            {transcription ? (
+                                                <Typography
+                                                    sx={{ color: 'text.secondary', fontStyle: 'italic', fontSize: '0.7rem', lineHeight: 1.25, mt: 0.25 }}
+                                                    noWrap
+                                                    title={transcription}
+                                                >
+                                                    “{transcription}”
+                                                </Typography>
+                                            ) : pending ? (
+                                                <Typography sx={{ color: 'text.disabled', fontStyle: 'italic', fontSize: '0.7rem', lineHeight: 1.25, mt: 0.25 }}>
+                                                    Transcribing…
+                                                </Typography>
+                                            ) : null}
                                         </Box>
                                         {clickable && <LaunchIcon sx={{ color: alpha(status.warn, 0.6), fontSize: 14, flexShrink: 0 }} />}
                                         <Typography sx={{ color: 'text.disabled', fontSize: '0.7rem', flexShrink: 0 }}>

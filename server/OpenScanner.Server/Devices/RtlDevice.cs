@@ -37,6 +37,11 @@ public class RtlDevice : BackgroundService, IRadioSource
 
     private ScannerState _state = new ScannerState("IDLE", 0);
     private bool _manualOverride = false;
+
+    // Capture-watchdog diagnostics surfaced on the debug page.
+    private int _restartCount;
+    private long _totalBytesRead;
+    private (DateTime When, long Bytes)? _lastThroughputSample;
     
     private string? _lastDetectedTone;
     // Normally 2s of silence ends a transmission. After a fire tone-out we use a
@@ -69,6 +74,9 @@ public class RtlDevice : BackgroundService, IRadioSource
     // Parallel FastScan mode
     private List<ChannelPipeline>? _parallelPipelines;
     private readonly ConcurrentDictionary<double, CancellationTokenSource> _parallelActivityTimeouts = new();
+    // Per-channel throttle for the audio-driven activity-timeout reset (mirrors
+    // the single-channel _lastActivityReset throttle) to avoid task churn.
+    private readonly ConcurrentDictionary<double, DateTime> _parallelLastAudioReset = new();
     private readonly ConcurrentDictionary<double, string?> _parallelLastTones = new();
     // Stereo pan positions for parallel channels: maps frequency -> (leftGain, rightGain)
     private Dictionary<double, (double Left, double Right)> _parallelPanMap = new();
@@ -148,6 +156,22 @@ public class RtlDevice : BackgroundService, IRadioSource
 
     /// <inheritdoc />
     public ScannerState GetState() => _state;
+
+    /// <inheritdoc />
+    public RadioDiagnostics GetDiagnostics()
+    {
+        // Throughput = bytes read since the previous call, over elapsed wall time.
+        var now = DateTime.UtcNow;
+        var bytes = System.Threading.Interlocked.Read(ref _totalBytesRead);
+        double kbPerSec = 0;
+        if (_lastThroughputSample is { } prev)
+        {
+            var elapsed = (now - prev.When).TotalSeconds;
+            if (elapsed > 0) kbPerSec = (bytes - prev.Bytes) / 1024.0 / elapsed;
+        }
+        _lastThroughputSample = (now, bytes);
+        return new RadioDiagnostics(_restartCount, Math.Round(Math.Max(0, kbPerSec), 1));
+    }
 
     /// <inheritdoc />
     public void ReloadChannels()
@@ -477,6 +501,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             kvp.Value.Cancel();
         }
         _parallelActivityTimeouts.Clear();
+        _parallelLastAudioReset.Clear();
         _parallelLastTones.Clear();
     }
 
@@ -718,6 +743,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                 {
                     bool isAlive = _scannerProcess != null && !_scannerProcess.HasExited;
                     _logger.LogWarning($"Parallel scanner stalled. Process alive: {isAlive}. Restarting...");
+                    System.Threading.Interlocked.Increment(ref _restartCount);
                     break;
                 }
 
@@ -726,6 +752,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                 if (bytesRead <= 0) break;
 
                 totalBytesRead += bytesRead;
+                System.Threading.Interlocked.Add(ref _totalBytesRead, bytesRead);
 
                 // Warm-up: skip first 50ms
                 if ((DateTime.UtcNow - segmentStartTime).TotalMilliseconds < 50) continue;
@@ -851,6 +878,19 @@ public class RtlDevice : BackgroundService, IRadioSource
         if (rs != null && rs.IsChannelRecording(channel.Frequency))
         {
             _recordingService.ProcessAudio(channel.Frequency, audio);
+
+            // Keep the recording alive while audio is still flowing, not only on
+            // decoder metadata/activity events. Otherwise a gap in metadata longer
+            // than the 2s activity timeout finalizes the clip mid-transmission and
+            // the next event starts a new one, splitting one over into ~2s chunks.
+            // Throttled per channel to avoid re-arming the timer on every chunk.
+            var now = DateTime.UtcNow;
+            var last = _parallelLastAudioReset.TryGetValue(channel.Frequency, out var l) ? l : DateTime.MinValue;
+            if ((now - last).TotalMilliseconds >= 500)
+            {
+                _parallelLastAudioReset[channel.Frequency] = now;
+                ResetParallelActivityTimeout(channel);
+            }
         }
 
         UpdateParallelState();
@@ -1089,7 +1129,8 @@ public class RtlDevice : BackgroundService, IRadioSource
                 {
                     bool isAlive = _scannerProcess != null && !_scannerProcess.HasExited;
                     _logger.LogWarning($"Scanner hardware stalled (No data for 5s). Process Alive: {isAlive}, Total Bytes: {totalBytesRead}. Restarting...");
-                    break; 
+                    System.Threading.Interlocked.Increment(ref _restartCount);
+                    break;
                 }
 
                 // Data received, cancel the watchdog task
@@ -1102,6 +1143,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                 }
 
                 totalBytesRead += bytesRead;
+                System.Threading.Interlocked.Add(ref _totalBytesRead, bytesRead);
 
 
                 // Rate limit FFT updates (approx 50Hz)

@@ -34,6 +34,11 @@ public interface IRadioSource
     ScannerState GetState();
 
     /// <summary>
+    /// Gets SDR reliability diagnostics (capture restart count and throughput).
+    /// </summary>
+    RadioDiagnostics GetDiagnostics();
+
+    /// <summary>
     /// Reloads the channel list from the database.
     /// </summary>
     void ReloadChannels();

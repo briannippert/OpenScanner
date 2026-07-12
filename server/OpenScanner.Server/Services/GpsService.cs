@@ -13,6 +13,14 @@ public class GpsService : BackgroundService
     private readonly ILogger<GpsService> _logger;
     public GpsData? LastKnownLocation { get; private set; }
     private DateTime _lastUpdate = DateTime.MinValue;
+    private volatile bool _gpsdConnected;
+
+    /// <summary>Whether the service currently has a live TCP connection to gpsd.</summary>
+    public bool IsGpsdConnected => _gpsdConnected;
+
+    /// <summary>Seconds since the last GPS fix update, or null if none received yet.</summary>
+    public double? SecondsSinceLastFix =>
+        _lastUpdate == DateTime.MinValue ? null : (DateTime.UtcNow - _lastUpdate).TotalSeconds;
 
     /// <summary>
     /// Event triggered when a new GPS location update is received.
@@ -52,6 +60,7 @@ public class GpsService : BackgroundService
                 using var client = new TcpClient();
                 // gpsd default port is 2947
                 await client.ConnectAsync("localhost", 2947, stoppingToken);
+                _gpsdConnected = true;
                 _logger.LogInformation("Connected to gpsd");
 
                 using var stream = client.GetStream();
@@ -102,6 +111,10 @@ public class GpsService : BackgroundService
                     _logger.LogWarning("GPSD Connection failed (retrying in 5s): " + ex.Message);
                 }
                 await Task.Delay(5000, stoppingToken);
+            }
+            finally
+            {
+                _gpsdConnected = false;
             }
         }
     }
