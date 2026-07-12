@@ -29,6 +29,7 @@ public class MixedScanTests
         return new RtlDevice(
             db.Object,
             logger.Object,
+            Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance,
             gps.Object,
             toneDetector.Object,
             new Mdc1200Decoder(new Mock<ILogger<Mdc1200Decoder>>().Object),
@@ -190,7 +191,7 @@ public class MixedScanTests
                    .Returns(async (Channel _, CancellationToken t) => await Task.Delay(Timeout.Infinite, t).ContinueWith(_ => { }));
 
         var device = new RtlDevice(
-            db.Object, logger.Object, gps.Object, toneDetector.Object,
+            db.Object, logger.Object, Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance, gps.Object, toneDetector.Object,
             new Mdc1200Decoder(new Mock<ILogger<Mdc1200Decoder>>().Object),
             decoderFactory.Object, transcription.Object, recording.Object, channelService.Object);
 
@@ -251,7 +252,7 @@ public class MixedScanTests
                    .Returns(async (Channel _, CancellationToken t) => await Task.Delay(Timeout.Infinite, t).ContinueWith(_ => { }));
 
         var device = new RtlDevice(
-            db.Object, logger.Object, gps.Object, toneDetector.Object,
+            db.Object, logger.Object, Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance, gps.Object, toneDetector.Object,
             new Mdc1200Decoder(new Mock<ILogger<Mdc1200Decoder>>().Object),
             decoderFactory.Object, transcription.Object, recording.Object, channelService.Object);
 

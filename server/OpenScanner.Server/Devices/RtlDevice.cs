@@ -15,6 +15,7 @@ public class RtlDevice : BackgroundService, IRadioSource
 {
     private readonly IDatabase _db;
     private readonly ILogger<RtlDevice> _logger;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly GpsService _gps;
     private readonly ToneDetector _toneDetector;
     private readonly Mdc1200Decoder _mdc;
@@ -96,18 +97,20 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// Initializes a new instance of the <see cref="RtlDevice"/> class.
     /// </summary>
     public RtlDevice(
-        IDatabase db, 
-        ILogger<RtlDevice> logger, 
+        IDatabase db,
+        ILogger<RtlDevice> logger,
+        ILoggerFactory loggerFactory,
         GpsService gps,
         ToneDetector toneDetector,
         Mdc1200Decoder mdc,
         IDecoderFactory decoderFactory,
-        ITranscriptionService transcriptionService, 
+        ITranscriptionService transcriptionService,
         IRecordingService recordingService,
         IChannelService channelService)
     {
         _db = db;
         _logger = logger;
+        _loggerFactory = loggerFactory;
         _gps = gps;
         _toneDetector = toneDetector;
         _mdc = mdc;
@@ -618,7 +621,7 @@ public class RtlDevice : BackgroundService, IRadioSource
 
             var pipeline = new ChannelPipeline(
                 ch, sampleRate, outputRate, bank.CenterFrequency,
-                _decoderFactory, _logger, _state.Squelch ?? -55.0);
+                _decoderFactory, _logger, _loggerFactory, _state.Squelch ?? -55.0);
 
             // Wire up events
             pipeline.OnAudio += HandleParallelAudio;
@@ -856,7 +859,9 @@ public class RtlDevice : BackgroundService, IRadioSource
     private void HandleParallelAudio(Channel channel, byte[] audio)
     {
         _toneDetector.ProcessAudio(audio);
-        _mdc.ProcessAudio(audio);
+        // MDC1200 is decoded per-channel inside each ChannelPipeline (analog modes),
+        // which attributes the unit ID to the correct channel; the shared decoder here
+        // could neither decode interleaved multi-channel audio nor attribute it.
 
         // Enqueue mono samples for the mixer instead of broadcasting per-channel stereo.
         int monoSamples = audio.Length / 2;

@@ -1,6 +1,7 @@
 using OpenScanner.Server.DSP;
 using OpenScanner.Server.Interfaces;
 using OpenScanner.Server.Models;
+using OpenScanner.Server.Services;
 
 namespace OpenScanner.Server.Devices;
 
@@ -16,12 +17,18 @@ public class ChannelPipeline : IDisposable
     private readonly Channelizer _channelizer;
     private readonly IDecoderFactory _decoderFactory;
     private readonly ILogger _logger;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly double _squelchDb;
 
     private IDecoder? _decoder;
     private CancellationTokenSource? _decoderCts;
     private bool _decoderStarted;
     private bool _disposed;
+
+    // Per-channel MDC1200 decoder for analog modes. Each parallel channel needs its
+    // own decoder so bursts are attributed to the right channel (a single shared
+    // decoder fed interleaved audio can neither decode reliably nor attribute).
+    private Mdc1200Decoder? _mdc;
 
     // Pre-allocated output buffer for channelizer (avoids per-call allocation)
     private byte[] _audioBuffer;
@@ -80,11 +87,13 @@ public class ChannelPipeline : IDisposable
         double centerFreqMhz,
         IDecoderFactory decoderFactory,
         ILogger logger,
+        ILoggerFactory loggerFactory,
         double squelchDb = -55.0)
     {
         _channel = channel;
         _decoderFactory = decoderFactory;
         _logger = logger;
+        _loggerFactory = loggerFactory;
         _squelchDb = squelchDb;
 
         // Frequency offset from SDR center (in Hz)
@@ -112,6 +121,14 @@ public class ChannelPipeline : IDisposable
         if (needsDecoder)
         {
             StartDecoderProcess(_decoderCts.Token);
+        }
+        else
+        {
+            // Analog channel: decode MDC1200 unit IDs from the demodulated FM audio and
+            // surface them as this channel's source ID via the normal activity path.
+            _mdc = new Mdc1200Decoder(_loggerFactory.CreateLogger<Mdc1200Decoder>());
+            _mdc.OnPacket += pkt =>
+                OnActivity?.Invoke(_channel, pkt.UnitId, null, pkt.IsEmergency ? "EMRG" : null);
         }
 
         _logger.LogInformation(
@@ -174,6 +191,10 @@ public class ChannelPipeline : IDisposable
                 var chunk = new byte[audioBytes];
                 Buffer.BlockCopy(_audioBuffer, 0, chunk, 0, audioBytes);
                 OnAudio?.Invoke(_channel, chunk);
+
+                // Feed the same carrier audio to this channel's MDC1200 decoder so a
+                // PTT/emergency burst is attributed to this channel.
+                _mdc?.ProcessAudio(chunk);
             }
             else if (_isActive && (DateTime.UtcNow - _lastActivityTime).TotalSeconds > 2.0)
             {
@@ -194,6 +215,7 @@ public class ChannelPipeline : IDisposable
         _decoderCts?.Cancel();
         _decoder?.Stop();
         _decoder = null;
+        _mdc = null;
         _decoderCts?.Dispose();
     }
 
