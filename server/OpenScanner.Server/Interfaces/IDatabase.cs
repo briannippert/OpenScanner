@@ -193,6 +193,32 @@ public interface IDatabase
     /// <param name="id">The ID of the tone set to delete.</param>
     Task DeleteFireToneAsync(int id);
 
+    // Radio Aliases (per-channel display names for SRC / TG)
+
+    /// <summary>Retrieves all radio aliases.</summary>
+    Task<IEnumerable<RadioAlias>> GetAliasesAsync();
+
+    /// <summary>Adds (or updates on conflict) a radio alias; returns its row id.</summary>
+    Task<int> AddAliasAsync(RadioAlias alias);
+
+    /// <summary>Updates an existing radio alias by id.</summary>
+    Task UpdateAliasAsync(RadioAlias alias);
+
+    /// <summary>Deletes a radio alias by id.</summary>
+    Task DeleteAliasAsync(int id);
+
+    /// <summary>
+    /// Imports aliases additively: inserts only those whose (kind, value, channel) is
+    /// not already named, never overwriting existing names. Returns the number added.
+    /// </summary>
+    Task<int> ImportAliasesAsync(IEnumerable<RadioAlias> aliases);
+
+    /// <summary>
+    /// Returns the distinct SRC and TG values seen on each channel within the last
+    /// <paramref name="days"/> days, with occurrence counts and last-seen timestamps.
+    /// </summary>
+    Task<IEnumerable<AliasCandidate>> GetAliasCandidatesAsync(int days);
+
     // Radio Events (fire tone-out and MDC1200 detections)
 
     /// <summary>

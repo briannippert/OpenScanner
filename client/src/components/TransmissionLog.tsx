@@ -38,6 +38,7 @@ import {
 } from '@mui/icons-material';
 import { Chip } from '@mui/material';
 import type { CallLog, Channel } from '../types';
+import { chainLabel, srcLabel, tgLabel, type NameFor } from '../lib/aliasLabels';
 import { status } from '../theme/tokens';
 import EmptyState from './common/EmptyState';
 import PanelSkeleton from './common/PanelSkeleton';
@@ -77,6 +78,8 @@ export interface HighlightRequest {
 }
 
 const HighlightContext = createContext<HighlightRequest | null>(null);
+/** Per-channel SRC/TG display-name resolver, provided to the deeply-nested rows. */
+const AliasContext = createContext<NameFor | null>(null);
 
 interface Props {
     liveLogs: CallLog[];
@@ -88,9 +91,11 @@ interface Props {
     loaded?: boolean;
     /** Recording ids referenced by fire tone-out events (for the Tone-outs filter). */
     toneOutIds?: Set<string>;
+    /** Resolves per-channel display names for SRC/TG. */
+    nameFor?: NameFor;
 }
 
-const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelete, highlight, loaded = true, toneOutIds }) => {
+const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelete, highlight, loaded = true, toneOutIds, nameFor }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<CallLog[] | null>(null);
     const [years, setYears] = useState<string[]>([]);
@@ -183,6 +188,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     }, [searchQuery]);
 
     return (
+        <AliasContext.Provider value={nameFor ?? null}>
         <HighlightContext.Provider value={highlight ?? null}>
         <Box data-testid="transmission-log" sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <Box sx={{ p: 1.5, borderBottom: '1px solid', borderColor: 'surface.border', display: 'flex', flexDirection: 'column', gap: 1.25 }}>
@@ -298,6 +304,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
             </Box>
         </Box>
         </HighlightContext.Provider>
+        </AliasContext.Provider>
     );
 };
 
@@ -531,7 +538,11 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete, o
 const LogItem =({ log, tree, playingId, onPlay, onDelete, onFavoriteToggle }: { log: CallLog; tree?: boolean } & LogNodeProps) => {
     const [isFavorite, setIsFavorite] = useState(log.isFavorite ?? false);
     const highlight = useContext(HighlightContext);
+    const nameFor = useContext(AliasContext);
     const itemRef = useRef<HTMLLIElement>(null);
+
+    // Per-channel SRC/TG display names (fall back to the raw number; raw kept on hover).
+    const at = log.alphaTag, fq = log.frequency;
 
     // Scroll into view and briefly flash when this log is the highlight target.
     // The flash is driven imperatively via the Web Animations API so the effect
@@ -681,30 +692,38 @@ const LogItem =({ log, tree, playingId, onPlay, onDelete, onFavoriteToggle }: { 
                                         <Box display="flex" alignItems="center" gap={0.4}>
                                             {log.speakerChain ? (
                                                 <>
-                                                    <Typography variant="caption" sx={{ color: status.warn, fontSize: '0.7rem', ...monoFont, fontWeight: 'bold' }}>
-                                                        {log.speakerChain}
-                                                    </Typography>
+                                                    <Tooltip title={log.speakerChain}>
+                                                        <Typography variant="caption" sx={{ color: status.warn, fontSize: '0.7rem', ...monoFont, fontWeight: 'bold' }}>
+                                                            {chainLabel(nameFor, log.speakerChain, at, fq)}
+                                                        </Typography>
+                                                    </Tooltip>
                                                     {log.targetID && (
                                                         <>
                                                             <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem' }}>→</Typography>
                                                             <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem', ...monoFont }}>TG</Typography>
-                                                            <Typography variant="caption" sx={{ color: status.info, fontSize: '0.7rem', ...monoFont, fontWeight: 'bold' }}>
-                                                                {log.targetID}
-                                                            </Typography>
+                                                            <Tooltip title={String(log.targetID)}>
+                                                                <Typography variant="caption" sx={{ color: status.info, fontSize: '0.7rem', ...monoFont, fontWeight: 'bold' }}>
+                                                                    {tgLabel(nameFor, log.targetID, at, fq)}
+                                                                </Typography>
+                                                            </Tooltip>
                                                         </>
                                                     )}
                                                 </>
                                             ) : (
                                                 <>
                                                     <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem', ...monoFont }}>SRC</Typography>
-                                                    <Typography variant="caption" sx={{ color: status.warn, fontSize: '0.7rem', ...monoFont, fontWeight: 'bold' }}>
-                                                        {log.sourceID ?? '?'}
-                                                    </Typography>
+                                                    <Tooltip title={log.sourceID != null ? String(log.sourceID) : ''}>
+                                                        <Typography variant="caption" sx={{ color: status.warn, fontSize: '0.7rem', ...monoFont, fontWeight: 'bold' }}>
+                                                            {srcLabel(nameFor, log.sourceID, at, fq)}
+                                                        </Typography>
+                                                    </Tooltip>
                                                     <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem' }}>→</Typography>
                                                     <Typography variant="caption" sx={{ color: 'text.disabled', fontSize: '0.65rem', ...monoFont }}>TG</Typography>
-                                                    <Typography variant="caption" sx={{ color: status.info, fontSize: '0.7rem', ...monoFont, fontWeight: 'bold' }}>
-                                                        {log.targetID ?? '?'}
-                                                    </Typography>
+                                                    <Tooltip title={log.targetID != null ? String(log.targetID) : ''}>
+                                                        <Typography variant="caption" sx={{ color: status.info, fontSize: '0.7rem', ...monoFont, fontWeight: 'bold' }}>
+                                                            {tgLabel(nameFor, log.targetID, at, fq)}
+                                                        </Typography>
+                                                    </Tooltip>
                                                 </>
                                             )}
                                         </Box>

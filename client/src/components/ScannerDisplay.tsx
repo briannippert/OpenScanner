@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Typography, Paper, Chip, ThemeProvider } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import type { ScannerState, Channel } from '../types';
+import { chainLabel, srcLabel, tgLabel, type NameFor } from '../lib/aliasLabels';
 import RadioIcon from '@mui/icons-material/Radio';
 import SignalCellularAltIcon from '@mui/icons-material/SignalCellularAlt';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -15,11 +16,12 @@ interface Props {
     analyser?: AnalyserNode;
     onScan?: (freq?: number) => void;
     channels?: Channel[];
+    nameFor?: NameFor;
 }
 
 const monoFont = { fontFamily: '"Roboto Mono", ui-monospace, monospace' };
 
-const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [] }) => {
+const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [], nameFor }) => {
     const isReceiving = state.status === 'RECEIVING';
     const isParallel = !!state.parallelChannels && state.parallelChannels.length > 0;
     const isFastScan = !isParallel && state.status === 'SCANNING' && !state.currentFrequency && channels.length > 1;
@@ -163,7 +165,7 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                     <Typography key={pc.channel.frequency} variant="caption" sx={{
                                         color: status.warn, fontWeight: 'bold', mt: 0.5, display: 'block', ...monoFont, fontSize: '0.65rem',
                                     }}>
-                                        {pc.channel.alphaTag}: {pc.sourceID ?? '?'} {pc.targetID ? `-> TG ${pc.targetID}` : ''}
+                                        {pc.channel.alphaTag}: {srcLabel(nameFor, pc.sourceID, pc.channel.alphaTag, pc.channel.frequency)} {pc.targetID ? `-> TG ${tgLabel(nameFor, pc.targetID, pc.channel.alphaTag, pc.channel.frequency)}` : ''}
                                     </Typography>
                                 ))}
                             </>
@@ -231,9 +233,13 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                 </Box>
                                 {isReceiving && (state.speakerChain || state.sourceID || state.targetID) && (
                                     <Typography variant="caption" sx={{ color: status.warn, fontWeight: 'bold', mt: 0.5, display: 'block', ...monoFont, letterSpacing: 1 }}>
-                                        {state.speakerChain
-                                            ? `${state.speakerChain} → TG ${state.targetID ?? '?'}`
-                                            : `${state.sourceID ?? '?'} → TG ${state.targetID ?? '?'}`}
+                                        {(() => {
+                                            const at = state.currentChannel?.alphaTag ?? '';
+                                            const fq = state.currentChannel?.frequency ?? state.currentFrequency ?? 0;
+                                            return state.speakerChain
+                                                ? `${chainLabel(nameFor, state.speakerChain, at, fq)} → TG ${tgLabel(nameFor, state.targetID, at, fq)}`
+                                                : `${srcLabel(nameFor, state.sourceID, at, fq)} → TG ${tgLabel(nameFor, state.targetID, at, fq)}`;
+                                        })()}
                                     </Typography>
                                 )}
                             </>
