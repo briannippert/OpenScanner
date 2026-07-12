@@ -61,11 +61,11 @@ function App() {
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
-  // Ribbon indicator: live WS state wins; otherwise fall back to the poll. Hidden
-  // while an update is running/done or when a check found nothing.
+  // Ribbon indicator: show when the poll or a live WS check reports an update,
+  // hidden only while an update is actively running or just finished.
   const updateState = scanner.updateState;
-  const updateAvailable = updateState === 'available'
-    || (polledAvailable && updateState !== 'updating' && updateState !== 'success' && updateState !== 'idle');
+  const updateAvailable = (updateState === 'available' || polledAvailable)
+    && updateState !== 'updating' && updateState !== 'success';
 
   // Command palette: Ctrl/⌘-K toggles it from anywhere.
   useEffect(() => {
