@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
@@ -18,6 +19,13 @@ public class WhisperTranscriptionServiceTests
     private readonly Mock<ILogger<WhisperTranscriptionService>> _loggerMock = new();
     private readonly Mock<IConfiguration> _configMock = new();
 
+    private RemoteTranscriptionClient CreateRemoteClient() =>
+        new RemoteTranscriptionClient(
+            Mock.Of<IHttpClientFactory>(),
+            _dbMock.Object,
+            _configMock.Object,
+            Mock.Of<ILogger<RemoteTranscriptionClient>>());
+
     [Fact]
     public async Task QueueTranscription_ProcessesJobAndFiresCompletedEvent()
     {
@@ -25,7 +33,7 @@ public class WhisperTranscriptionServiceTests
         _dbMock.Setup(db => db.GetSettingAsync("TranscriptionThreads")).ReturnsAsync("2");
         _dbMock.Setup(db => db.GetSettingAsync("EnableTranscription")).ReturnsAsync("false");
 
-        using var service = new WhisperTranscriptionService(_dbMock.Object, _loggerMock.Object, _configMock.Object);
+        using var service = new WhisperTranscriptionService(_dbMock.Object, _loggerMock.Object, _configMock.Object, CreateRemoteClient());
 
         var log = new CallLog
         {
@@ -88,5 +96,21 @@ public class WhisperTranscriptionServiceTests
         var args = WhisperTranscriptionService.BuildWhisperArgs("/m.bin", "/a.wav", "p", 5, 4, "   ");
         // Blank ExtraArgs must not append anything after the prompt.
         Assert.EndsWith("--prompt \"p\"", args);
+    }
+
+    [Fact]
+    public async Task RemoteClient_GetConfiguredUrl_TrimsTrailingSlash()
+    {
+        _dbMock.Setup(db => db.GetSettingAsync("RemoteTranscriptionUrl")).ReturnsAsync("http://host:8090/");
+        var client = CreateRemoteClient();
+        Assert.Equal("http://host:8090", await client.GetConfiguredUrlAsync());
+    }
+
+    [Fact]
+    public async Task RemoteClient_GetConfiguredUrl_NullWhenUnset()
+    {
+        _dbMock.Setup(db => db.GetSettingAsync("RemoteTranscriptionUrl")).ReturnsAsync((string?)null);
+        var client = CreateRemoteClient();
+        Assert.Null(await client.GetConfiguredUrlAsync());
     }
 }
