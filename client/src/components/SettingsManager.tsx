@@ -17,6 +17,13 @@ interface StorageInfo {
     diskTotalBytes: number;
 }
 
+interface RemoteModel {
+    id: string;
+    label: string;
+}
+
+type RemoteHealth = { status: 'idle' | 'testing' | 'ok' | 'error'; message: string };
+
 interface Props {
     open: boolean;
     onClose: () => void;
@@ -81,6 +88,11 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
     const [storage, setStorage] = useState<StorageInfo | null>(null);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [remoteModels, setRemoteModels] = useState<RemoteModel[]>([]);
+    const [remoteHealth, setRemoteHealth] = useState<RemoteHealth>({ status: 'idle', message: '' });
+
+    const backend = settings['TranscriptionBackend'] || 'local';
+    const remoteUrl = settings['RemoteTranscriptionUrl'] || '';
 
     useEffect(() => {
         if (open) {
@@ -97,6 +109,42 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
         const id = setInterval(fetchSettings, 3000);
         return () => clearInterval(id);
     }, [open, modelDownloading]);
+
+    // When the remote backend is selected, query the server for the models it has
+    // installed to populate the dropdown. Debounced so typing the URL doesn't spam it.
+    useEffect(() => {
+        if (!open || backend !== 'remote' || !remoteUrl) return;
+        let cancelled = false;
+        const run = async () => {
+            try {
+                const res = await apiFetch(`/api/transcription/remote/models?url=${encodeURIComponent(remoteUrl)}`);
+                if (cancelled) return;
+                setRemoteModels(res.ok ? await res.json() : []);
+            } catch {
+                if (!cancelled) setRemoteModels([]);
+            }
+        };
+        const id = setTimeout(run, 500);
+        return () => { cancelled = true; clearTimeout(id); };
+    }, [open, backend, remoteUrl]);
+
+    const testRemoteServer = async () => {
+        if (!remoteUrl) return;
+        setRemoteHealth({ status: 'testing', message: 'Testing…' });
+        try {
+            const res = await apiFetch(`/api/transcription/remote/health?url=${encodeURIComponent(remoteUrl)}`);
+            const data = await res.json();
+            if (res.ok && data.ok) {
+                const h = data.health || {};
+                const accel = h.acceleration ? ` (${h.acceleration})` : '';
+                setRemoteHealth({ status: 'ok', message: `Connected${accel}` });
+            } else {
+                setRemoteHealth({ status: 'error', message: data.error || 'Server unreachable' });
+            }
+        } catch {
+            setRemoteHealth({ status: 'error', message: 'Server unreachable' });
+        }
+    };
 
     const fetchStorage = async () => {
         try {
@@ -224,42 +272,119 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
                             {settings['EnableTranscription'] === 'true' && (
                                 <>
                                     <Row
-                                        label="Model"
-                                        description={(() => {
-                                            const s = parseModelStatus(settings['TranscriptionModelStatus']);
-                                            return s.text
-                                                ? `Larger models are more accurate but slower on a Pi. Status: ${s.text}`
-                                                : 'Larger models are more accurate but slower on a Pi. Downloaded automatically when changed.';
-                                        })()}
+                                        label="Backend"
+                                        description="Transcribe on this device, or offload to a remote OpenScanner.WhisperServer."
                                         control={
                                             <Select
                                                 size="small"
                                                 variant="outlined"
-                                                style={{ minWidth: 260 }}
-                                                value={settings['TranscriptionModel'] || 'large-v3-turbo-q5_0'}
-                                                onChange={(e) => handleValueChange('TranscriptionModel', e.target.value)}
+                                                style={{ minWidth: 160 }}
+                                                value={backend}
+                                                onChange={(e) => handleValueChange('TranscriptionBackend', e.target.value)}
                                             >
-                                                {TRANSCRIPTION_MODELS.map((m) => (
-                                                    <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
-                                                ))}
+                                                <MenuItem value="local">Local (this device)</MenuItem>
+                                                <MenuItem value="remote">Remote server</MenuItem>
                                             </Select>
                                         }
                                     />
-                                    <Row
-                                        label="Transcription Threads"
-                                        description={`Number of recordings transcribed at once. With a large model, 1 is recommended (each run already uses all cores). CPU cores: ${systemInfo.CpuCores || 'Unknown'}`}
-                                        control={
-                                            <TextField
-                                                type="number"
-                                                size="small"
-                                                variant="outlined"
-                                                style={{ width: '80px', minWidth: '80px' }}
-                                                value={settings['TranscriptionThreads'] || ''}
-                                                inputProps={{ min: 1, max: 32 }}
-                                                onChange={(e) => handleValueChange('TranscriptionThreads', e.target.value)}
+                                    {backend === 'local' ? (
+                                        <>
+                                            <Row
+                                                label="Model"
+                                                description={(() => {
+                                                    const s = parseModelStatus(settings['TranscriptionModelStatus']);
+                                                    return s.text
+                                                        ? `Larger models are more accurate but slower on a Pi. Status: ${s.text}`
+                                                        : 'Larger models are more accurate but slower on a Pi. Downloaded automatically when changed.';
+                                                })()}
+                                                control={
+                                                    <Select
+                                                        size="small"
+                                                        variant="outlined"
+                                                        style={{ minWidth: 260 }}
+                                                        value={settings['TranscriptionModel'] || 'large-v3-turbo-q5_0'}
+                                                        onChange={(e) => handleValueChange('TranscriptionModel', e.target.value)}
+                                                    >
+                                                        {TRANSCRIPTION_MODELS.map((m) => (
+                                                            <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
+                                                        ))}
+                                                    </Select>
+                                                }
                                             />
-                                        }
-                                    />
+                                            <Row
+                                                label="Transcription Threads"
+                                                description={`Number of recordings transcribed at once. With a large model, 1 is recommended (each run already uses all cores). CPU cores: ${systemInfo.CpuCores || 'Unknown'}`}
+                                                control={
+                                                    <TextField
+                                                        type="number"
+                                                        size="small"
+                                                        variant="outlined"
+                                                        style={{ width: '80px', minWidth: '80px' }}
+                                                        value={settings['TranscriptionThreads'] || ''}
+                                                        inputProps={{ min: 1, max: 32 }}
+                                                        onChange={(e) => handleValueChange('TranscriptionThreads', e.target.value)}
+                                                    />
+                                                }
+                                            />
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Row
+                                                label="Server URL"
+                                                description={
+                                                    remoteHealth.status === 'ok' ? `✓ ${remoteHealth.message}`
+                                                    : remoteHealth.status === 'error' ? `✗ ${remoteHealth.message}`
+                                                    : 'Address of the WhisperServer, e.g. http://192.168.1.100:8090'
+                                                }
+                                                control={
+                                                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                                                        <TextField
+                                                            size="small"
+                                                            variant="outlined"
+                                                            placeholder="http://192.168.1.100:8090"
+                                                            style={{ width: '240px' }}
+                                                            value={remoteUrl}
+                                                            onChange={(e) => handleValueChange('RemoteTranscriptionUrl', e.target.value)}
+                                                        />
+                                                        <Button
+                                                            size="small"
+                                                            variant="outlined"
+                                                            onClick={testRemoteServer}
+                                                            disabled={!remoteUrl || remoteHealth.status === 'testing'}
+                                                        >
+                                                            {remoteHealth.status === 'testing' ? '…' : 'Test'}
+                                                        </Button>
+                                                    </Box>
+                                                }
+                                            />
+                                            <Row
+                                                label="Model"
+                                                description={
+                                                    remoteModels.length > 0
+                                                        ? 'Models installed on the remote server.'
+                                                        : 'Enter a reachable server URL to load its available models.'
+                                                }
+                                                control={
+                                                    <Select
+                                                        size="small"
+                                                        variant="outlined"
+                                                        displayEmpty
+                                                        style={{ minWidth: 260 }}
+                                                        value={settings['RemoteTranscriptionModel'] || ''}
+                                                        onChange={(e) => handleValueChange('RemoteTranscriptionModel', e.target.value)}
+                                                        disabled={remoteModels.length === 0}
+                                                    >
+                                                        <MenuItem value="" disabled>
+                                                            {remoteModels.length === 0 ? 'No models loaded' : 'Select a model'}
+                                                        </MenuItem>
+                                                        {remoteModels.map((m) => (
+                                                            <MenuItem key={m.id} value={m.id}>{m.label}</MenuItem>
+                                                        ))}
+                                                    </Select>
+                                                }
+                                            />
+                                        </>
+                                    )}
                                 </>
                             )}
                         </Section>

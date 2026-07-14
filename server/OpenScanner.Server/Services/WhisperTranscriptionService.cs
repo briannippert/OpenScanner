@@ -16,6 +16,7 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
     private readonly IDatabase _db;
     private readonly ILogger<WhisperTranscriptionService> _logger;
     private readonly IConfiguration _config;
+    private readonly RemoteTranscriptionClient _remoteClient;
 
     private readonly System.Threading.Channels.Channel<(CallLog Log, string AudioPath)> _queueChannel = System.Threading.Channels.Channel.CreateUnbounded<(CallLog Log, string AudioPath)>();
     private readonly List<TranscriptionWorker> _workers = new();
@@ -41,11 +42,12 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
         }
     }
 
-    public WhisperTranscriptionService(IDatabase db, ILogger<WhisperTranscriptionService> logger, IConfiguration config)
+    public WhisperTranscriptionService(IDatabase db, ILogger<WhisperTranscriptionService> logger, IConfiguration config, RemoteTranscriptionClient remoteClient)
     {
         _db = db;
         _logger = logger;
         _config = config;
+        _remoteClient = remoteClient;
 
         // Initialize workers based on current setting
         var targetCount = GetTargetThreadCount();
@@ -56,7 +58,24 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
 
         // Proactively ensure the configured model is present (and reflect its
         // status) so the first transmission isn't blocked on a large download.
-        PrepareModel(GetConfiguredModel());
+        // Only meaningful for the local backend — remote uses the server's models.
+        if (GetBackend() == "local")
+        {
+            PrepareModel(GetConfiguredModel());
+        }
+    }
+
+    // Transcription backend: "local" (whisper-cli on this machine) or "remote"
+    // (offloaded to an OpenScanner.WhisperServer over HTTP). Stored in settings.
+    private string GetBackend()
+    {
+        try
+        {
+            var backend = _db.GetSettingAsync("TranscriptionBackend").GetAwaiter().GetResult();
+            if (string.Equals(backend, "remote", StringComparison.OrdinalIgnoreCase)) return "remote";
+        }
+        catch { /* fall through to local */ }
+        return "local";
     }
 
     private string GetConfiguredModel()
@@ -391,44 +410,11 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
         }
     }
 
-    public string? TranscribeAudio(string audioPath)
+    // Resample an input recording (raw 48k s16le or an encoded file) to 16 kHz mono
+    // WAV with the radio voice-filter chain. Shared by the local and remote backends.
+    // Returns true when the output file was produced.
+    private bool ConvertTo16kWav(string audioPath, string tempWavPath)
     {
-        // Check setting
-        var enabled = _db.GetSettingAsync("EnableTranscription").GetAwaiter().GetResult();
-        if (enabled != "true") return null;
-
-        // Model is managed from the web-app settings (DB), falling back to
-        // appsettings then a safe default.
-        var modelName = _db.GetSettingAsync("TranscriptionModel").GetAwaiter().GetResult();
-        if (string.IsNullOrWhiteSpace(modelName)) modelName = _config["Transcription:Model"];
-        if (string.IsNullOrWhiteSpace(modelName)) modelName = "small.en";
-        if (!IsValidModelName(modelName))
-        {
-            _logger.LogError("Invalid transcription model name '{Model}'; refusing to use it.", SafeForLog(modelName));
-            return null;
-        }
-
-        // Temp file for resampling to 16k
-        var tempWavPath = audioPath + ".16k.wav";
-        var whisperRoot = FindWhisperRoot();
-        var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");
-        var modelPath = Path.Combine(whisperRoot, $"models/ggml-{modelName}.bin");
-
-        if (!File.Exists(whisperBin))
-        {
-            _logger.LogError($"Whisper binary not found at {whisperBin}. Search root was: {whisperRoot}");
-            return null;
-        }
-
-        // Download the selected model on demand if it isn't present yet. Blocks
-        // this worker until ready (every queued clip needs the same model, so
-        // there is nothing else to do meanwhile).
-        if (!EnsureModelAvailable(whisperRoot, modelName))
-        {
-            _logger.LogError("Transcription model '{Model}' is not available and could not be downloaded.", SafeForLog(modelName));
-            return null;
-        }
-
         var convertStart = new ProcessStartInfo(PlatformTools.Ffmpeg)
         {
             RedirectStandardOutput = true,
@@ -473,7 +459,71 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
             }
         }
 
-        if (!File.Exists(tempWavPath)) return null;
+        return File.Exists(tempWavPath);
+    }
+
+    public string? TranscribeAudio(string audioPath)
+    {
+        // Check setting
+        var enabled = _db.GetSettingAsync("EnableTranscription").GetAwaiter().GetResult();
+        if (enabled != "true") return null;
+
+        var backend = GetBackend();
+
+        // Shared preprocessing target: resample to 16 kHz mono with the radio
+        // voice-filter chain (used by both the local and remote backends).
+        var tempWavPath = audioPath + ".16k.wav";
+
+        // Remote backend: offload to an OpenScanner.WhisperServer over HTTP. We still
+        // do the radio-tuned resample locally so the server just transcribes.
+        if (backend == "remote")
+        {
+            try
+            {
+                if (!ConvertTo16kWav(audioPath, tempWavPath)) return null;
+                var remoteModel = _db.GetSettingAsync("RemoteTranscriptionModel").GetAwaiter().GetResult() ?? string.Empty;
+                var remotePrompt = _config["Transcription:Prompt"];
+                if (string.IsNullOrWhiteSpace(remotePrompt)) remotePrompt = DefaultPrompt;
+                return _remoteClient.TranscribeAsync(tempWavPath, remoteModel, remotePrompt).GetAwaiter().GetResult();
+            }
+            finally
+            {
+                if (File.Exists(tempWavPath)) File.Delete(tempWavPath);
+            }
+        }
+
+        // ---- Local backend (whisper-cli on this machine) ----
+        // Model is managed from the web-app settings (DB), falling back to
+        // appsettings then a safe default.
+        var modelName = _db.GetSettingAsync("TranscriptionModel").GetAwaiter().GetResult();
+        if (string.IsNullOrWhiteSpace(modelName)) modelName = _config["Transcription:Model"];
+        if (string.IsNullOrWhiteSpace(modelName)) modelName = "small.en";
+        if (!IsValidModelName(modelName))
+        {
+            _logger.LogError("Invalid transcription model name '{Model}'; refusing to use it.", SafeForLog(modelName));
+            return null;
+        }
+
+        var whisperRoot = FindWhisperRoot();
+        var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");
+        var modelPath = Path.Combine(whisperRoot, $"models/ggml-{modelName}.bin");
+
+        if (!File.Exists(whisperBin))
+        {
+            _logger.LogError($"Whisper binary not found at {whisperBin}. Search root was: {whisperRoot}");
+            return null;
+        }
+
+        // Download the selected model on demand if it isn't present yet. Blocks
+        // this worker until ready (every queued clip needs the same model, so
+        // there is nothing else to do meanwhile).
+        if (!EnsureModelAvailable(whisperRoot, modelName))
+        {
+            _logger.LogError("Transcription model '{Model}' is not available and could not be downloaded.", SafeForLog(modelName));
+            return null;
+        }
+
+        if (!ConvertTo16kWav(audioPath, tempWavPath)) return null;
 
         // 2. Run Whisper with radio context + accuracy-oriented decode settings.
         var prompt = _config["Transcription:Prompt"];
