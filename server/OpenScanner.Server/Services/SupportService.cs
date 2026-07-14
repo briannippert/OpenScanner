@@ -170,13 +170,15 @@ public class SupportService : ISupportService
         var cpu = GetCpuPercent();
         var (usedBytes, totalBytes) = GetMemoryBytes();
         var memPct = totalBytes > 0 ? (double)usedBytes / totalBytes * 100.0 : 0;
+        var temp = GetCpuTempCelsius();
 
         return new SystemStats(
             Math.Round(cpu, 1),
             Math.Round(memPct, 1),
             usedBytes / 1024 / 1024,
             totalBytes / 1024 / 1024,
-            _transcription.GetQueueStatus());
+            _transcription.GetQueueStatus(),
+            temp.HasValue ? Math.Round(temp.Value, 1) : (double?)null);
     }
 
     /// <inheritdoc />
@@ -330,6 +332,68 @@ public class SupportService : ISupportService
             _loggerProvider.CreateLogger(nameof(SupportService)).LogDebug(ex, "Failed to read process memory");
             return (0, 0);
         }
+    }
+
+    // CPU/SoC temperature in °C, or null when no sensor is available. Reads the
+    // Linux thermal sysfs first (covers Raspberry Pi and x86 boards), then falls
+    // back to best-effort shell commands for boards/OSes that don't expose sysfs.
+    private double? GetCpuTempCelsius()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            try
+            {
+                double? best = null;
+                double? preferred = null;
+                foreach (var zone in Directory.EnumerateDirectories("/sys/class/thermal", "thermal_zone*"))
+                {
+                    var tempPath = Path.Combine(zone, "temp");
+                    if (!File.Exists(tempPath)) continue;
+                    if (!long.TryParse(File.ReadAllText(tempPath).Trim(), out var milli)) continue;
+                    var celsius = milli / 1000.0;
+                    if (celsius <= 0 || celsius > 200) continue; // ignore obviously bogus readings
+
+                    best = best is { } b ? Math.Max(b, celsius) : celsius;
+
+                    var typePath = Path.Combine(zone, "type");
+                    if (preferred is null && File.Exists(typePath))
+                    {
+                        var type = File.ReadAllText(typePath).Trim().ToLowerInvariant();
+                        if (type.Contains("cpu") || type.Contains("x86_pkg") || type.Contains("soc"))
+                            preferred = celsius;
+                    }
+                }
+                if (preferred is { } p) return p;
+                if (best is { } m) return m;
+            }
+            catch (Exception ex)
+            {
+                _loggerProvider.CreateLogger(nameof(SupportService)).LogDebug(ex, "Failed to read thermal sysfs");
+            }
+
+            // Raspberry Pi boards without a usable thermal zone expose vcgencmd.
+            var vc = ParseTempOutput(RunCommand("vcgencmd", new[] { "measure_temp" }, 1500));
+            if (vc.HasValue) return vc;
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            // Optional Homebrew tool; fails cleanly (returns null) when not installed.
+            var osx = ParseTempOutput(RunCommand("osx-cpu-temp", Array.Empty<string>(), 1500));
+            if (osx.HasValue) return osx;
+        }
+
+        return null;
+    }
+
+    // Extracts the first temperature number from strings like "temp=54.3'C" or "55.2°C".
+    private static double? ParseTempOutput(string? output)
+    {
+        if (string.IsNullOrWhiteSpace(output)) return null;
+        var match = System.Text.RegularExpressions.Regex.Match(output, @"-?\d+(?:\.\d+)?");
+        if (match.Success && double.TryParse(match.Value, System.Globalization.CultureInfo.InvariantCulture, out var v)
+            && v > 0 && v <= 200)
+            return v;
+        return null;
     }
 
     // "MemTotal:       8123456 kB" -> 8123456
