@@ -440,7 +440,8 @@ public record SystemStats(
     double MemPercent,
     long MemUsedMb,
     long MemTotalMb,
-    TranscriptionQueueStatus Transcription
+    TranscriptionQueueStatus Transcription,
+    double? TempCelsius        // CPU/SoC temperature in °C; null when no thermal sensor is available
 );
 
 /// <summary>State of a systemd unit (or the process itself when systemd is absent).</summary>

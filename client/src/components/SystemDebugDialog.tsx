@@ -20,6 +20,7 @@ interface SystemStats {
   memPercent: number;
   memUsedMb: number;
   memTotalMb: number;
+  tempCelsius?: number | null;
   transcription: TranscriptionQueueStatus;
 }
 interface ServiceStatus { name: string; state: string; detail: string; }
@@ -62,6 +63,9 @@ interface BackfillStatus {
 }
 type SystemInfo = Record<string, string>;
 
+// Celsius (as reported by the sensors) to Fahrenheit for display.
+const cToF = (c: number): number => c * 9 / 5 + 32;
+
 // Byte / time formatting helpers.
 const fmtBytes = (n: number): string => {
   if (!n || n < 0) return '0 B';
@@ -93,7 +97,7 @@ const MONO = '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 // How many one-second samples to retain — the graphs cover the last 120 seconds.
 const WINDOW = 120;
 
-interface Sample { t: number; cpu: number; mem: number; }
+interface Sample { t: number; cpu: number; mem: number; temp: number | null; }
 
 /**
  * Single-series area+line chart over the last WINDOW seconds with a fixed 0-100%
@@ -105,7 +109,9 @@ const ResourceGraph: React.FC<{
   samples: Sample[];
   value: (s: Sample) => number;
   currentText: string;
-}> = ({ label, color, samples, value, currentText }) => {
+  max?: number;
+  unit?: string;
+}> = ({ label, color, samples, value, currentText, max = 100, unit = '%' }) => {
   const theme = useTheme();
   const W = 520;
   const H = 140;
@@ -121,7 +127,7 @@ const ResourceGraph: React.FC<{
   // Map a sample index to an x coordinate. The window is right-aligned so the
   // newest sample sits at the right edge even before the buffer is full.
   const x = (i: number) => padL + plotW * (i - (samples.length - WINDOW)) / (WINDOW - 1);
-  const y = (v: number) => padT + plotH * (1 - Math.max(0, Math.min(100, v)) / 100);
+  const y = (v: number) => padT + plotH * (1 - Math.max(0, Math.min(max, v)) / max);
 
   const linePath = samples.map((s, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(value(s)).toFixed(1)}`).join(' ');
   const areaPath = samples.length
@@ -159,10 +165,10 @@ const ResourceGraph: React.FC<{
         onMouseLeave={() => setHover(null)}
         sx={{ width: '100%', height: 'auto', display: 'block' }}
       >
-        {[0, 25, 50, 75, 100].map((g) => (
+        {[0, 0.25, 0.5, 0.75, 1].map((f) => f * max).map((g) => (
           <g key={g}>
             <line x1={padL} x2={W - padR} y1={y(g)} y2={y(g)} stroke={gridColor} strokeWidth={1} opacity={0.5} />
-            <text x={padL - 6} y={y(g) + 3} textAnchor="end" fontSize={9} fill={inkMuted} fontFamily={MONO}>{g}</text>
+            <text x={padL - 6} y={y(g) + 3} textAnchor="end" fontSize={9} fill={inkMuted} fontFamily={MONO}>{Math.round(g)}</text>
           </g>
         ))}
         {areaPath && <path d={areaPath} fill={color} opacity={0.14} />}
@@ -178,7 +184,7 @@ const ResourceGraph: React.FC<{
               fontFamily={MONO}
               fill={theme.palette.text.primary}
             >
-              {value(hoverSample).toFixed(0)}%
+              {value(hoverSample).toFixed(0)}{unit}
             </text>
           </g>
         )}
@@ -271,7 +277,7 @@ const SystemDebugDialog: React.FC<Props> = ({ open, onClose, onDownloadSupport }
       if (cancelled || !s) return;
       setStats(s);
       setSamples((prev) => {
-        const next = [...prev, { t: Date.now(), cpu: s.cpuPercent, mem: s.memPercent }];
+        const next = [...prev, { t: Date.now(), cpu: s.cpuPercent, mem: s.memPercent, temp: s.tempCelsius != null ? cToF(s.tempCelsius) : null }];
         return next.length > WINDOW ? next.slice(next.length - WINDOW) : next;
       });
     };
@@ -362,9 +368,11 @@ const SystemDebugDialog: React.FC<Props> = ({ open, onClose, onDownloadSupport }
   const memText = stats
     ? `${stats.memPercent.toFixed(0)}%  (${stats.memUsedMb}/${stats.memTotalMb} MB)`
     : '—';
+  const tempText = stats?.tempCelsius != null ? `${cToF(stats.tempCelsius).toFixed(0)}°F` : 'N/A';
 
   const cpuColor = theme.palette.primary.main;
   const memColor = theme.palette.statusColors.info;
+  const tempColor = theme.palette.statusColors.warn;
 
   const sortedPorts = useMemo(() => services?.ports ?? [], [services]);
 
@@ -397,6 +405,9 @@ const SystemDebugDialog: React.FC<Props> = ({ open, onClose, onDownloadSupport }
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <ResourceGraph label="CPU" color={cpuColor} samples={samples} value={(s) => s.cpu} currentText={cpuText} />
               <ResourceGraph label="Memory" color={memColor} samples={samples} value={(s) => s.mem} currentText={memText} />
+              {stats?.tempCelsius != null && (
+                <ResourceGraph label="Temp" color={tempColor} samples={samples} value={(s) => s.temp ?? 0} currentText={tempText} max={212} unit="°F" />
+              )}
             </Box>
           </Paper>
         </Grid>

@@ -99,4 +99,23 @@ public class SupportServiceTests
         Assert.Contains("Network", sysContent);
         Assert.Contains("RunningProcesses", sysContent);
     }
+
+    [Fact]
+    public void GetSystemStats_ReturnsStats_WithPlausibleTemperature()
+    {
+        // Arrange
+        var memLogger = new MemoryLoggerProvider();
+        _transcriptionMock.Setup(t => t.GetQueueStatus()).Returns(new TranscriptionQueueStatus(0, 0));
+        var service = new SupportService(_configMock.Object, memLogger, _dbMock.Object, _radioMock.Object, _gpsMock.Object, _transcriptionMock.Object, _broadcaster, _recordingMock.Object, _cleanup);
+
+        // Act
+        var stats = service.GetSystemStats();
+
+        // Assert
+        Assert.NotNull(stats);
+        // TempCelsius is null when no thermal sensor is available (e.g. macOS/CI without /sys/class/thermal);
+        // when present it must be a plausible reading.
+        if (stats.TempCelsius.HasValue)
+            Assert.InRange(stats.TempCelsius.Value, 0.1, 200.0);
+    }
 }
