@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Button, Typography, Alert, CircularProgress, Chip, Link } from '@mui/material';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import FormDialog from './common/FormDialog';
 import { apiFetch, apiJson } from './common/apiBase';
 import type { UpdateStatus, UpdateState } from '../types';
@@ -21,9 +22,25 @@ const MONO = '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
 const shortCommit = (c?: string) => (c ? c.slice(0, 8) : '');
 
+/** "3 minutes ago" for the last-checked caption. The server only checks every 30
+ *  minutes, so minute precision is plenty. */
+const sinceText = (iso?: string): string => {
+  if (!iso) return 'never';
+  const secs = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (!Number.isFinite(secs) || secs < 0) return 'just now';
+  if (secs < 60) return 'just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+};
+
 const UpdateManager: React.FC<Props> = ({ open, onClose, log, state, onSeed }) => {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [restarted, setRestarted] = useState(false);
+  const [checking, setChecking] = useState(false);
   const logBoxRef = useRef<HTMLDivElement>(null);
 
   // Seed from the authoritative snapshot whenever the dialog opens.
@@ -68,9 +85,23 @@ const UpdateManager: React.FC<Props> = ({ open, onClose, log, state, onSeed }) =
     await apiFetch('/api/update/start', { method: 'POST' });
   }, [onSeed]);
 
+  // Force a check now rather than waiting out the server's 30-minute poll. The
+  // response is the refreshed snapshot, so no follow-up GET is needed; a failed
+  // check comes back with `error` set and surfaces in the alert below.
+  const check = useCallback(async () => {
+    setChecking(true);
+    try {
+      const s = await apiJson<UpdateStatus>('/api/update/check', { method: 'POST' });
+      if (s) setStatus(s);
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
   const failed = state === 'failed';
   const updating = state === 'updating';
   const available = status?.updateAvailable ?? false;
+  const busyChecking = checking || state === 'checking';
 
   const actionButton = (() => {
     if (state === 'success') {
@@ -102,6 +133,13 @@ const UpdateManager: React.FC<Props> = ({ open, onClose, log, state, onSeed }) =
       actions={
         <>
           <Button onClick={onClose} color="inherit" disabled={updating}>Close</Button>
+          <Button
+            onClick={check}
+            disabled={updating || busyChecking || state === 'success'}
+            startIcon={busyChecking ? <CircularProgress size={16} /> : <RefreshIcon />}
+          >
+            {busyChecking ? 'Checking…' : 'Check now'}
+          </Button>
           {actionButton}
         </>
       }
@@ -124,8 +162,11 @@ const UpdateManager: React.FC<Props> = ({ open, onClose, log, state, onSeed }) =
             />
           </>
         )}
+        <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+          {busyChecking ? 'Checking…' : `Checked ${sinceText(status?.lastCheckedUtc)}`}
+        </Typography>
         {status?.releaseUrl && (
-          <Link href={status.releaseUrl} target="_blank" rel="noopener" variant="caption" sx={{ ml: 'auto' }}>
+          <Link href={status.releaseUrl} target="_blank" rel="noopener" variant="caption">
             Release notes
           </Link>
         )}
@@ -146,7 +187,16 @@ const UpdateManager: React.FC<Props> = ({ open, onClose, log, state, onSeed }) =
           {status?.error || 'Update failed. The running version is unchanged — see the log below.'}
         </Alert>
       )}
-      {!status?.latestTag && !updating && state !== 'success' && (
+      {/* A failed *check* deliberately leaves the state alone (a network blip
+          shouldn't look like a failed update), so it reports through `error`
+          only — without this the Check now button would silently snap back to
+          "Up to date". */}
+      {!failed && !updating && status?.error && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {status.error}
+        </Alert>
+      )}
+      {!status?.latestTag && !status?.error && !updating && state !== 'success' && (
         <Alert severity="info" sx={{ mb: 2 }}>
           Checking for the latest release… If this persists, the server may be offline from GitHub.
         </Alert>
