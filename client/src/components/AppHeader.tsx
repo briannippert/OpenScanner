@@ -54,8 +54,12 @@ const AppHeader: React.FC<Props> = ({
   const hasFix = gps?.time && gps.fix >= 2;
 
   // The toolbar actions, shared between the desktop icon row and the mobile menu.
+  // Software Update is always listed: it's the only way into the update dialog,
+  // and gating it on updateAvailable meant you couldn't check on demand until the
+  // server's 30-minute poll had already found something. The UPDATE chip below
+  // stays gated — that's the "there's something waiting" nudge.
   const actions = [
-    ...(updateAvailable ? [{ label: 'Software Update', icon: <SystemUpdateIcon />, onClick: onOpenUpdate }] : []),
+    { label: 'Software Update', icon: <SystemUpdateIcon />, onClick: onOpenUpdate },
     { label: 'Fire Tone Outs', icon: <NotificationsActiveIcon />, onClick: onOpenFireTones },
     { label: 'Radio Aliases', icon: <BadgeIcon />, onClick: onOpenAliases },
     { label: 'Settings', icon: <SettingsIcon />, onClick: onOpenSettings },
