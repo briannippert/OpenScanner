@@ -15,11 +15,31 @@ STAGING="${1:?staging dir required}"
 PUBLISH="${2:?publish dir required}"
 UNIT="${3:-openscanner}"
 BACKUP="${PUBLISH%/}_backup"
+REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 log() { echo "[finalize] $*"; }
 
-# Whatever happens, never leave the service down: always try to start it on exit.
+# The service — and therefore the whole self-update — runs as root, while the
+# checkout belongs to the operator. Every step that writes into the repo (git
+# reset, npm build, the swap below) leaves root-owned files behind, which then
+# block the next update and any manual `install_service.sh` run. Hand the tree
+# back to whoever owns .git so the repo is never left half root-owned.
+restore_ownership() {
+    [ "$(id -u)" -eq 0 ] || return 0
+    local owner
+    owner=$(stat -c '%U:%G' "$REPO_ROOT/.git" 2>/dev/null) || return 0
+    case "$owner" in
+        ""|root:*) return 0 ;;
+    esac
+    log "Restoring ownership of $REPO_ROOT to $owner"
+    chown -R "$owner" "$REPO_ROOT" || log "WARN: chown failed"
+}
+
+# Whatever happens, never leave the service down or the repo root-owned: the
+# build steps have already run as root by the time we get here, so every exit
+# path — including the aborts below — needs the ownership fixup.
 cleanup() {
+    restore_ownership
     if ! systemctl is-active --quiet "$UNIT"; then
         log "Ensuring $UNIT is started"
         systemctl start "$UNIT" || true

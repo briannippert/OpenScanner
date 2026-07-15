@@ -67,6 +67,34 @@ else
     log_info "Service was not running."
 fi
 
+# The service runs as root, so an older in-UI self-update can have left root-owned
+# files behind: the git reset rewrites tracked files, the build writes client/dist
+# and the publish dir. Those block the reset and build below, which run as the
+# regular user. Reclaim them first.
+#
+# Only the paths the update actually writes are checked — data/ (recordings) and
+# whisper.cpp/models are written by the root service by design, and chowning those
+# on every install would be pointless churn.
+log_step "Checking File Ownership..."
+RECLAIM_PATHS=(".git" "scripts" "client" "server" "version.json")
+NEEDS_RECLAIM=()
+for rel in "${RECLAIM_PATHS[@]}"; do
+    path="$PROJECT_ROOT/$rel"
+    [ -e "$path" ] || continue
+    if [ -n "$(find "$path" ! -user "$USER" -print -quit 2>/dev/null)" ]; then
+        NEEDS_RECLAIM+=("$path")
+    fi
+done
+
+if [ ${#NEEDS_RECLAIM[@]} -gt 0 ]; then
+    log_warn "Found files not owned by $USER (left by a root self-update):"
+    for p in "${NEEDS_RECLAIM[@]}"; do log_warn "  - ${p#"$PROJECT_ROOT/"}"; done
+    sudo chown -R "$USER:$(id -gn)" "${NEEDS_RECLAIM[@]}"
+    log_success "Ownership restored to $USER."
+else
+    log_success "Ownership looks correct."
+fi
+
 # ----------------------------------------------------------------
 # 2. Update Code
 # ----------------------------------------------------------------
