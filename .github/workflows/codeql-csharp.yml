@@ -1,0 +1,53 @@
+name: CodeQL (C#)
+
+# Replaces GitHub's default CodeQL setup, which analysed every language on every
+# PR regardless of what changed — a scripts-only PR still paid for a full C#
+# analysis. Default setup has no path filters, so scoping it means running CodeQL
+# from a workflow we control. One file per language, because `paths:` is a
+# workflow-level trigger and can't be applied per-job.
+#
+# NOTE: default setup must stay disabled (Settings > Code security > Code
+# scanning). If it's re-enabled, these runs fail — GitHub refuses SARIF from an
+# advanced configuration while default setup owns the repo's scanning.
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'server/**'
+      - '.github/workflows/codeql-csharp.yml'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'server/**'
+      - '.github/workflows/codeql-csharp.yml'
+  # Default setup scanned weekly; keep that safety net so a language still gets
+  # scanned even if nobody touches it for a while.
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze C#
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: csharp
+          # No build needed — this skips the mbelib/dsd-fme native dependency
+          # chain that the .NET CI job has to compile from source.
+          build-mode: none
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:csharp"

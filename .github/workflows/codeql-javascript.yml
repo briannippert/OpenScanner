@@ -1,0 +1,43 @@
+name: CodeQL (JavaScript/TypeScript)
+
+# See codeql-csharp.yml for why CodeQL runs from workflow files instead of
+# GitHub's default setup, and why there's one file per language.
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'client/**'
+      - '.github/workflows/codeql-javascript.yml'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'client/**'
+      - '.github/workflows/codeql-javascript.yml'
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze JavaScript/TypeScript
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          # Covers plain JS and TS both — the separate 'javascript' and
+          # 'typescript' entries default setup listed are aliases of this.
+          languages: javascript-typescript
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"

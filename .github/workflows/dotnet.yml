@@ -5,13 +5,19 @@ on:
     branches: [ "main" ]
     paths:
       - 'server/**'
+      - '.github/workflows/dotnet.yml'
   pull_request:
     branches: [ "main" ]
     paths:
       - 'server/**'
+      - '.github/workflows/dotnet.yml'
 
 jobs:
   build:
+    # Named so it's distinguishable from the frontend job in the checks list —
+    # both were previously called "build", which made it look like .NET CI
+    # wasn't running on PRs at all.
+    name: Server (.NET)
     runs-on: ubuntu-latest
 
     steps:
