@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Numerics;
 using OpenScanner.Server.DSP;
 using OpenScanner.Server.Models;
@@ -119,8 +120,13 @@ public class RtlDevice : BackgroundService, IRadioSource
         _recordingService = recordingService;
         _channelService = channelService;
         _state = new ScannerState("IDLE", 0);
-        
-        _gps.OnGpsUpdate += (data) => 
+
+        // Restore persisted SDR tuner gain (dB; "0" or absent = AUTO / tuner AGC).
+        var gainSetting = _db.GetSettingAsync("SdrGain").GetAwaiter().GetResult();
+        if (double.TryParse(gainSetting, NumberStyles.Any, CultureInfo.InvariantCulture, out var savedGain))
+            _state = _state with { Gain = savedGain };
+
+        _gps.OnGpsUpdate += (data) =>
         {
             UpdateState(_state with { Gps = data });
             _channelService.CheckGeoRefresh(data.Lat, data.Lon);
@@ -195,6 +201,28 @@ public class RtlDevice : BackgroundService, IRadioSource
         UpdateState(_state with { Squelch = db });
         _logger.LogInformation($"Squelch set to {db}dB");
     }
+
+    /// <inheritdoc />
+    public void SetGain(double db)
+    {
+        UpdateState(_state with { Gain = db });
+        _db.SetSettingAsync("SdrGain", db.ToString("0.##", CultureInfo.InvariantCulture));
+        _logger.LogInformation($"SDR gain set to {(db == 0 ? "AUTO (tuner AGC)" : $"{db}dB")}");
+
+        // Gain is baked into the rtl_sdr arguments at launch, so an active scan must be
+        // restarted to pick up the new value (mirrors ReloadChannels).
+        if (_state.Status == "SCANNING")
+        {
+            StopScanning();
+            Task.Delay(250).ContinueWith(_ => StartScanning());
+        }
+    }
+
+    /// <summary>
+    /// Builds the rtl_sdr "-g" argument from the current gain setting. A null or 0 value
+    /// selects the tuner's automatic gain — rtl_sdr treats "-g 0" as AUTO/AGC.
+    /// </summary>
+    private string GainArg() => $"-g {(_state.Gain ?? 0).ToString("0.##", CultureInfo.InvariantCulture)}";
 
     /// <inheritdoc />
     public void Start()
@@ -671,7 +699,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         await Task.Delay(250, token); // USB settle time
 
         var binPath = PlatformTools.RtlSdr;
-        var args = $"-f {bank.CenterFrequency:F3}M -s {sampleRate} -g 20 -b 1 -";
+        var args = $"-f {bank.CenterFrequency:F3}M -s {sampleRate} {GainArg()} -b 1 -";
         _logger.LogInformation($"Parallel Scanner: {binPath} {args}");
 
         var psi = new ProcessStartInfo(binPath, args)
@@ -1063,7 +1091,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         int scanRate = 1024000; 
         var binPath = PlatformTools.RtlSdr;
         // -b 1: Use 1 buffer to reduce latency and improve startup reliability
-        var args = $"-f {centerFreqMhz:F3}M -s {scanRate} -g 20 -b 1 -";
+        var args = $"-f {centerFreqMhz:F3}M -s {scanRate} {GainArg()} -b 1 -";
 
         _logger.LogInformation($"Starting Scanner: {centerFreqMhz:F3} MHz (Cmd: {binPath} {args})");
 

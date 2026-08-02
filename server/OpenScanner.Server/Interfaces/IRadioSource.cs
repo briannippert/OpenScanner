@@ -50,6 +50,13 @@ public interface IRadioSource
     void SetSquelch(double db);
 
     /// <summary>
+    /// Sets the RTL-SDR tuner gain, in dB. A value of 0 selects the tuner's automatic gain (AGC).
+    /// The setting is persisted and applied to subsequent captures.
+    /// </summary>
+    /// <param name="db">The tuner gain in dB, or 0 for AUTO.</param>
+    void SetGain(double db);
+
+    /// <summary>
     /// Starts the radio source scanning process.
     /// </summary>
     void Start();

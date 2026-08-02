@@ -144,6 +144,18 @@ public class ScannerController : ControllerBase
     }
 
     /// <summary>
+    /// Sets the RTL-SDR tuner gain.
+    /// </summary>
+    /// <param name="request">The tuner gain, in dB (0 = AUTO/AGC).</param>
+    [HttpPut("scanner/gain")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult SetGain([FromBody] GainRequest request)
+    {
+        _radio.SetGain(request.Value);
+        return Ok();
+    }
+
+    /// <summary>
     /// Temporarily avoids a frequency for a given duration.
     /// </summary>
     /// <param name="request">The frequency to avoid and how long to avoid it.</param>
@@ -316,6 +328,9 @@ public record HoldRequest(double Frequency);
 
 /// <summary>Request to set the squelch threshold (dB).</summary>
 public record SquelchRequest(double Value);
+
+/// <summary>Request to set the RTL-SDR tuner gain (dB; 0 = AUTO/AGC).</summary>
+public record GainRequest(double Value);
 
 /// <summary>Request to temporarily avoid a frequency (MHz) for a duration (seconds).</summary>
 public record AvoidRequest(double Frequency, double Duration = 10);
