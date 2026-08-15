@@ -20,6 +20,14 @@ public class ChannelizerSelectivityTests
     private const double AdjacentChannelHz = 12500;
 
     /// <summary>
+    /// Samples per measurement. The power meter averages over 4800 output samples, and total
+    /// decimation here is 20, so 96k input samples fill the window exactly once; 250k fills it
+    /// 2.6 times, which settles the reading without burning CI time. These tests share a
+    /// 2-core runner with wall-clock-sensitive ones, so their cost is not free.
+    /// </summary>
+    private const int MeasurementSamples = 250000;
+
+    /// <summary>
     /// Generates a constant-amplitude carrier at <paramref name="toneOffsetHz"/> from the SDR
     /// centre, as unsigned 8-bit interleaved IQ (what rtl_sdr emits).
     /// </summary>
@@ -40,13 +48,13 @@ public class ChannelizerSelectivityTests
 
     /// <summary>
     /// Runs a carrier through a channelizer tuned to <paramref name="tunedOffsetHz"/> and returns
-    /// the settled in-channel power. Uses a full second so the ~100 ms power window is filled
-    /// several times over and filter start-up transients have washed out.
+    /// the settled in-channel power, over enough samples to fill the power window several times
+    /// and wash out filter start-up transients.
     /// </summary>
     private static double PowerDbOf(double tunedOffsetHz, double carrierOffsetHz, double channelCutoffHz)
     {
         var ch = new Channelizer(InputRate, OutputRate, tunedOffsetHz, channelCutoffHz: channelCutoffHz);
-        var iq = Carrier(carrierOffsetHz, InputRate);
+        var iq = Carrier(carrierOffsetHz, MeasurementSamples);
         var output = new byte[ch.MaxOutputBytes(iq.Length)];
         ch.ProcessIQ(iq, iq.Length, output);
         return ch.SignalPowerDb;
@@ -97,7 +105,7 @@ public class ChannelizerSelectivityTests
     public void NarrowerChannel_LowersNoiseBandwidth()
     {
         var rng = new Random(20260814);
-        var noise = new byte[InputRate * 2];
+        var noise = new byte[MeasurementSamples * 2];
         for (int i = 0; i < noise.Length; i++)
             noise[i] = (byte)Math.Clamp(127.5 + 40 * (rng.NextDouble() * 2 - 1), 0, 255);
 
@@ -125,14 +133,16 @@ public class ChannelizerSelectivityTests
     public void RecursiveNco_DoesNotDriftOverALongRun()
     {
         var ch = new Channelizer(InputRate, OutputRate, 100000, channelCutoffHz: 6250);
-        var iq = Carrier(100000, InputRate);
+        var iq = Carrier(100000, MeasurementSamples);
         var output = new byte[ch.MaxOutputBytes(iq.Length)];
 
         ch.ProcessIQ(iq, iq.Length, output);
         double early = ch.SignalPowerDb;
 
-        // ~20 more seconds of samples: 19.2M complex multiplies for the rotator to drift in.
-        for (int i = 0; i < 20; i++) ch.ProcessIQ(iq, iq.Length, output);
+        // ~2M further complex multiplies. The rotator renormalizes every 1024 samples, so drift
+        // can never accumulate past that window — this only has to prove renormalization runs,
+        // not survive an arbitrarily long soak.
+        for (int i = 0; i < 8; i++) ch.ProcessIQ(iq, iq.Length, output);
         double late = ch.SignalPowerDb;
 
         Assert.True(Math.Abs(early - late) < 0.05,
@@ -167,7 +177,7 @@ public class ChannelizerSelectivityTests
     private static double OutputRms(double deviationHz, double modulationDeviationHz)
     {
         const double toneHz = 1000;
-        int samples = InputRate / 4;
+        int samples = MeasurementSamples;
         var iq = new byte[samples * 2];
         double carrierPhase = 0, tonePhase = 0;
         double toneInc = 2.0 * Math.PI * toneHz / InputRate;
@@ -206,8 +216,8 @@ public class ChannelizerSelectivityTests
     public void DcBlocker_RemovesTheCentreSpike()
     {
         // A constant IQ offset with no modulation: pure DC, i.e. the dongle's spike.
-        var iq = new byte[InputRate * 2];
-        for (int i = 0; i < InputRate; i++)
+        var iq = new byte[MeasurementSamples * 2];
+        for (int i = 0; i < MeasurementSamples; i++)
         {
             iq[i * 2] = 180;       // well away from the 127.5 midpoint
             iq[i * 2 + 1] = 150;
