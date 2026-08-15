@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
+using OpenScanner.Server.Audio;
 using OpenScanner.Server.DSP;
 using OpenScanner.Server.Models;
 using OpenScanner.Server.Interfaces;
@@ -31,7 +32,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     public event Action<CallLog>? OnNewLog;
     
     /// <inheritdoc />
-    public event Action<byte[]>? OnAudio;
+    public event Action<AudioChunk>? OnAudio;
 
     /// <inheritdoc />
     public event Action<RadioEvent>? OnNewEvent;
@@ -951,7 +952,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             stereo[outIdx + 3] = (byte)((right >> 8) & 0xFF);
         }
 
-        OnAudio?.Invoke(stereo);
+        OnAudio?.Invoke(AudioChunk.Stereo48k(stereo));
     }
 
     /// <summary>
@@ -1552,7 +1553,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                 // Analyze for Fire Tone Outs and MDC1200 signaling
                 _toneDetector.ProcessAudio(chunk);
                 _mdc.ProcessAudio(chunk);
-                OnAudio?.Invoke(chunk);
+                OnAudio?.Invoke(AudioChunk.Mono48k(chunk));
 
                 _recordingService.ProcessAudio(chunk);
                 

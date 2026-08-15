@@ -1,5 +1,6 @@
 using Microsoft.Extensions.FileProviders;
 using OpenScanner.Server;
+using OpenScanner.Server.Audio;
 using OpenScanner.Server.Services;
 using OpenScanner.Server.Interfaces;
 using OpenScanner.Server.Devices;
@@ -144,8 +145,11 @@ app.Map("/ws/audio", async (HttpContext context) =>
 {
     if (context.WebSockets.IsWebSocketRequest)
     {
+        // No ?codec= at all means a pre-negotiation client, which keeps getting raw PCM.
+        var codecParam = context.Request.Query.TryGetValue("codec", out var v) ? v.ToString() : null;
+        var codec = AudioNegotiation.Negotiate(codecParam, wsBroadcaster.OpusAvailable);
         using var ws = await context.WebSockets.AcceptWebSocketAsync();
-        await wsBroadcaster.HandleAudioConnection(ws);
+        await wsBroadcaster.HandleAudioConnection(ws, codec);
     }
     else
     {

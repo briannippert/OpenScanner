@@ -1,3 +1,4 @@
+using OpenScanner.Server.Audio;
 using OpenScanner.Server.Interfaces;
 using OpenScanner.Server.Models;
 using OpenScanner.Server.Services;
@@ -31,7 +32,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
 
     public event Action<ScannerState>? OnStateChanged;
     public event Action<CallLog>? OnNewLog;
-    public event Action<byte[]>? OnAudio;
+    public event Action<AudioChunk>? OnAudio;
     public event Action<RadioEvent>? OnNewEvent;
 
     private ScannerState _state = new("IDLE", 0);
@@ -370,7 +371,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
 
     private void HandleAudioChunk(byte[] chunk)
     {
-        OnAudio?.Invoke(chunk);
+        OnAudio?.Invoke(AudioChunk.Mono48k(chunk));
         _recordingService.ProcessAudio(chunk);
         _toneDetector.ProcessAudio(chunk);
         _mdc.ProcessAudio(chunk);

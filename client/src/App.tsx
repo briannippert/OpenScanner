@@ -41,7 +41,7 @@ function App() {
   const [debugGain, setDebugGain] = useState<number>(40);
 
   const audio = useAudioPipeline(volume);
-  const scanner = useScannerSocket({ onParallel: audio.setParallel });
+  const scanner = useScannerSocket();
   const { scannerState } = scanner;
   const manualHold = scannerState.manualHoldFrequency;
 

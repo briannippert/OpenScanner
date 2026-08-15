@@ -1,3 +1,4 @@
+using OpenScanner.Server.Audio;
 using OpenScanner.Server.Models;
 
 namespace OpenScanner.Server.Interfaces;
@@ -20,7 +21,7 @@ public interface IRadioSource
     /// <summary>
     /// Event triggered when new audio data is available.
     /// </summary>
-    event Action<byte[]>? OnAudio;
+    event Action<AudioChunk>? OnAudio;
 
     /// <summary>
     /// Event triggered when a signaling event (fire tone-out or MDC1200) is detected.
