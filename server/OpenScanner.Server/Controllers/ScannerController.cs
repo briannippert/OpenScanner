@@ -134,12 +134,36 @@ public class ScannerController : ControllerBase
     /// <summary>
     /// Sets the squelch threshold.
     /// </summary>
-    /// <param name="request">The squelch threshold, in dB.</param>
+    /// <param name="request">The squelch threshold, in dB of SNR above the noise floor.</param>
     [HttpPut("scanner/squelch")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public IActionResult SetSquelch([FromBody] SquelchRequest request)
     {
         _radio.SetSquelch(request.Value);
+        return Ok();
+    }
+
+    /// <summary>
+    /// Sets the RTL-SDR tuner gain.
+    /// </summary>
+    /// <param name="request">The tuner gain, in dB (0 = AUTO/AGC).</param>
+    [HttpPut("scanner/gain")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult SetGain([FromBody] GainRequest request)
+    {
+        _radio.SetGain(request.Value);
+        return Ok();
+    }
+
+    /// <summary>
+    /// Sets the crystal frequency error correction.
+    /// </summary>
+    /// <param name="request">The correction, in parts per million.</param>
+    [HttpPut("scanner/ppm")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult SetPpm([FromBody] PpmRequest request)
+    {
+        _radio.SetPpm(request.Value);
         return Ok();
     }
 
@@ -188,6 +212,22 @@ public class ScannerController : ControllerBase
     {
         _radio.StartDebugSpectrum(request.Frequency, request.Gain);
         return Ok();
+    }
+
+    /// <summary>
+    /// Reads a numeric "value" from a loose-typed command body, accepting either a JSON
+    /// number or a numeric string (older clients send the latter).
+    /// </summary>
+    private static bool TryReadValue(JsonElement body, out double value)
+    {
+        value = 0;
+        if (!body.TryGetProperty("value", out var prop)) return false;
+        if (prop.ValueKind == JsonValueKind.Number)
+        {
+            value = prop.GetDouble();
+            return true;
+        }
+        return double.TryParse(prop.GetString(), out value);
     }
 
     /// <summary>
@@ -268,10 +308,13 @@ public class ScannerController : ControllerBase
                 }
                 break;
             case "set_squelch":
-                 if (body.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.Number)
-                    _radio.SetSquelch(v.GetDouble());
-                 else if (body.TryGetProperty("value", out var vs) && double.TryParse(vs.GetString(), out var vd))
-                    _radio.SetSquelch(vd);
+                if (TryReadValue(body, out var squelchValue)) _radio.SetSquelch(squelchValue);
+                break;
+            case "set_gain":
+                if (TryReadValue(body, out var gainValue)) _radio.SetGain(gainValue);
+                break;
+            case "set_ppm":
+                if (TryReadValue(body, out var ppmValue)) _radio.SetPpm(ppmValue);
                 break;
             case "start_dump":
                 if (body.TryGetProperty("label", out var labelProp))
@@ -314,8 +357,14 @@ public record PowerRequest(bool Enabled);
 /// <summary>Request to hold the scanner on a frequency (MHz).</summary>
 public record HoldRequest(double Frequency);
 
-/// <summary>Request to set the squelch threshold (dB).</summary>
+/// <summary>Request to set the squelch threshold (dB of SNR above the noise floor).</summary>
 public record SquelchRequest(double Value);
+
+/// <summary>Request to set the RTL-SDR tuner gain (dB; 0 = AUTO/AGC).</summary>
+public record GainRequest(double Value);
+
+/// <summary>Request to set the crystal frequency error correction (ppm).</summary>
+public record PpmRequest(double Value);
 
 /// <summary>Request to temporarily avoid a frequency (MHz) for a duration (seconds).</summary>
 public record AvoidRequest(double Frequency, double Duration = 10);

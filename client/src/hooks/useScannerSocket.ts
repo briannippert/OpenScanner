@@ -52,6 +52,8 @@ export function useScannerSocket() {
       case 'start': return scannerApi('power', 'PUT', { enabled: true });
       case 'stop': return scannerApi('power', 'PUT', { enabled: false });
       case 'set_squelch': return scannerApi('squelch', 'PUT', { value });
+      case 'set_gain': return scannerApi('gain', 'PUT', { value });
+      case 'set_ppm': return scannerApi('ppm', 'PUT', { value });
       case 'debug_spectrum': return scannerApi('debug-spectrum', 'POST', { frequency, gain: value });
       default: console.error('Unknown command:', action);
     }

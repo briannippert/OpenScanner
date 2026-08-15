@@ -130,6 +130,10 @@ public class MockRadioSource : BackgroundService, IRadioSource
 
     public void SetSquelch(double db) => UpdateState(_state with { Squelch = db });
 
+    public void SetGain(double db) => UpdateState(_state with { Gain = db });
+
+    public void SetPpm(double ppm) => UpdateState(_state with { Ppm = ppm });
+
     public void Start()
     {
         if (_isRunning) return;

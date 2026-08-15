@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Numerics;
 using OpenScanner.Server.Audio;
 using OpenScanner.Server.DSP;
@@ -52,6 +53,14 @@ public class RtlDevice : BackgroundService, IRadioSource
     // the tone and the voice that follows stay one recording.
     private const int ActivityTimeoutMs = 2000;
     private const int ToneHoldMs = 6000;
+
+    /// <summary>
+    /// Default squelch, in dB of SNR above the measured noise floor. Squelch used to be an
+    /// absolute dB level, which meant it silently changed meaning with the gain setting and
+    /// with the FFT size. It is not persisted, so there is no stored value on the old scale
+    /// to migrate.
+    /// </summary>
+    private const double DefaultSquelchSnrDb = 10.0;
 
     private DateTime _recordingLockoutUntil = DateTime.MinValue;
     private CancellationTokenSource? _scanCts;
@@ -120,8 +129,16 @@ public class RtlDevice : BackgroundService, IRadioSource
         _recordingService = recordingService;
         _channelService = channelService;
         _state = new ScannerState("IDLE", 0);
-        
-        _gps.OnGpsUpdate += (data) => 
+
+        // Restore the persisted SDR tuning. Gain: dB, or 0/absent = AUTO (tuner AGC).
+        // Ppm: crystal error correction; 0/absent = uncorrected.
+        _state = _state with
+        {
+            Gain = ReadNumericSetting("SdrGain"),
+            Ppm = ReadNumericSetting("SdrPpm"),
+        };
+
+        _gps.OnGpsUpdate += (data) =>
         {
             UpdateState(_state with { Gps = data });
             _channelService.CheckGeoRefresh(data.Lat, data.Lon);
@@ -194,8 +211,57 @@ public class RtlDevice : BackgroundService, IRadioSource
     public void SetSquelch(double db)
     {
         UpdateState(_state with { Squelch = db });
-        _logger.LogInformation($"Squelch set to {db}dB");
+        _logger.LogInformation($"Squelch set to {db}dB SNR");
     }
+
+    /// <inheritdoc />
+    public void SetGain(double db)
+    {
+        UpdateState(_state with { Gain = db });
+        _ = _db.SetSettingAsync("SdrGain", Num(db));
+        _logger.LogInformation($"SDR gain set to {(db == 0 ? "AUTO (tuner AGC)" : $"{db}dB")}");
+        RestartScanToApplyTuning();
+    }
+
+    /// <inheritdoc />
+    public void SetPpm(double ppm)
+    {
+        UpdateState(_state with { Ppm = ppm });
+        _ = _db.SetSettingAsync("SdrPpm", Num(ppm));
+        _logger.LogInformation($"SDR frequency correction set to {ppm} ppm");
+        RestartScanToApplyTuning();
+    }
+
+    /// <summary>
+    /// Gain and ppm are baked into the rtl_sdr/rtl_fm arguments at launch, so a running
+    /// capture has to be restarted to pick up a change (mirrors <see cref="ReloadChannels"/>).
+    /// </summary>
+    private void RestartScanToApplyTuning()
+    {
+        if (_state.Status != "SCANNING") return;
+        StopScanning();
+        Task.Delay(250).ContinueWith(_ => StartScanning());
+    }
+
+    private double? ReadNumericSetting(string key)
+    {
+        var raw = _db.GetSettingAsync(key).GetAwaiter().GetResult();
+        return double.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
+    }
+
+    /// <summary>Formats a number for a command-line argument, immune to the host locale.</summary>
+    private static string Num(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// The rtl_sdr/rtl_fm tuning arguments shared by every capture: tuner gain and crystal
+    /// error correction. Both tools spell these the same way and both treat "-g 0" as AUTO.
+    /// </summary>
+    private string TuningArgs() => $"-g {Num(_state.Gain ?? 0)} -p {Num(_state.Ppm ?? 0)}";
+
+    /// <summary>The configured front-end settings, for handing to a decoder's own rtl_fm.</summary>
+    private SdrTuning CurrentTuning() => new(_state.Gain ?? 0, _state.Ppm ?? 0);
 
     /// <inheritdoc />
     public void Start()
@@ -249,7 +315,9 @@ public class RtlDevice : BackgroundService, IRadioSource
         StopScanning();
         StopDecoding();
 
-        UpdateState(_state with { Status = "DEBUG", CurrentFrequency = freq, ManualHoldFrequency = freq, RfSpectrum = null, Gain = targetGain });
+        // Deliberately does not touch _state.Gain: that field is the *configured* tuner gain
+        // and drives every capture's -g. The debug sweep's gain is a transient argument.
+        UpdateState(_state with { Status = "DEBUG", CurrentFrequency = freq, ManualHoldFrequency = freq, RfSpectrum = null });
 
         _scanCts = new CancellationTokenSource();
         var token = _scanCts.Token;
@@ -273,7 +341,9 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         int sampleRate = 2400000; 
         var binPath = PlatformTools.RtlSdr;
-        var args = $"-f {freq}M -s {sampleRate} -g {gain} -b 1 -";
+        // Debug spectrum takes an explicit gain (it sweeps to find one), but still needs the
+        // configured ppm or the displayed spectrum sits offset from the real frequencies.
+        var args = $"-f {freq}M -s {sampleRate} -g {Num(gain)} -p {Num(_state.Ppm ?? 0)} -b 1 -";
 
         _logger.LogInformation($"Debug Spectrum HW: {binPath} {args}");
 
@@ -372,8 +442,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             CurrentChannel = null, 
             SignalStrength = 0,
             ManualHoldFrequency = null,
-            ParallelChannels = null,
-            Gain = null
+            ParallelChannels = null
         });
         
         // Small delay to let hardware settle before restarting the scan
@@ -622,7 +691,7 @@ public class RtlDevice : BackgroundService, IRadioSource
 
             var pipeline = new ChannelPipeline(
                 ch, sampleRate, outputRate, bank.CenterFrequency,
-                _decoderFactory, _logger, _loggerFactory, _state.Squelch ?? -55.0);
+                _decoderFactory, _logger, _loggerFactory, _state.Squelch ?? DefaultSquelchSnrDb);
 
             // Wire up events
             pipeline.OnAudio += HandleParallelAudio;
@@ -672,7 +741,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         await Task.Delay(250, token); // USB settle time
 
         var binPath = PlatformTools.RtlSdr;
-        var args = $"-f {bank.CenterFrequency:F3}M -s {sampleRate} -g 20 -b 1 -";
+        var args = $"-f {bank.CenterFrequency:F3}M -s {sampleRate} {TuningArgs()} -b 1 -";
         _logger.LogInformation($"Parallel Scanner: {binPath} {args}");
 
         var psi = new ProcessStartInfo(binPath, args)
@@ -810,46 +879,14 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// <summary>
     /// FFT spectrum calculation for UI display only (no carrier detection in parallel mode).
     /// </summary>
-    private void ProcessSamplesForSpectrum(byte[] buffer, int length, double centerFreq, int sampleRate, int fftSize = 256)
+    private void ProcessSamplesForSpectrum(byte[] buffer, int length, double centerFreq, int sampleRate, int fftSize = DetectionFftSize)
     {
-        if (length < fftSize * 2) return;
+        // Fewer segments than the detection path: this only feeds the waterfall, and it runs at
+        // ~50 Hz on top of every channel pipeline's own filtering.
+        var spectrum = SpectrumEstimator.Estimate(buffer, length, sampleRate, fftSize, maxSegments: 4);
+        if (spectrum == null) return;
 
-        int bytesNeeded = fftSize * 2;
-        int offset = length - bytesNeeded;
-        if (offset < 0) return;
-
-        var complexSamples = new Complex[fftSize];
-        for (int i = 0; i < fftSize; i++)
-        {
-            double iSample = (buffer[offset + i * 2] - 127.5) / 127.5;
-            double qSample = (buffer[offset + i * 2 + 1] - 127.5) / 127.5;
-            double window = 0.5 * (1 - Math.Cos(2 * Math.PI * i / (fftSize - 1)));
-            complexSamples[i] = new Complex(iSample * window, qSample * window);
-        }
-
-        FftSharp.FFT.Forward(complexSamples);
-
-        var fftDb = new double[fftSize];
-        for (int i = 0; i < fftSize; i++)
-        {
-            var power = complexSamples[i].Magnitude * complexSamples[i].Magnitude;
-            fftDb[i] = 10 * Math.Log10(power + 1e-9);
-        }
-
-        var shiftedDb = new double[fftSize];
-        Array.Copy(fftDb, fftSize / 2, shiftedDb, 0, fftSize / 2);
-        Array.Copy(fftDb, 0, shiftedDb, fftSize / 2, fftSize / 2);
-
-        for (int i = 0; i < fftSize; i++) shiftedDb[i] -= 20;
-
-        var spectrumPoints = new SpectrumPoint[fftSize];
-        for (int i = 0; i < fftSize; i++)
-        {
-            double freqOffset = (i - fftSize / 2.0) * (sampleRate / (double)fftSize);
-            spectrumPoints[i] = new SpectrumPoint((centerFreq * 1000000 + freqOffset) / 1000000, shiftedDb[i]);
-        }
-
-        UpdateState(_state with { RfSpectrum = spectrumPoints });
+        PublishSpectrum(spectrum, centerFreq, sampleRate);
     }
 
     /// <summary>
@@ -1049,7 +1086,8 @@ public class RtlDevice : BackgroundService, IRadioSource
             SourceID: null,
             TargetID: null,
             SpeakerChain: null,
-            CurrentTone: _parallelLastTones.GetValueOrDefault(p.Channel.Frequency)
+            CurrentTone: _parallelLastTones.GetValueOrDefault(p.Channel.Frequency),
+            MeasuredOffsetHz: p.MeasuredOffsetHz
         )).ToArray();
 
         UpdateState(_state with { ParallelChannels = states });
@@ -1064,7 +1102,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         int scanRate = 1024000; 
         var binPath = PlatformTools.RtlSdr;
         // -b 1: Use 1 buffer to reduce latency and improve startup reliability
-        var args = $"-f {centerFreqMhz:F3}M -s {scanRate} -g 20 -b 1 -";
+        var args = $"-f {centerFreqMhz:F3}M -s {scanRate} {TuningArgs()} -b 1 -";
 
         _logger.LogInformation($"Starting Scanner: {centerFreqMhz:F3} MHz (Cmd: {binPath} {args})");
 
@@ -1190,6 +1228,38 @@ public class RtlDevice : BackgroundService, IRadioSource
         }
     }
 
+    /// <summary>
+    /// Shifts a proposed tuner centre until no channel sits within <see cref="DcGuardMHz"/> of
+    /// it, while keeping every channel inside the capture window. Returns the original centre
+    /// if no clear offset exists — the window is the harder constraint, and losing one channel
+    /// to the DC spike beats losing several off the edge.
+    /// </summary>
+    internal static double NudgeOffChannels(double center, List<Channel> sorted, double spreadMHz)
+    {
+        // How much the centre may move before a channel falls outside the 2.4 MHz window.
+        double slack = (2.4 - spreadMHz) / 2.0;
+        if (slack <= 0) return center;
+
+        bool IsClear(double candidate) =>
+            sorted.All(c => Math.Abs(c.Frequency - candidate) > DcGuardMHz);
+
+        if (IsClear(center)) return center;
+
+        // Try progressively larger nudges either side, staying inside the window.
+        for (double step = DcGuardMHz; step <= slack; step += DcGuardMHz)
+        {
+            if (IsClear(center + step)) return center + step;
+            if (IsClear(center - step)) return center - step;
+        }
+        return center;
+    }
+
+    /// <summary>
+    /// Keep-out radius around the tuner centre, in MHz. One detection FFT bin at the 1.024 MHz
+    /// scan rate is 1 kHz, so 10 kHz is comfortably clear of the residual DC bin.
+    /// </summary>
+    private const double DcGuardMHz = 0.01;
+
     private List<double> CalculateScanCenters(List<Channel> channels)
     {
         if (!channels.Any()) return new List<double>();
@@ -1251,13 +1321,14 @@ public class RtlDevice : BackgroundService, IRadioSource
         if (spread <= 2.4 + 1e-9)
         {
             // FastScan: all channels fit in a single 2.4 MHz SDR window — no hopping needed.
-            // For single-channel, offset center by +0.25 MHz so the signal doesn't land on the
-            // DC spike bin (bin fftSize/2). Multi-channel midpoint is already offset from DC.
-            double center;
-            if (sorted.Count == 1)
-                center = sorted[0].Frequency + 0.25;
-            else
-                center = (minFreq + maxFreq) / 2.0;
+            // The centre must not land on a channel, or that channel sits on the DC spike and
+            // is the one channel the scanner can never hear. A single channel is offset by a
+            // fixed 0.25 MHz; the multi-channel midpoint was previously assumed to be clear of
+            // any channel, which is false whenever the set is symmetric about one of its own
+            // members (three channels evenly spaced, say).
+            double center = sorted.Count == 1
+                ? sorted[0].Frequency + 0.25
+                : NudgeOffChannels((minFreq + maxFreq) / 2.0, sorted, spread);
 
             _logger.LogInformation($"ScanBank FastScan: {minFreq:F3}-{maxFreq:F3} MHz (spread: {spread:F2} MHz)");
             banks.Add(new ScanBank
@@ -1290,70 +1361,45 @@ public class RtlDevice : BackgroundService, IRadioSource
         return banks;
     }
 
+    /// <summary>
+    /// Bins per detection FFT. At the 1.024 MHz scan rate this is 1 kHz per bin, fine enough
+    /// to resolve a 12.5 kHz channel across ~13 bins rather than guessing from one.
+    /// </summary>
+    private const int DetectionFftSize = 1024;
+
+    /// <summary>Segments averaged per buffer. See <see cref="SpectrumEstimator.Estimate"/>.</summary>
+    private const int DetectionSegments = 16;
+
     private void ProcessSamples(byte[] buffer, int length, double centerFreq, int sampleRate)
     {
-        if (length < 1024) return;
-        
-        // Use last 512 samples (1024 bytes) for lowest latency
-        int fftSize = 256;
-        int bytesNeeded = fftSize * 2;
-        int offset = length - bytesNeeded;
-        if (offset < 0) return;
+        var spectrum = SpectrumEstimator.Estimate(
+            buffer, length, sampleRate, DetectionFftSize, DetectionSegments);
+        if (spectrum == null) return;
 
-        var complexSamples = new Complex[fftSize];
-        for (int i = 0; i < fftSize; i++)
-        {
-            // Normalize 0-255 to -1.0 to 1.0
-            double iSample = (buffer[offset + i * 2] - 127.5) / 127.5;
-            double qSample = (buffer[offset + i * 2 + 1] - 127.5) / 127.5;
-            
-            // Hanning Window
-            double window = 0.5 * (1 - Math.Cos(2 * Math.PI * i / (fftSize - 1)));
-            complexSamples[i] = new Complex(iSample * window, qSample * window);
-        }
-
-        // FFT
-        FftSharp.FFT.Forward(complexSamples);
-        
-        // Power in dB
-        var fftDb = new double[fftSize];
-        for (int i = 0; i < fftSize; i++)
-        {
-            var power = complexSamples[i].Magnitude * complexSamples[i].Magnitude;
-            fftDb[i] = 10 * Math.Log10(power + 1e-9);
-        }
-
-        // FFT Shift (Swap halves)
-        var shiftedDb = new double[fftSize];
-        Array.Copy(fftDb, fftSize / 2, shiftedDb, 0, fftSize / 2);
-        Array.Copy(fftDb, 0, shiftedDb, fftSize / 2, fftSize / 2);
-
-        // Normalize (Empirical)
-        for(int i=0; i<fftSize; i++) shiftedDb[i] -= 20;
-
-        // Map to SpectrumPoint objects
-        var spectrumPoints = new SpectrumPoint[fftSize];
-        for (int i = 0; i < fftSize; i++)
-        {
-            double freqOffset = (i - fftSize / 2.0) * (sampleRate / (double)fftSize);
-            spectrumPoints[i] = new SpectrumPoint((centerFreq * 1000000 + freqOffset) / 1000000, shiftedDb[i]);
-        }
-
-        UpdateState(_state with { RfSpectrum = spectrumPoints });
-
-        // Check Channels
-        CheckChannels(shiftedDb, centerFreq, sampleRate, fftSize);
+        PublishSpectrum(spectrum, centerFreq, sampleRate);
+        CheckChannels(spectrum, centerFreq);
     }
 
-    private void CheckChannels(double[] fftDb, double centerFreq, int sampleRate, int fftSize)
+    /// <summary>Pushes a spectrum estimate to the UI waterfall.</summary>
+    private void PublishSpectrum(SpectrumEstimate spectrum, double centerFreq, int sampleRate)
+    {
+        var db = spectrum.ToDbArray();
+        var spectrumPoints = new SpectrumPoint[db.Length];
+        for (int i = 0; i < db.Length; i++)
+        {
+            double freqOffset = (i - db.Length / 2.0) * spectrum.BinWidthHz;
+            spectrumPoints[i] = new SpectrumPoint((centerFreq * 1e6 + freqOffset) / 1e6, db[i]);
+        }
+        UpdateState(_state with { RfSpectrum = spectrumPoints });
+    }
+
+        // Normalize (Empirical)
+    private void CheckChannels(SpectrumEstimate spectrum, double centerFreq)
     {
         Channel? bestChannel = null;
+        double bestSnr = double.NegativeInfinity;
         double maxDetectedDb = -100;
-        
-        // Calculate average noise floor
-        double sum = 0;
-        for (int i = 0; i < fftSize; i++) sum += fftDb[i];
-        double avgNoise = sum / fftSize;
+        double squelchSnr = _state.Squelch ?? DefaultSquelchSnrDb;
 
         // Clean up old lockouts to prevent memory leak
         if (!_channelLockouts.IsEmpty)
@@ -1382,55 +1428,43 @@ public class RtlDevice : BackgroundService, IRadioSource
                 continue;
             }
 
-            double freqDiff = (channel.Frequency - centerFreq) * 1000000;
-            int binIndex = (int)((freqDiff / sampleRate) * fftSize + fftSize / 2.0);
+            int binIndex = spectrum.BinForOffset((channel.Frequency - centerFreq) * 1e6);
+            if (binIndex < 0) continue;
 
-            if (binIndex >= 0 && binIndex < fftSize)
+            // The residual DC spike is a single bin wide once the capture has been DC-blocked,
+            // so only that bin is skipped. The old guard blanked three bins, and at the FFT
+            // size in use that blinded a ~28 kHz window around the tuner centre — enough to
+            // hide a channel outright when a FastScan bank happened to centre on one.
+            if (binIndex == spectrum.FftSize / 2)
             {
-                // DC Filter: Ignore center 3 bins (approx 24kHz spread)
-                int centerBin = fftSize / 2;
-                if (binIndex >= centerBin - 1 && binIndex <= centerBin + 1)
-                {
-                    // If we have a strong signal in the center bin, warn that it might be getting filtered
-                    if (fftDb[binIndex] > -40) 
-                    {
-                        _logger.LogDebug($"Strong signal detected in center bin ({channel.Frequency} MHz). DC filter is rejecting it.");
-                    }
-                    continue;
-                }
+                _logger.LogDebug(
+                    $"{channel.AlphaTag} ({channel.Frequency} MHz) sits on the tuner centre; " +
+                    "skipping its DC bin.");
+                continue;
+            }
 
-                double db = fftDb[binIndex];
-                if (db > maxDetectedDb) maxDetectedDb = db;
+            int halfWidth = spectrum.HalfWidthBins(ChannelBandwidthHz(channel.Mode));
+            double snr = spectrum.ChannelSnrDb(binIndex, halfWidth);
+            double db = spectrum.ChannelPowerDb(binIndex, halfWidth);
+            if (db > maxDetectedDb) maxDetectedDb = db;
 
-                // SNR Requirement: Signal must be at least 15dB above average noise
-                // AND above absolute threshold
-                double snr = db - avgNoise;
-                double threshold = _state.Squelch ?? -55;
+            if (snr <= squelchSnr)
+            {
+                _channelHits[channel.Frequency] = 0;
+                continue;
+            }
 
-                if (db > threshold)
-                {
-                    if (snr > 15)
-                    {
-                        _channelHits[channel.Frequency] = _channelHits.GetValueOrDefault(channel.Frequency, 0) + 1;
-                        
-                        // Instant lock for strong signals (>20dB SNR), otherwise require 3 hits
-                        int hitsNeeded = snr > 20 ? 1 : 3;
-                        
-                        if (_channelHits[channel.Frequency] >= hitsNeeded && (bestChannel == null || db > maxDetectedDb))
-                        {
-                            bestChannel = channel;
-                        }
-                    }
-                    else
-                    {
-                        _channelHits[channel.Frequency] = 0;
-                        _logger.LogDebug($"Signal detected on {channel.AlphaTag} but SNR too low: {snr:F1}dB (Need 15dB)");
-                    }
-                }
-                else
-                {
-                    _channelHits[channel.Frequency] = 0;
-                }
+            _channelHits[channel.Frequency] = _channelHits.GetValueOrDefault(channel.Frequency, 0) + 1;
+
+            // Averaging 16 segments cut the per-bin variance by 16x, so a single reading is
+            // now trustworthy on its own for anything comfortably above threshold. Only
+            // marginal signals still wait for a second look.
+            int hitsNeeded = snr > squelchSnr + 10 ? 1 : 2;
+
+            if (_channelHits[channel.Frequency] >= hitsNeeded && snr > bestSnr)
+            {
+                bestSnr = snr;
+                bestChannel = channel;
             }
         }
 
@@ -1440,12 +1474,27 @@ public class RtlDevice : BackgroundService, IRadioSource
 
         if (bestChannel != null)
         {
-            _logger.LogInformation($"Detected carrier on {bestChannel.AlphaTag} (SNR: {(maxDetectedDb - avgNoise):F1}dB)");
+            _logger.LogInformation(
+                $"Detected carrier on {bestChannel.AlphaTag} (SNR: {bestSnr:F1}dB over a " +
+                $"{spectrum.NoiseFloorDb:F1}dB floor)");
             StopScanning();
             _recordingLockoutUntil = DateTime.UtcNow.AddSeconds(3);
             LockOn(bestChannel);
         }
     }
+
+    /// <summary>
+    /// Occupied bandwidth of a channel by mode, used to decide how many FFT bins its energy
+    /// is spread across. Analog FM stays at 25 kHz rather than assuming a narrowbanded system:
+    /// integrating a slightly too-wide window costs a little noise, whereas integrating too
+    /// narrow a one misses signal.
+    /// </summary>
+    private static double ChannelBandwidthHz(string? mode) => mode?.ToUpperInvariant() switch
+    {
+        "P25" or "DMR" => 12500,
+        "AM" => 10000,
+        _ => 25000,
+    };
 
     private void LockOn(Channel channel)
     {
@@ -1534,6 +1583,10 @@ public class RtlDevice : BackgroundService, IRadioSource
         try 
         {
             _currentDecoder = _decoderFactory.GetDecoder(channel.Mode);
+            // The decoder runs its own rtl_fm, so it needs the same front-end settings as the
+            // wideband scan that found the signal — otherwise the scanner detects at one gain
+            // and listens at another.
+            _currentDecoder.Tuning = CurrentTuning();
             
             _currentDecoder.OnAudio += (chunk) => 
             {

@@ -316,6 +316,7 @@ function App() {
           open={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
           onRecordingsDeleted={() => scanner.setCallLog([])}
+          scannerState={scannerState}
         />
         <AliasManager
           open={isAliasManagerOpen}
