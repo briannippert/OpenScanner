@@ -6,17 +6,12 @@ import type { NameFor } from '../lib/aliasLabels';
 const aliasKey = (kind: string, value: number, alphaTag: string, frequency: number) =>
   `${alphaTag}|${frequency.toFixed(4)}|${kind}|${value}`;
 
-interface Options {
-  /** Called when a state update indicates whether the live stream is stereo. */
-  onParallel?: (parallel: boolean) => void;
-}
-
 /**
  * Owns the control WebSocket, initial REST loads, live scanner/channel/log/event
  * state, and the command + CRUD helpers. Extracted from App so the component is a
  * thin composition root over this hook and useAudioPipeline.
  */
-export function useScannerSocket({ onParallel }: Options = {}) {
+export function useScannerSocket() {
   const [scannerState, setScannerState] = useState<ScannerState>({ status: 'IDLE', signalStrength: 0 });
   const [channels, setChannels] = useState<Channel[]>([]);
   const [fireTones, setFireTones] = useState<FireToneSet[]>([]);
@@ -40,8 +35,6 @@ export function useScannerSocket({ onParallel }: Options = {}) {
   const [logLoaded, setLogLoaded] = useState(false);
 
   const wsControl = useRef<WebSocket | null>(null);
-  const onParallelRef = useRef(onParallel);
-  useEffect(() => { onParallelRef.current = onParallel; }, [onParallel]);
 
   // Low-level REST helper for scanner control endpoints.
   const scannerApi = useCallback((path: string, method: string, body?: object) =>
@@ -59,6 +52,8 @@ export function useScannerSocket({ onParallel }: Options = {}) {
       case 'start': return scannerApi('power', 'PUT', { enabled: true });
       case 'stop': return scannerApi('power', 'PUT', { enabled: false });
       case 'set_squelch': return scannerApi('squelch', 'PUT', { value });
+      case 'set_gain': return scannerApi('gain', 'PUT', { value });
+      case 'set_ppm': return scannerApi('ppm', 'PUT', { value });
       case 'debug_spectrum': return scannerApi('debug-spectrum', 'POST', { frequency, gain: value });
       default: console.error('Unknown command:', action);
     }
@@ -239,7 +234,6 @@ export function useScannerSocket({ onParallel }: Options = {}) {
           const message = JSON.parse(event.data);
           if (message.type === 'STATE_UPDATE') {
             const newState = message.payload as ScannerState;
-            onParallelRef.current?.(!!(newState.parallelChannels && newState.parallelChannels.length > 0));
             setScannerState(newState);
           } else if (message.type === 'NEW_LOG') {
             const newEntry = message.payload as CallLog;

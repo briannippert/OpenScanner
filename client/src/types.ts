@@ -23,6 +23,11 @@ export interface ParallelChannelState {
     targetID?: number;
     speakerChain?: string;
     currentTone?: string;
+    /**
+     * Measured frequency error of the received carrier, in Hz, or absent when idle. Over a
+     * transmitter known to be on-frequency this is the dongle's crystal error.
+     */
+    measuredOffsetHz?: number;
 }
 
 export interface ScannerState {
@@ -37,6 +42,7 @@ export interface ScannerState {
     isAudioStreaming?: boolean;
     squelch?: number;
     gain?: number;
+    ppm?: number;
     rfSpectrum?: { frequency: number, db: number }[];
     gps?: {
         lat: number;

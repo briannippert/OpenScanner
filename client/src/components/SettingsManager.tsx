@@ -8,6 +8,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import FormDialog from './common/FormDialog';
 import { apiFetch } from './common/apiBase';
+import type { ScannerState } from '../types';
 
 interface StorageInfo {
     recordingsBytes: number;
@@ -28,7 +29,31 @@ interface Props {
     open: boolean;
     onClose: () => void;
     onRecordingsDeleted?: () => void;
+    /** Live scanner state, for the measured frequency offset shown beside the PPM setting. */
+    scannerState?: ScannerState;
 }
+
+/**
+ * Turns the live per-channel frequency error into a ppm figure the user can act on.
+ *
+ * Only parallel FastScan measures this — it comes from the channelizer's FM discriminator DC,
+ * and the single-channel path hands demodulation to rtl_fm instead. Picks the strongest active
+ * channel, since a weak one's discriminator reading is mostly noise.
+ */
+const measuredPpm = (state?: ScannerState): { offsetHz: number; ppm: number; label: string } | null => {
+    const active = (state?.parallelChannels ?? [])
+        .filter(pc => pc.isActive && pc.measuredOffsetHz != null && pc.channel.frequency > 0)
+        .sort((a, b) => b.signalStrength - a.signalStrength);
+    if (active.length === 0) return null;
+
+    const best = active[0];
+    const offsetHz = best.measuredOffsetHz!;
+    return {
+        offsetHz,
+        ppm: offsetHz / (best.channel.frequency * 1e6) * 1e6,
+        label: best.channel.alphaTag || `${best.channel.frequency} MHz`,
+    };
+};
 
 const formatBytes = (bytes: number): string => {
     if (!bytes || bytes < 0) return '0 B';
@@ -81,7 +106,7 @@ const Row: React.FC<{ label: string; description?: string; control: React.ReactN
     </Box>
 );
 
-const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }) => {
+const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted, scannerState }) => {
     const [settings, setSettings] = useState<Record<string, string>>({});
     const [systemInfo, setSystemInfo] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(false);
@@ -230,6 +255,33 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
             console.error("Failed to update setting", error);
         }
     };
+
+    /**
+     * SDR tuning goes through the scanner endpoints rather than /api/settings, because the
+     * device has to persist *and* apply the value — gain and ppm are baked into the rtl_sdr
+     * arguments, so the server restarts an active capture to pick them up.
+     */
+    const handleSdrChange = async (key: 'SdrGain' | 'SdrPpm', raw: string) => {
+        setSettings(prev => ({ ...prev, [key]: raw }));
+        const value = parseFloat(raw);
+        if (!Number.isFinite(value)) return;
+
+        const path = key === 'SdrGain' ? 'gain' : 'ppm';
+        try {
+            await apiFetch(`/api/scanner/${path}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value })
+            });
+        } catch (error) {
+            console.error("Failed to update SDR tuning", error);
+        }
+    };
+
+    // The measured error is relative to how we are *currently* tuned, so applying it means
+    // adding it to the correction already in force, not replacing it.
+    const measured = measuredPpm(scannerState);
+    const currentPpm = parseFloat(settings['SdrPpm'] ?? '') || 0;
 
     // Define known settings with friendly names
     const knownSettings: { key: string; label: string; description: string }[] = [
@@ -387,6 +439,56 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
                                     )}
                                 </>
                             )}
+                        </Section>
+
+                        <Section title="SDR Tuning">
+                            <Row
+                                label="Tuner Gain"
+                                description="RTL-SDR tuner gain in dB. 0 uses the tuner's own AGC, which suits most setups; raise it manually if weak signals are being missed, lower it if a strong local transmitter is desensitising the front end."
+                                control={
+                                    <TextField
+                                        type="number"
+                                        size="small"
+                                        variant="outlined"
+                                        style={{ width: '90px', minWidth: '90px' }}
+                                        value={settings['SdrGain'] ?? ''}
+                                        placeholder="0"
+                                        inputProps={{ min: 0, max: 50, step: 0.1 }}
+                                        onChange={(e) => handleSdrChange('SdrGain', e.target.value)}
+                                    />
+                                }
+                            />
+                            <Row
+                                label="Frequency Correction"
+                                description={
+                                    measured
+                                        ? `Measured on ${measured.label}: ${(measured.offsetHz / 1000).toFixed(2)} kHz off, about ${(currentPpm + measured.ppm).toFixed(1)} ppm. Apply it while a strong, known-accurate signal is up.`
+                                        : 'Crystal error in ppm. Dongles without a TCXO are commonly 20–60 ppm off, which at VHF is several kHz — enough to push a narrowband channel out of the passband and break digital decoding. Open this while a strong signal is being received in parallel scan and the measured value appears here.'
+                                }
+                                control={
+                                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                                        {measured && (
+                                            <Button
+                                                size="small"
+                                                variant="outlined"
+                                                onClick={() => handleSdrChange('SdrPpm', (currentPpm + measured.ppm).toFixed(1))}
+                                            >
+                                                Apply
+                                            </Button>
+                                        )}
+                                        <TextField
+                                            type="number"
+                                            size="small"
+                                            variant="outlined"
+                                            style={{ width: '90px', minWidth: '90px' }}
+                                            value={settings['SdrPpm'] ?? ''}
+                                            placeholder="0"
+                                            inputProps={{ min: -200, max: 200, step: 0.1 }}
+                                            onChange={(e) => handleSdrChange('SdrPpm', e.target.value)}
+                                        />
+                                    </Box>
+                                }
+                            />
                         </Section>
 
                         <Section title="Integrations">

@@ -21,6 +21,9 @@ public abstract class DSDBase : IDecoder
     public string? InputSource { get; set; }
 
     /// <inheritdoc />
+    public SdrTuning Tuning { get; set; } = new();
+
+    /// <inheritdoc />
     public bool CanFeedInput => InputSource != null;
 
     protected DSDBase(ILogger logger)
