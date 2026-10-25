@@ -11,6 +11,7 @@ public class ToneDetector
 {
     private readonly IDatabase _db;
     private readonly ILogger<ToneDetector> _logger;
+    private readonly TimeProvider _time;
     private List<FireToneSet> _activeToneSets = new();
     private readonly int _sampleRate = 48000;
     
@@ -54,9 +55,21 @@ public class ToneDetector
     /// <param name="db">Database interface.</param>
     /// <param name="logger">Logger instance.</param>
     public ToneDetector(IDatabase db, ILogger<ToneDetector> logger)
+        : this(db, logger, TimeProvider.System)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ToneDetector"/> class with an explicit clock.
+    /// </summary>
+    /// <param name="db">Database interface.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="time">Clock used to time tone durations.</param>
+    public ToneDetector(IDatabase db, ILogger<ToneDetector> logger, TimeProvider time)
     {
         _db = db;
         _logger = logger;
+        _time = time;
         ReloadTones();
     }
 
@@ -88,7 +101,7 @@ public class ToneDetector
             samples[i] = s / 32768f;
         }
 
-        var now = DateTime.UtcNow;
+        var now = _time.GetUtcNow().UtcDateTime;
 
         // Check for active tones in this chunk
         // Standard FTO: Tone A (approx 1s) followed by Tone B (approx 3s)
@@ -111,13 +124,13 @@ public class ToneDetector
                 {
                     _logger.LogInformation($"ToneDetector: Potential Tone A for {toneSet.Name} ({toneSet.FrequencyA} Hz)");
                     _detectedToneAName = toneSet.Name;
-                    _toneADetectedTime = DateTime.UtcNow;
+                    _toneADetectedTime = now;
                     _lastToneAFreq = toneSet.FrequencyA;
                 }
             }
             
             // Check Tone B if Tone A was recently detected
-            if (_detectedToneAName == toneSet.Name && (DateTime.UtcNow - _toneADetectedTime).TotalSeconds < 2.0)
+            if (_detectedToneAName == toneSet.Name && (now - _toneADetectedTime).TotalSeconds < 2.0)
             {
                 bool toneBPresent = IsFrequencyPresent(samples, toneSet.FrequencyB);
                 if (toneBPresent && Math.Abs(toneSet.FrequencyB - _lastToneAFreq) > 5) // ensure it's not the same tone
@@ -130,7 +143,7 @@ public class ToneDetector
         }
 
         // Cleanup stale Tone A detections
-        if (_detectedToneAName != null && (DateTime.UtcNow - _toneADetectedTime).TotalSeconds > 3.0)
+        if (_detectedToneAName != null && (now - _toneADetectedTime).TotalSeconds > 3.0)
         {
             _detectedToneAName = null;
         }

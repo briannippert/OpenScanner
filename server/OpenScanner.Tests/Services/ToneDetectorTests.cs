@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using OpenScanner.Server;
 using OpenScanner.Server.Models;
@@ -13,6 +14,9 @@ public class ToneDetectorTests
     private readonly Mock<IDatabase> _dbMock = new();
     private readonly Mock<ILogger<ToneDetector>> _loggerMock = new();
 
+    // Tone timing runs on a fake clock so results don't depend on how busy the machine is.
+    private readonly FakeTimeProvider _time = new();
+
     [Fact]
     public async Task Detects_TwoTone_Sequence()
     {
@@ -20,7 +24,7 @@ public class ToneDetectorTests
         var toneSet = new FireToneSet { Name = "Test Station", FrequencyA = 600, FrequencyB = 800 };
         _dbMock.Setup(db => db.GetAllFireTonesAsync()).ReturnsAsync(new[] { toneSet });
 
-        var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object);
+        var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object, _time);
         // Wait for async reload — poll to avoid a fixed delay that can be too short in CI
         var deadline = DateTime.UtcNow.AddSeconds(2);
         while (detector.ToneCount == 0 && DateTime.UtcNow < deadline)
@@ -50,7 +54,7 @@ public class ToneDetectorTests
         var toneSet = new FireToneSet { Name = "Test Station", FrequencyA = 600, FrequencyB = 800 };
         _dbMock.Setup(db => db.GetAllFireTonesAsync()).ReturnsAsync(new[] { toneSet });
 
-        var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object);
+        var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object, _time);
         var deadline = DateTime.UtcNow.AddSeconds(2);
         while (detector.ToneCount == 0 && DateTime.UtcNow < deadline)
             await Task.Delay(10);
@@ -74,7 +78,7 @@ public class ToneDetectorTests
         var toneSet = new FireToneSet { Name = "Test Station", FrequencyA = 600, FrequencyB = 800 };
         _dbMock.Setup(db => db.GetAllFireTonesAsync()).ReturnsAsync(new[] { toneSet });
 
-        var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object);
+        var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object, _time);
         var deadline = DateTime.UtcNow.AddSeconds(2);
         while (detector.ToneCount == 0 && DateTime.UtcNow < deadline)
             await Task.Delay(10);
@@ -88,7 +92,7 @@ public class ToneDetectorTests
 
         // Act
         detector.ProcessAudio(toneA); // Tone A detected
-        await Task.Delay(3100); 
+        _time.Advance(TimeSpan.FromSeconds(3.1));
         detector.ProcessAudio(toneB); // Should be ignored as A expired
 
         // Assert
@@ -102,7 +106,7 @@ public class ToneDetectorTests
         var toneSet = new FireToneSet { Name = "Single Station", FrequencyA = 1010, FrequencyB = 0 };
         _dbMock.Setup(db => db.GetAllFireTonesAsync()).ReturnsAsync(new[] { toneSet });
 
-        var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object);
+        var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object, _time);
         var reload = DateTime.UtcNow.AddSeconds(2);
         while (detector.ToneCount == 0 && DateTime.UtcNow < reload)
             await Task.Delay(10);
@@ -111,13 +115,12 @@ public class ToneDetectorTests
         FireToneSet? detected = null;
         detector.OnToneDetected += (t) => { detected = t; fireCount++; };
 
-        // Feed 100ms tone chunks continuously for ~1.5s, mimicking live audio arrival.
+        // Feed 100ms tone chunks continuously for 1.6s, mimicking live audio arrival.
         var chunk = GenerateSineWave(1010, 0.1, 48000);
-        var deadline = DateTime.UtcNow.AddSeconds(1.6);
-        while (DateTime.UtcNow < deadline)
+        for (int i = 0; i < 16; i++)
         {
             detector.ProcessAudio(chunk);
-            await Task.Delay(80);
+            _time.Advance(TimeSpan.FromMilliseconds(100));
         }
 
         Assert.NotNull(detected);
@@ -132,7 +135,7 @@ public class ToneDetectorTests
         var toneSet = new FireToneSet { Name = "Single Station", FrequencyA = 1010, FrequencyB = 0 };
         _dbMock.Setup(db => db.GetAllFireTonesAsync()).ReturnsAsync(new[] { toneSet });
 
-        var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object);
+        var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object, _time);
         var reload = DateTime.UtcNow.AddSeconds(2);
         while (detector.ToneCount == 0 && DateTime.UtcNow < reload)
             await Task.Delay(10);
