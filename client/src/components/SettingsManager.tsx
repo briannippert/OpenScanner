@@ -90,6 +90,7 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
     const [deleting, setDeleting] = useState(false);
     const [remoteModels, setRemoteModels] = useState<RemoteModel[]>([]);
     const [remoteHealth, setRemoteHealth] = useState<RemoteHealth>({ status: 'idle', message: '' });
+    const [ntfyTest, setNtfyTest] = useState<RemoteHealth>({ status: 'idle', message: '' });
 
     const backend = settings['TranscriptionBackend'] || 'local';
     const remoteUrl = settings['RemoteTranscriptionUrl'] || '';
@@ -143,6 +144,19 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
             }
         } catch {
             setRemoteHealth({ status: 'error', message: 'Server unreachable' });
+        }
+    };
+
+    const sendNtfyTest = async () => {
+        setNtfyTest({ status: 'testing', message: 'Sending…' });
+        try {
+            const res = await apiFetch('/api/settings/ntfy/test', { method: 'POST' });
+            const data = await res.json();
+            setNtfyTest(res.ok && data.ok
+                ? { status: 'ok', message: data.message || 'Sent' }
+                : { status: 'error', message: data.message || 'Send failed' });
+        } catch {
+            setNtfyTest({ status: 'error', message: 'Send failed' });
         }
     };
 
@@ -387,6 +401,76 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted }
                                     )}
                                 </>
                             )}
+                        </Section>
+
+                        <Section title="Notifications">
+                            <Row
+                                label="Push tone-outs via ntfy"
+                                description="Send a phone notification for each fire tone-out, with the dispatch transcript as the message."
+                                control={
+                                    <Switch
+                                        checked={settings['NtfyEnabled'] === 'true'}
+                                        onChange={() => handleToggle('NtfyEnabled', settings['NtfyEnabled'] || 'false')}
+                                    />
+                                }
+                            />
+                            <Row
+                                label="Server URL"
+                                description="Leave blank to use the public ntfy.sh server."
+                                control={
+                                    <TextField
+                                        size="small"
+                                        variant="outlined"
+                                        placeholder="https://ntfy.sh"
+                                        style={{ width: '240px' }}
+                                        value={settings['NtfyServerUrl'] || ''}
+                                        onChange={(e) => handleValueChange('NtfyServerUrl', e.target.value)}
+                                    />
+                                }
+                            />
+                            <Row
+                                label="Topic"
+                                description="Subscribe to this topic in the ntfy app. ntfy.sh topics are public, so pick a hard-to-guess name."
+                                control={
+                                    <TextField
+                                        size="small"
+                                        variant="outlined"
+                                        placeholder="e.g. station1-tones-x7q2"
+                                        style={{ width: '240px' }}
+                                        value={settings['NtfyTopic'] || ''}
+                                        onChange={(e) => handleValueChange('NtfyTopic', e.target.value)}
+                                    />
+                                }
+                            />
+                            <Row
+                                label="Access Token"
+                                description={
+                                    ntfyTest.status === 'ok' ? `✓ ${ntfyTest.message}`
+                                    : ntfyTest.status === 'error' ? `✗ ${ntfyTest.message}`
+                                    : 'Optional, for protected topics or self-hosted servers.'
+                                }
+                                control={
+                                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                                        <TextField
+                                            size="small"
+                                            variant="outlined"
+                                            type="password"
+                                            placeholder="tk_…"
+                                            style={{ width: '160px' }}
+                                            value={settings['NtfyToken'] || ''}
+                                            onChange={(e) => handleValueChange('NtfyToken', e.target.value)}
+                                        />
+                                        <Button
+                                            size="small"
+                                            variant="outlined"
+                                            onClick={sendNtfyTest}
+                                            disabled={!settings['NtfyTopic'] || ntfyTest.status === 'testing'}
+                                        >
+                                            {ntfyTest.status === 'testing' ? '…' : 'Send test'}
+                                        </Button>
+                                    </Box>
+                                }
+                            />
                         </Section>
 
                         <Section title="Integrations">
