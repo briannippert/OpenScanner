@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using OpenScanner.Server.Interfaces;
+using OpenScanner.Server.Services;
 
 namespace OpenScanner.Server.Controllers;
 
@@ -13,11 +14,13 @@ public class SettingsController : ControllerBase
 {
     private readonly IDatabase _db;
     private readonly ITranscriptionService _transcription;
+    private readonly NtfyNotificationService _ntfy;
 
-    public SettingsController(IDatabase db, ITranscriptionService transcription)
+    public SettingsController(IDatabase db, ITranscriptionService transcription, NtfyNotificationService ntfy)
     {
         _db = db;
         _transcription = transcription;
+        _ntfy = ntfy;
     }
 
     /// <summary>
@@ -50,5 +53,17 @@ public class SettingsController : ControllerBase
         }
 
         return Ok();
+    }
+
+    /// <summary>
+    /// Sends a test push notification using the saved ntfy settings.
+    /// </summary>
+    /// <returns>Whether ntfy accepted it, plus a status or error message.</returns>
+    [HttpPost("ntfy/test")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> TestNtfy()
+    {
+        var (ok, message) = await _ntfy.SendTestAsync();
+        return Ok(new { ok, message });
     }
 }

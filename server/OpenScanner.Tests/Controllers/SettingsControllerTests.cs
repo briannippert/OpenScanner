@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using OpenScanner.Server.Controllers;
+using Microsoft.Extensions.Logging.Abstractions;
 using OpenScanner.Server.Interfaces;
+using OpenScanner.Server.Services;
 using Xunit;
 
 namespace OpenScanner.Tests.Controllers;
@@ -16,7 +18,9 @@ public class SettingsControllerTests
     {
         _dbMock = new Mock<IDatabase>();
         _transcriptionMock = new Mock<ITranscriptionService>();
-        _controller = new SettingsController(_dbMock.Object, _transcriptionMock.Object);
+        var ntfy = new NtfyNotificationService(Mock.Of<IRadioSource>(), _transcriptionMock.Object, _dbMock.Object,
+            Mock.Of<IHttpClientFactory>(), TimeProvider.System, NullLogger<NtfyNotificationService>.Instance);
+        _controller = new SettingsController(_dbMock.Object, _transcriptionMock.Object, ntfy);
     }
 
     [Fact]

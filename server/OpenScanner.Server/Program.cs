@@ -49,6 +49,8 @@ builder.Services.AddSingleton<IRecordingService, RecordingService>();
 builder.Services.AddSingleton<IChannelService, ChannelService>();
 builder.Services.AddSingleton<RecordingCleanupService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RecordingCleanupService>());
+builder.Services.AddSingleton<NtfyNotificationService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<NtfyNotificationService>());
 
 var radioProvider = builder.Configuration["Radio:Provider"] ?? "RTL-SDR";
 if (radioProvider == "Mock")
