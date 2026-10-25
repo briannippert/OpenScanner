@@ -30,7 +30,10 @@ public class P25 : DSDBase
         string rtlMode = "fm";
         string dsdArgs = "-f1"; // P25 Phase 1
 
-        string source = InputSource ?? $"{PlatformTools.RtlFm} -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 -M {rtlMode} -";
+        // -l 0: no squelch. rtl_fm's squelch gates the sample stream, and dsd-fme needs a
+        // continuous one to hold C4FM symbol sync — chopping it costs the opening syllables of
+        // every call and breaks marginal signals outright.
+        string source = InputSource ?? $"{PlatformTools.RtlFm} -f {channel.Frequency}M -s {captureRate} -r {outputRate} {Tuning.RtlFmArgs()} -l 0 -M {rtlMode} -";
 
         return $"{PlatformTools.Stdbuf("-o0")}{source} | {PlatformTools.Stdbuf("-i0 -o0")}{PlatformTools.DsdFme} {dsdArgs} -i - -o - -s {outputRate} | {PlatformTools.Stdbuf("-o0")}{PlatformTools.Ffmpeg} -f s16le -ar {dsdOutputRate} -ac 1 -probesize 32 -analyzeduration 0 -i - -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
     }

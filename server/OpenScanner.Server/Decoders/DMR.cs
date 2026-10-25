@@ -32,7 +32,10 @@ public class DMR : DSDBase
         string rtlMode = "fm";
         string dsdArgs = "-fs -ma -V 1"; // DMR TDMA Simplex, auto modulation, slot 1
 
-        string source = InputSource ?? $"{PlatformTools.RtlFm} -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 45 -p 0 -M {rtlMode} -";
+        // -l 0: no squelch, for the same reason as P25 — dsd-fme needs an unbroken sample
+        // stream to hold TDMA sync. This was already implicit (rtl_fm defaults to 0); it is
+        // now explicit so it cannot be "tidied" back into a squelched pipeline.
+        string source = InputSource ?? $"{PlatformTools.RtlFm} -f {channel.Frequency}M -s {captureRate} -r {outputRate} {Tuning.RtlFmArgs()} -l 0 -M {rtlMode} -";
 
         return $"{PlatformTools.Stdbuf("-o0")}{source} | {PlatformTools.Stdbuf("-i0 -o0")}{PlatformTools.DsdFme} {dsdArgs} -i - -o - -s {outputRate} | {PlatformTools.Stdbuf("-o0")}{PlatformTools.Ffmpeg} -f s16le -ar {dsdOutputRate} -ac 2 -probesize 32 -analyzeduration 0 -i - -af volume=2.0 -f s16le -ar 48000 -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
     }

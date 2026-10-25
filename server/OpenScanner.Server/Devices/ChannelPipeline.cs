@@ -37,10 +37,17 @@ public class ChannelPipeline : IDisposable
     private bool _isActive;
     private DateTime _lastActivityTime = DateTime.MinValue;
 
-    // Analog squelch uses pre-demod IQ power from the channelizer.
-    // The threshold is calibrated against the IQ magnitude dB scale where
-    // noise floor sits around -35 to -45 dB and a carrier reads -5 to -15 dB.
-    private const double AnalogSquelchThresholdDb = -28.0;
+    // Analog squelch runs off the channelizer's in-channel power (post channel filter,
+    // pre-demodulation), measured as SNR against a self-calibrating noise floor. The
+    // configured threshold arrives via the constructor; before 2026 it was stored and then
+    // ignored in favour of a hardcoded absolute constant, so the squelch setting had no
+    // effect in parallel FastScan at all — and an absolute threshold could not have worked
+    // across gain settings anyway.
+    private double? _noiseFloorDb;
+    // Adapt quickly while the channel is quiet, barely at all while a signal is up, so a long
+    // transmission cannot drag its own floor up and squelch itself off.
+    private const double NoiseFloorAttackQuiet = 0.05;
+    private const double NoiseFloorAttackActive = 0.002;
 
     // Digital channels are marked inactive after this long without voice audio.
     private const double DigitalHangSeconds = 2.0;
@@ -64,8 +71,15 @@ public class ChannelPipeline : IDisposable
     /// <summary>Whether this channel currently has active audio/voice.</summary>
     public bool IsActive => _isActive;
 
-    /// <summary>Latest measured signal level in dB (IQ power before demod, updated every ~100ms).</summary>
+    /// <summary>Latest measured signal level in dB (in-channel power before demod, updated every ~100ms).</summary>
     public double SignalLevelDb => _channelizer.SignalPowerDb;
+
+    /// <summary>
+    /// Measured frequency error of the received carrier, in Hz. Over a transmitter known to be
+    /// on-frequency this is the dongle's crystal error, which is what makes ppm calibratable
+    /// from the UI instead of guessed. Null until a signal has been present.
+    /// </summary>
+    public double? MeasuredOffsetHz => _isActive ? _channelizer.FrequencyOffsetHz : null;
 
     /// <summary>The channel this pipeline is assigned to.</summary>
     public Channel Channel => _channel;
@@ -79,7 +93,8 @@ public class ChannelPipeline : IDisposable
     /// <param name="centerFreqMhz">SDR center frequency in MHz</param>
     /// <param name="decoderFactory">Factory for creating decoders</param>
     /// <param name="logger">Logger instance</param>
-    /// <param name="squelchDb">Squelch threshold in dB (for analog modes)</param>
+    /// <param name="loggerFactory">Factory for per-channel sub-loggers (MDC1200 decoder)</param>
+    /// <param name="squelchDb">Squelch threshold, in dB of SNR above the noise floor (analog modes)</param>
     public ChannelPipeline(
         Channel channel,
         int inputSampleRate,
@@ -100,7 +115,9 @@ public class ChannelPipeline : IDisposable
         double offsetHz = (channel.Frequency - centerFreqMhz) * 1e6;
 
         bool isAm = channel.Mode?.ToUpper() == "AM";
-        _channelizer = new Channelizer(inputSampleRate, outputSampleRate, offsetHz, isAm);
+        var (channelCutoffHz, deviationHz) = FilterProfile(channel.Mode);
+        _channelizer = new Channelizer(
+            inputSampleRate, outputSampleRate, offsetHz, isAm, channelCutoffHz, deviationHz);
 
         // Pre-allocate audio buffer (generous size for typical IQ chunk of 65536 bytes)
         _audioBuffer = new byte[_channelizer.MaxOutputBytes(65536 * 2)];
@@ -176,7 +193,11 @@ public class ChannelPipeline : IDisposable
         {
             // Analog mode: channelizer output IS the audio.
             // Use pre-demod IQ power for squelch (post-demod FM noise is always loud).
-            bool hasSignal = _channelizer.SignalPowerDb > AnalogSquelchThresholdDb;
+            double powerDb = _channelizer.SignalPowerDb;
+            _noiseFloorDb ??= powerDb;
+            bool hasSignal = powerDb - _noiseFloorDb.Value > _squelchDb;
+            _noiseFloorDb += (hasSignal ? NoiseFloorAttackActive : NoiseFloorAttackQuiet)
+                             * (powerDb - _noiseFloorDb.Value);
 
             if (hasSignal)
             {
@@ -235,6 +256,25 @@ public class ChannelPipeline : IDisposable
         }
         return false;
     }
+
+    /// <summary>
+    /// Channel filter cutoff (one-sided, Hz) and peak transmitter deviation for a mode.
+    ///
+    /// The digital modes are pinned by standard: P25 and DMR are 12.5 kHz channels, so 6.25 kHz
+    /// of cutoff, with C4FM peaking at 1800 Hz and DMR 4FSK at 1944 Hz. Analog FM is deliberately
+    /// left at 12.5 kHz / 5 kHz rather than assuming a narrowbanded system — over-narrowing a
+    /// 25 kHz channel would clip the audio, which is a worse failure than passing extra noise.
+    /// Anything unrecognised gets no channel filter, preserving the pre-2026 behaviour.
+    /// </summary>
+    private static (double CutoffHz, double DeviationHz) FilterProfile(string? mode) =>
+        mode?.ToUpperInvariant() switch
+        {
+            "P25" => (6250, 1800),
+            "DMR" => (6250, 1944),
+            "NFM" or "FM" => (12500, 5000),
+            "AM" => (5000, 5000),
+            _ => (0, 5000),
+        };
 
     /// <summary>
     /// Whether this mode requires a decoder process (dsd-fme).

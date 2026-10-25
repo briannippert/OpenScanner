@@ -11,6 +11,12 @@ public interface IDecoder
     string? InputSource { get; set; }
 
     /// <summary>
+    /// SDR tuning applied to the decoder's own rtl_fm capture. Ignored when
+    /// <see cref="InputSource"/> is set, since the caller is then supplying samples itself.
+    /// </summary>
+    SdrTuning Tuning { get; set; }
+
+    /// <summary>
     /// Whether this decoder supports being fed audio via <see cref="FeedInput"/>.
     /// True when InputSource is set (stdin-based feeding mode).
     /// </summary>
