@@ -544,7 +544,8 @@ public class RtlDevice : BackgroundService, IRadioSource
     private async Task RunScannerLoop(List<ScanBank> banks, int sampleRate, CancellationToken token)
     {
         int bankIndex = 0;
-        
+        int failures = 0;
+
         while (!token.IsCancellationRequested)
         {
             if (banks.Count == 0) break;
@@ -559,7 +560,8 @@ public class RtlDevice : BackgroundService, IRadioSource
                 ? _channelService.Channels.FirstOrDefault(c => Math.Abs(c.Frequency - bank.Frequencies[0]) < 0.001)
                 : null;
             UpdateState(_state with { CurrentFrequency = bankDisplayFreq, CurrentChannel = bankDisplayChannel });
-            
+
+            long bytes = 0;
             if (banks.Count > 1)
             {
                 // Multiple banks: dwell on each before hopping to the next
@@ -568,7 +570,7 @@ public class RtlDevice : BackgroundService, IRadioSource
 
                 try
                 {
-                    await RunSingleScanSegment(bank.CenterFrequency, sampleRate, dwellCts.Token);
+                    bytes = await RunSingleScanSegment(bank.CenterFrequency, sampleRate, dwellCts.Token);
                 }
                 catch (OperationCanceledException)
                 {
@@ -580,12 +582,28 @@ public class RtlDevice : BackgroundService, IRadioSource
                 // Single bank: run continuously until signal lock or manual stop
                 try
                 {
-                    await RunSingleScanSegment(bank.CenterFrequency, sampleRate, token);
+                    bytes = await RunSingleScanSegment(bank.CenterFrequency, sampleRate, token);
                 }
                 catch (OperationCanceledException) { }
             }
-            
+
             if (token.IsCancellationRequested) break;
+
+            // No data at all means rtl_sdr couldn't reach the dongle (e.g. it dropped off
+            // USB). Back off instead of relaunching it in a tight loop, and keep retrying.
+            if (bytes > 0)
+            {
+                failures = 0;
+            }
+            else
+            {
+                failures++;
+                var delay = ReconnectDelay(failures);
+                _logger.LogWarning($"SDR delivered no data; reconnecting in {delay.TotalSeconds:F0}s (attempt {failures + 1})");
+                System.Threading.Interlocked.Increment(ref _restartCount);
+                try { await Task.Delay(delay, token); }
+                catch (OperationCanceledException) { break; }
+            }
             
             bankIndex = (bankIndex + 1) % banks.Count;
         }
@@ -667,9 +685,49 @@ public class RtlDevice : BackgroundService, IRadioSource
         // Build initial parallel channel states for the UI
         UpdateParallelState();
 
-        // Start rtl_sdr wideband capture and distribute IQ to all pipelines
-        await Task.Delay(250, token); // USB settle time
+        // Keep the capture alive. If rtl_sdr exits or stalls (the dongle dropped off USB,
+        // say), relaunch it with backoff instead of leaving the scanner silently idle.
+        // The channel pipelines are kept across relaunches.
+        int failures = 0;
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await Task.Delay(250, token); // USB settle time
+                long bytes = await RunParallelCapture(bank, sampleRate, token);
+                if (token.IsCancellationRequested) break;
 
+                // A capture that delivered data was a working device that later dropped:
+                // retry promptly. Back off only while the device keeps failing to come up.
+                failures = bytes > 0 ? 0 : failures + 1;
+                var delay = ReconnectDelay(failures);
+                UpdateState(_state with { IsHardwareConnected = false });
+                _logger.LogWarning($"SDR capture ended after {bytes} bytes; reconnecting in {delay.TotalSeconds:F0}s (attempt {failures + 1})");
+                System.Threading.Interlocked.Increment(ref _restartCount);
+                await Task.Delay(delay, token);
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            // A new scan may already have installed its own pipelines; only tear down ours.
+            if (ReferenceEquals(_parallelPipelines, pipelines))
+                StopParallelPipelines();
+        }
+    }
+
+    /// <summary>
+    /// Backoff between SDR reconnect attempts: 1s, 2s, 4s ... capped at 30s.
+    /// </summary>
+    internal static TimeSpan ReconnectDelay(int consecutiveFailures) =>
+        TimeSpan.FromSeconds(Math.Min(30, 1 << Math.Min(consecutiveFailures, 5)));
+
+    /// <summary>
+    /// Runs one rtl_sdr wideband capture for parallel scan, feeding every channel pipeline
+    /// until the process exits, stalls, or the token is cancelled. Returns the bytes read.
+    /// </summary>
+    private async Task<long> RunParallelCapture(ScanBank bank, int sampleRate, CancellationToken token)
+    {
         var binPath = PlatformTools.RtlSdr;
         var args = $"-f {bank.CenterFrequency:F3}M -s {sampleRate} -g 20 -b 1 -";
         _logger.LogInformation($"Parallel Scanner: {binPath} {args}");
@@ -682,38 +740,34 @@ public class RtlDevice : BackgroundService, IRadioSource
             CreateNoWindow = true
         };
 
+        Process? process;
         try
         {
-            _scannerProcess = Process.Start(psi);
-            UpdateState(_state with { IsHardwareConnected = true });
+            process = Process.Start(psi);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to start rtl_sdr for parallel scan");
-            UpdateState(_state with { IsHardwareConnected = false });
-            return;
+            return 0;
         }
 
-        if (_scannerProcess == null) return;
+        if (process == null) return 0;
+        _scannerProcess = process;
 
-        // Monitor stderr for hardware messages
+        // Monitor stderr for hardware messages. A missing device makes rtl_sdr exit on its
+        // own; the caller's reconnect loop handles that, so don't cancel the scan here.
         _ = Task.Run(async () =>
         {
             try
             {
-                while (!token.IsCancellationRequested && !_scannerProcess.HasExited)
+                while (!token.IsCancellationRequested && !process.HasExited)
                 {
-                    var line = await _scannerProcess.StandardError.ReadLineAsync(token);
+                    var line = await process.StandardError.ReadLineAsync(token);
                     if (string.IsNullOrEmpty(line)) continue;
                     _logger.LogInformation($"Scanner HW: {line}");
 
-                    if (line.Contains("Found") || line.Contains("Using device"))
-                        UpdateState(_state with { IsHardwareConnected = true });
                     if (line.Contains("No supported devices") || line.Contains("Failed to open"))
-                    {
                         UpdateState(_state with { IsHardwareConnected = false });
-                        _scanCts?.Cancel();
-                    }
                 }
             }
             catch (OperationCanceledException) { }
@@ -723,7 +777,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         // Main IQ distribution loop
         var bufferSize = 16384 * 4;
         var buffer = new byte[bufferSize];
-        var baseStream = _scannerProcess.StandardOutput.BaseStream;
+        var baseStream = process.StandardOutput.BaseStream;
         var lastFftUpdate = DateTime.MinValue;
         var lastMeterUpdate = DateTime.MinValue;
         var segmentStartTime = DateTime.UtcNow;
@@ -731,9 +785,9 @@ public class RtlDevice : BackgroundService, IRadioSource
         // FFT parameters for spectrum display (reuse existing logic)
         int fftScanRate = sampleRate; // Use actual sample rate for FFT calculations
 
+        long totalBytesRead = 0;
         try
         {
-            long totalBytesRead = 0;
             while (!token.IsCancellationRequested)
             {
                 // Watchdog
@@ -744,9 +798,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                 var completedTask = await Task.WhenAny(readTask, timeoutTask);
                 if (completedTask == timeoutTask)
                 {
-                    bool isAlive = _scannerProcess != null && !_scannerProcess.HasExited;
-                    _logger.LogWarning($"Parallel scanner stalled. Process alive: {isAlive}. Restarting...");
-                    System.Threading.Interlocked.Increment(ref _restartCount);
+                    _logger.LogWarning($"Parallel scanner stalled. Process alive: {!process.HasExited}.");
                     break;
                 }
 
@@ -754,6 +806,8 @@ public class RtlDevice : BackgroundService, IRadioSource
                 var bytesRead = await readTask;
                 if (bytesRead <= 0) break;
 
+                if (totalBytesRead == 0)
+                    UpdateState(_state with { IsHardwareConnected = true });
                 totalBytesRead += bytesRead;
                 System.Threading.Interlocked.Add(ref _totalBytesRead, bytesRead);
 
@@ -797,13 +851,11 @@ public class RtlDevice : BackgroundService, IRadioSource
         catch (Exception ex) { _logger.LogError(ex, "Error in parallel scan loop"); }
         finally
         {
-            try { _scannerProcess?.Kill(true); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to kill scanner process"); }
-            _scannerProcess = null;
-            StopParallelPipelines();
+            try { process.Kill(true); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to kill scanner process"); }
+            process.Dispose();
+            if (ReferenceEquals(_scannerProcess, process)) _scannerProcess = null;
         }
-
-        if (!token.IsCancellationRequested && _state.Status == "SCANNING")
-            UpdateState(_state with { Status = "IDLE", ParallelChannels = null });
+        return totalBytesRead;
     }
 
     /// <summary>
@@ -1054,7 +1106,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         UpdateState(_state with { ParallelChannels = states });
     }
 
-    private async Task RunSingleScanSegment(double centerFreqMhz, int sampleRate, CancellationToken token)
+    private async Task<long> RunSingleScanSegment(double centerFreqMhz, int sampleRate, CancellationToken token)
     {
         // Brief delay to allow the previous rtl_sdr process to fully release the USB device
         await Task.Delay(250, token);
@@ -1084,10 +1136,10 @@ public class RtlDevice : BackgroundService, IRadioSource
         {
              _logger.LogError(ex, "Failed to start rtl_sdr scanner process");
              UpdateState(_state with { IsHardwareConnected = false });
-             return;
+             return 0;
         }
 
-        if (_scannerProcess == null) return;
+        if (_scannerProcess == null) return 0;
 
         // Monitor Stderr
         _ = Task.Run(async () => {
@@ -1102,11 +1154,9 @@ public class RtlDevice : BackgroundService, IRadioSource
 
                     if (line.Contains("Found") || line.Contains("Using device")) 
                         UpdateState(_state with { IsHardwareConnected = true });
+                    // rtl_sdr exits on its own here; RunScannerLoop backs off and retries.
                     if (line.Contains("No supported devices") || line.Contains("Failed to open"))
-                    {
                         UpdateState(_state with { IsHardwareConnected = false });
-                        _scanCts?.Cancel();
-                    }
                 }
             } 
             catch (OperationCanceledException) { }
@@ -1123,9 +1173,9 @@ public class RtlDevice : BackgroundService, IRadioSource
         var lastUpdate = DateTime.MinValue;
         var segmentStartTime = DateTime.UtcNow;
 
+        long totalBytesRead = 0;
         try
         {
-            long totalBytesRead = 0;
             while (!token.IsCancellationRequested)
             {
                 // Watchdog: If ReadAsync hangs for > 5 seconds, we assume hardware stall
@@ -1138,7 +1188,8 @@ public class RtlDevice : BackgroundService, IRadioSource
                 {
                     bool isAlive = _scannerProcess != null && !_scannerProcess.HasExited;
                     _logger.LogWarning($"Scanner hardware stalled (No data for 5s). Process Alive: {isAlive}, Total Bytes: {totalBytesRead}. Restarting...");
-                    System.Threading.Interlocked.Increment(ref _restartCount);
+                    // A stall with no data at all is counted by RunScannerLoop's backoff.
+                    if (totalBytesRead > 0) System.Threading.Interlocked.Increment(ref _restartCount);
                     break;
                 }
 
@@ -1187,6 +1238,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             try { _scannerProcess?.Kill(true); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to kill scanner process in finally"); }
             _scannerProcess = null;
         }
+        return totalBytesRead;
     }
 
     private List<double> CalculateScanCenters(List<Channel> channels)
