@@ -32,6 +32,8 @@ public class ChannelPipeline : IDisposable
 
     // Pre-allocated output buffer for channelizer (avoids per-call allocation)
     private byte[] _audioBuffer;
+    // Bytes in _audioBuffer produced by ChannelizeIQ and not yet dispatched.
+    private int _pendingAudioBytes;
 
     // Activity state
     private bool _isActive;
@@ -139,9 +141,23 @@ public class ChannelPipeline : IDisposable
     /// <summary>
     /// Process a chunk of wideband IQ data. Channelizes to this channel's frequency,
     /// feeds to the decoder (if digital), and monitors for activity.
+    /// Equivalent to <see cref="ChannelizeIQ"/> followed by <see cref="DispatchAudio"/>.
     /// </summary>
     public void ProcessIQ(byte[] iq, int length)
     {
+        ChannelizeIQ(iq, length);
+        DispatchAudio();
+    }
+
+    /// <summary>
+    /// Compute phase: channelize a chunk of wideband IQ into this pipeline's audio buffer
+    /// without raising any events. Touches only this pipeline's own state, so different
+    /// pipelines may run this concurrently over the same (read-only) IQ buffer.
+    /// Must be followed by <see cref="DispatchAudio"/> before the next chunk.
+    /// </summary>
+    public void ChannelizeIQ(byte[] iq, int length)
+    {
+        _pendingAudioBytes = 0;
         if (_disposed) return;
 
         // Ensure buffer is large enough
@@ -149,8 +165,19 @@ public class ChannelPipeline : IDisposable
         if (_audioBuffer.Length < maxOut)
             _audioBuffer = new byte[maxOut];
 
-        int audioBytes = _channelizer.ProcessIQ(iq, length, _audioBuffer);
-        if (audioBytes <= 0) return;
+        _pendingAudioBytes = _channelizer.ProcessIQ(iq, length, _audioBuffer);
+    }
+
+    /// <summary>
+    /// Dispatch phase: hand the audio produced by the last <see cref="ChannelizeIQ"/> to the
+    /// decoder or squelch/activity logic, raising events. Event handlers share state across
+    /// channels, so callers must invoke this sequentially, one pipeline at a time.
+    /// </summary>
+    public void DispatchAudio()
+    {
+        int audioBytes = _pendingAudioBytes;
+        _pendingAudioBytes = 0;
+        if (_disposed || audioBytes <= 0) return;
 
         bool needsDecoder = NeedsDecoderProcess(_channel.Mode);
 
