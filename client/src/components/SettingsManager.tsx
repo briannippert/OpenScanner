@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { memo, useState, useEffect } from 'react';
 import {
     Button, Switch,
     Box, CircularProgress, TextField,
@@ -683,4 +683,5 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted, 
     );
 };
 
-export default SettingsManager;
+// Memoized: the app re-renders on every scanner state update, which rarely changes these props.
+export default memo(SettingsManager);

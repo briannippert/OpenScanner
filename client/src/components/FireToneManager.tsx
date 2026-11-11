@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { memo, useState } from 'react';
 import {
     Button, List, ListItem, ListItemText, IconButton,
     TextField, Box, Typography,
@@ -146,4 +146,5 @@ const FireToneManager: React.FC<Props> = ({ open, onClose, tones, onSave, onDele
     );
 };
 
-export default FireToneManager;
+// Memoized: the app re-renders on every scanner state update, which rarely changes these props.
+export default memo(FireToneManager);

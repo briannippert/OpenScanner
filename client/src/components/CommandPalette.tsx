@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Box, TextField, List, ListItemButton, Typography, InputAdornment } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import SearchIcon from '@mui/icons-material/Search';
@@ -161,4 +161,5 @@ const CommandPalette: React.FC<Props> = ({
   );
 };
 
-export default CommandPalette;
+// Memoized: the app re-renders on every scanner state update, which rarely changes these props.
+export default memo(CommandPalette);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Button, Typography, Alert, CircularProgress, Chip, Link } from '@mui/material';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -227,4 +227,5 @@ const UpdateManager: React.FC<Props> = ({ open, onClose, log, state, onSeed }) =
   );
 };
 
-export default UpdateManager;
+// Memoized: the app re-renders on every scanner state update, which rarely changes these props.
+export default memo(UpdateManager);

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Box, Card, Grid, Typography, Button, IconButton, Tooltip } from '@mui/material';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import EditIcon from '@mui/icons-material/Edit';
@@ -119,4 +119,5 @@ const ChannelGrid: React.FC<Props> = ({ channels, manualHold, loaded, onEdit, on
   );
 };
 
-export default ChannelGrid;
+// Memoized: the app re-renders on every scanner state update, which rarely changes these props.
+export default memo(ChannelGrid);

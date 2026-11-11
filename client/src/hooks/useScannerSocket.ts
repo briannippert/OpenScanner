@@ -35,6 +35,8 @@ export function useScannerSocket() {
   const [logLoaded, setLogLoaded] = useState(false);
 
   const wsControl = useRef<WebSocket | null>(null);
+  // Raw text of the last STATE_UPDATE applied, to drop exact repeats without parsing them.
+  const lastStateRaw = useRef<string | null>(null);
 
   // Low-level REST helper for scanner control endpoints.
   const scannerApi = useCallback((path: string, method: string, body?: object) =>
@@ -231,6 +233,12 @@ export function useScannerSocket() {
       };
       wsControl.current.onmessage = (event) => {
         try {
+          // The server re-sends scanner state on a timer, often unchanged. Every applied
+          // update re-renders the app, so skip the ones that are byte-for-byte repeats.
+          if (typeof event.data === 'string' && event.data.startsWith('{"type":"STATE_UPDATE"')) {
+            if (event.data === lastStateRaw.current) return;
+            lastStateRaw.current = event.data;
+          }
           const message = JSON.parse(event.data);
           if (message.type === 'STATE_UPDATE') {
             const newState = message.payload as ScannerState;

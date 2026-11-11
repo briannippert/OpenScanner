@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Box, Typography, IconButton, Collapse, List, ListItemButton, Tooltip, ButtonBase } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
@@ -29,7 +29,7 @@ const formatDetail = (e: RadioEvent): string => {
     return '';
 };
 
-export default function EventLog({ events, onClear, onEventClick, transcriptions }: EventLogProps) {
+function EventLog({ events, onClear, onEventClick, transcriptions }: EventLogProps) {
     const [open, setOpen] = useState(true);
 
     // Transcriptions for older tone-outs whose recording has scrolled out of the
@@ -164,3 +164,6 @@ export default function EventLog({ events, onClear, onEventClick, transcriptions
         </Box>
     );
 }
+
+// Memoized: the app re-renders on every scanner state update, which rarely changes these props.
+export default memo(EventLog);

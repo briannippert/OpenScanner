@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { memo, useState } from 'react';
 import {
     Button, List, ListItem, ListItemText, IconButton,
     TextField, Box, Typography, MenuItem, Select, FormControl, InputLabel,
@@ -205,4 +205,5 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
     );
 };
 
-export default ChannelManager;
+// Memoized: the app re-renders on every scanner state update, which rarely changes these props.
+export default memo(ChannelManager);

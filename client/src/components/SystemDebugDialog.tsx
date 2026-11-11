@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box, Typography, Button, Paper, Grid, CircularProgress, Tooltip,
 } from '@mui/material';
@@ -698,4 +698,5 @@ const SystemDebugDialog: React.FC<Props> = ({ open, onClose, onDownloadSupport }
   );
 };
 
-export default SystemDebugDialog;
+// Memoized: the app re-renders on every scanner state update, which rarely changes these props.
+export default memo(SystemDebugDialog);
