@@ -22,11 +22,11 @@ Type in **Search logs…** to search by transcript text, channel name or frequen
 
 Click play on any entry. A player bar appears at the bottom with:
 
-- Play / pause and a seek bar.
+- Play / pause and a seek bar. With the seek bar focused, the arrow keys move 5 seconds and ++home++ / ++end++ jump to the start or end.
 - **Playback speed**.
 - **Download**, to save the recording.
 
-Each entry also has its own **Download** and **Delete** buttons.
+Each entry also has its own **Download** and **Delete** buttons. Delete asks for confirmation first: it removes the audio file as well as the entry, and cannot be undone.
 
 ## Favorites
 

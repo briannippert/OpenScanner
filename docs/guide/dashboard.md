@@ -10,7 +10,7 @@ The dashboard is a single page. The scanner and channel controls are on the left
 |---|---|
 | <span class="chip chip--ok">SDR READY</span> / <span class="chip chip--error">SDR DISCONNECTED</span> | Whether the RTL-SDR dongle is detected. Hover for the device name. |
 | Clock | Current time. With a GPS fix it shows GPS time and a satellite icon. |
-| Volume | Live audio volume for this browser. |
+| Volume | Live audio volume for this browser. Click the speaker icon to mute; click again to return to the previous level. |
 | <span class="chip chip--warn">UPDATE</span> | A newer release is available. See [Updating](../updating.md). |
 
 The buttons on the right (collapsed into a menu on phones) open:
@@ -47,7 +47,7 @@ Holds and avoids are shared: change one and every open browser updates.
 
 ## Command palette
 
-Press ++ctrl+k++ (++cmd+k++ on a Mac) and start typing. From the palette you can:
+Press ++ctrl+k++ (++cmd+k++ on a Mac), or click the search icon in the header, and start typing. From the palette you can:
 
 - Hold a channel, or resume from it, by typing its name.
 - Resume scanning or skip the current transmission.
