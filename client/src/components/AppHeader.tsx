@@ -22,6 +22,7 @@ import MonitorIcon from '@mui/icons-material/Monitor';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
 import BadgeIcon from '@mui/icons-material/Badge';
+import InsightsIcon from '@mui/icons-material/Insights';
 import type { ScannerState } from '../types';
 import StatusChip from './common/StatusChip';
 
@@ -44,6 +45,7 @@ interface Props {
   onOpenSettings: () => void;
   onOpenDebug: () => void;
   onOpenSystemDebug: () => void;
+  onOpenStats: () => void;
   onOpenAliases: () => void;
   updateAvailable?: boolean;
   onOpenUpdate: () => void;
@@ -66,7 +68,7 @@ const Clock = () => {
 
 const AppHeader: React.FC<Props> = ({
   isHardwareConnected, deviceName, devicePort, gps, volume, onVolumeChange, manualHold, onResume,
-  isFullscreen, onToggleFullscreen, onOpenFireTones, onOpenSettings, onOpenDebug, onOpenSystemDebug,
+  isFullscreen, onToggleFullscreen, onOpenFireTones, onOpenSettings, onOpenDebug, onOpenSystemDebug, onOpenStats,
   onOpenAliases, updateAvailable, onOpenUpdate, onOpenPalette,
 }) => {
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
@@ -94,6 +96,7 @@ const AppHeader: React.FC<Props> = ({
   const actions = [
     { label: `Search commands (${paletteShortcut})`, icon: <SearchIcon />, onClick: onOpenPalette },
     { label: 'Software Update', icon: <SystemUpdateIcon />, onClick: onOpenUpdate },
+    { label: 'Statistics', icon: <InsightsIcon />, onClick: onOpenStats },
     { label: 'Fire Tone Outs', icon: <NotificationsActiveIcon />, onClick: onOpenFireTones },
     { label: 'Radio Aliases', icon: <BadgeIcon />, onClick: onOpenAliases },
     { label: 'Settings', icon: <SettingsIcon />, onClick: onOpenSettings },

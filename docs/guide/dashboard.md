@@ -16,6 +16,7 @@ The dashboard is a single page. The scanner and channel controls are on the left
 The buttons on the right (collapsed into a menu on phones) open:
 
 - **Software Update** — check for and install new releases.
+- **Statistics** — [totals, busiest channels and activity patterns](statistics.md).
 - **Fire Tone Outs** — manage [tone-out alerts](fire-tones.md).
 - **Radio Aliases** — name [radio IDs and talkgroups](aliases.md).
 - **Settings** — [transcription, SDR tuning, notifications, storage](settings.md).
@@ -51,7 +52,7 @@ Press ++ctrl+k++ (++cmd+k++ on a Mac), or click the search icon in the header, a
 
 - Hold a channel, or resume from it, by typing its name.
 - Resume scanning or skip the current transmission.
-- Open channel management, fire tone-outs, radio aliases, settings or the RF debug view.
+- Open channel management, statistics, fire tone-outs, radio aliases, settings or the RF debug view.
 
 ## History
 

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 
 export const DIALOG_IDS = [
-  'channels', 'fireTones', 'settings', 'rfDebug', 'systemDebug', 'aliases', 'update', 'palette',
+  'channels', 'fireTones', 'settings', 'rfDebug', 'systemDebug', 'aliases', 'update', 'palette', 'stats',
 ] as const;
 export type DialogId = typeof DIALOG_IDS[number];
 

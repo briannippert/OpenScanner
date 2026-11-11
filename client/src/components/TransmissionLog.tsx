@@ -45,7 +45,6 @@ import { status } from '../theme/tokens';
 import EmptyState from './common/EmptyState';
 import PanelSkeleton from './common/PanelSkeleton';
 import SegmentedControl from './common/SegmentedControl';
-import ActivityHeatmap from './ActivityHeatmap';
 import ConfirmDialog from './common/ConfirmDialog';
 
 type LogTab = 'recent' | 'favorites' | 'browse';
@@ -344,7 +343,6 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                     <FavoritesList key={favoritesRefreshKey} filter={filter} toneOutIds={toneOutIds} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
                 ) : (
                     <>
-                        <ActivityHeatmap />
                         <List dense component="nav">
                             {years.length === 0 ? (
                                 <EmptyState icon={<Folder />} title="No archived recordings" hint="Older recordings are grouped by date here." />

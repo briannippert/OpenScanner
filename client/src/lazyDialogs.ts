@@ -36,6 +36,7 @@ const importers = {
   CommandPalette: () => import('./components/CommandPalette'),
   RfDebugDialog: () => import('./components/RfDebugDialog'),
   SystemDebugDialog: () => import('./components/SystemDebugDialog'),
+  StatsDialog: () => import('./components/StatsDialog'),
 };
 
 export const ChannelManager = lazy(() => load(importers.ChannelManager));
@@ -46,6 +47,7 @@ export const UpdateManager = lazy(() => load(importers.UpdateManager));
 export const CommandPalette = lazy(() => load(importers.CommandPalette));
 export const RfDebugDialog = lazy(() => load(importers.RfDebugDialog));
 export const SystemDebugDialog = lazy(() => load(importers.SystemDebugDialog));
+export const StatsDialog = lazy(() => load(importers.StatsDialog));
 
 /**
  * Fetch every dialog chunk in the background. Goes around load() on purpose: a failed

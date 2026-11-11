@@ -39,6 +39,24 @@ public class HistoryControllerTests
         Assert.InRange(windowDays, expectedDays - 0.01, expectedDays + 0.01);
     }
 
+    [Theory]
+    [InlineData(7, 7)]
+    [InlineData(-3, 1)]
+    [InlineData(400, 90)]
+    public async Task GetStats_ClampsTheWindowAndReportsIt(int requestedDays, int expectedDays)
+    {
+        DateTime? since = null;
+        _dbMock.Setup(db => db.GetTransmissionStatsAsync(It.IsAny<DateTime>(), 10))
+            .Callback<DateTime, int>((d, _) => since = d)
+            .ReturnsAsync(new TransmissionStats { Summary = new StatsSummary { Transmissions = 5 } });
+
+        var result = await _controller.GetStats(requestedDays);
+
+        Assert.Equal(expectedDays, result.Days);
+        Assert.Equal(5, result.Summary.Transmissions);
+        Assert.InRange((DateTime.UtcNow - since!.Value).TotalDays, expectedDays - 0.01, expectedDays + 0.01);
+    }
+
     [Fact]
     public async Task GetHistory_ReturnsLogs()
     {

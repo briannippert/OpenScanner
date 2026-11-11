@@ -10,8 +10,6 @@ Every transmission is recorded and listed in the history panel, with its channel
 | **Favorites** | Recordings you have starred. |
 | **Browse** | Everything, organised as Year → Month → Day → Channel. |
 
-The **Browse** view opens with an activity heatmap: how busy each hour of each weekday has been over the last four weeks, in your local time.
-
 In **Recent** and **Favorites** you can filter to **Tone-outs** to see only transmissions that followed a [fire tone-out](fire-tones.md).
 
 ## Search
@@ -41,3 +39,7 @@ To clear everything at once, use **Delete All Recordings** in [Settings → Stor
 ## PowerDMS daily log
 
 If you set a PowerDMS department in [Settings → Integrations](settings.md#integrations), each day in the **Browse** view gets a button that opens that day's PowerDMS daily log, when one exists.
+
+## Statistics
+
+For totals, busiest channels and when your scanner is most active, see [Statistics](statistics.md).

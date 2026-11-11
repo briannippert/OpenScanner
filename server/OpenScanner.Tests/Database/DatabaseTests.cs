@@ -170,6 +170,56 @@ public class DatabaseTests : IDisposable
     }
 
     [Fact]
+    public async Task GetTransmissionStats_ShouldAggregateTheWindow()
+    {
+        const string inWindow = "2026-03-10T14:05:00.0000000Z";
+        await _db.SaveTransmissionAsync(new CallLog("s1", inWindow, 155.0, "PD", "d", null, null, null, 10.0, "unit 4 responding", 101, 4021));
+        await _db.SaveTransmissionAsync(new CallLog("s2", inWindow, 155.0, "PD", "d", null, null, null, 20.0, null, 101, 4021));
+        await _db.SaveTransmissionAsync(new CallLog("s3", inWindow, 155.0, "PD", "d", null, null, null, 5.0, "", 202, 4021));
+        await _db.SaveTransmissionAsync(new CallLog("s4", inWindow, 154.43, "Fire", "d", null, null, null, 30.0, "station 4", null, null) { DetectedTone = "Station 4" });
+        // Before the window: must not appear anywhere.
+        await _db.SaveTransmissionAsync(new CallLog("s5", "2026-03-01T00:00:00.0000000Z", 460.1, "Old", "d", null, null, null, 99.0, "old", 999, 999) { DetectedTone = "Old Tone" });
+
+        var stats = await _db.GetTransmissionStatsAsync(new DateTime(2026, 3, 10, 0, 0, 0, DateTimeKind.Utc), top: 10);
+
+        Assert.Equal(4, stats.Summary.Transmissions);
+        Assert.Equal(65.0, stats.Summary.AirtimeSeconds);
+        Assert.Equal(30.0, stats.Summary.LongestSeconds);
+        Assert.Equal(2, stats.Summary.Transcribed);   // an empty transcript does not count
+        Assert.Equal(1, stats.Summary.ToneOuts);
+        Assert.Equal(2, stats.Summary.ActiveChannels);
+
+        Assert.Equal(new[] { ("PD", 3, 35.0), ("Fire", 1, 30.0) }, stats.Channels.Select(c => (c.AlphaTag, c.Count, c.AirtimeSeconds)));
+        Assert.Equal(new[] { (4021L, 3) }, stats.Talkgroups.Select(t => (t.Id, t.Count)));
+        Assert.Equal(new[] { (101L, 2), (202L, 1) }, stats.Sources.Select(s => (s.Id, s.Count)));
+        Assert.Equal(new[] { ("Station 4", 1) }, stats.Tones.Select(t => (t.Name, t.Count)));
+    }
+
+    [Fact]
+    public async Task GetTransmissionStats_OnAnEmptyWindow_ReturnsZeros()
+    {
+        var stats = await _db.GetTransmissionStatsAsync(DateTime.UtcNow.AddDays(-7), top: 10);
+
+        Assert.Equal(0, stats.Summary.Transmissions);
+        Assert.Equal(0, stats.Summary.AirtimeSeconds);
+        Assert.Empty(stats.Channels);
+        Assert.Empty(stats.Tones);
+    }
+
+    [Fact]
+    public async Task GetTransmissionStats_ShouldHonourTheTopLimit()
+    {
+        var now = DateTime.UtcNow.ToString("o");
+        for (var i = 0; i < 5; i++)
+            await _db.SaveTransmissionAsync(new CallLog($"t{i}", now, 150.0 + i, $"Ch{i}", "d", null, null, null, 1.0, null, null, null));
+
+        var stats = await _db.GetTransmissionStatsAsync(DateTime.UtcNow.AddDays(-1), top: 3);
+
+        Assert.Equal(3, stats.Channels.Count);
+        Assert.Equal(5, stats.Summary.ActiveChannels);
+    }
+
+    [Fact]
     public async Task GetAliasCandidates_ShouldGroupDistinctSrcAndTgPerChannel_WithinWindow()
     {
         var now = DateTime.UtcNow.ToString("o");

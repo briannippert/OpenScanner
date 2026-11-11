@@ -11,7 +11,8 @@ const WINDOW_DAYS = 28;
 
 /**
  * Activity heatmap: transmissions by day-of-week × hour-of-day over the last four
- * weeks. Sequential single-hue (scanner green) magnitude ramp, per the dataviz
+ * weeks, in the viewer's local time. Shown on the statistics page; the caller
+ * supplies the heading. Sequential single-hue (scanner green) magnitude ramp, per the dataviz
  * method.
  *
  * The counts come from the server, aggregated over the whole window. (They used
@@ -33,15 +34,12 @@ const ActivityHeatmap: React.FC = () => {
 
   const { counts: grid, max, total } = useMemo(() => toActivityGrid(buckets ?? []), [buckets]);
 
-  // Nothing recorded in the window (or still loading): no empty grid.
-  if (total === 0) return null;
+  if (buckets === null) return <Typography variant="caption" color="text.secondary">Loading…</Typography>;
+  if (total === 0) return <Typography variant="caption" color="text.secondary">No transmissions in the last 4 weeks.</Typography>;
 
   return (
-    <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'surface.border' }}>
-      <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase' }}>
-        Activity Pattern · Last 4 Weeks
-      </Typography>
-      <Box sx={{ mt: 1, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 0.5, alignItems: 'center' }}>
+    <Box>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 0.5, alignItems: 'center' }}>
         {DAYS.map((label, day) => (
           <React.Fragment key={label}>
             <Typography variant="caption" sx={{ color: 'text.disabled', pr: 1, fontSize: '0.62rem', textAlign: 'right' }}>
@@ -54,7 +52,8 @@ const ActivityHeatmap: React.FC = () => {
                   <Tooltip key={hour} title={`${DAYS[day]} ${hour}:00 — ${count} transmission${count === 1 ? '' : 's'}`} arrow>
                     <Box
                       sx={{
-                        aspectRatio: '1 / 1',
+                        // Fixed height: square cells get enormous in a wide panel.
+                        height: { xs: 14, sm: 20 },
                         borderRadius: '2px',
                         bgcolor: count === 0 ? surface.raised : green(0.25 + t * 0.75),
                       }}

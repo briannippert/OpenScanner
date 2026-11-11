@@ -60,6 +60,21 @@ public class HistoryController : ControllerBase
     }
 
     /// <summary>
+    /// Aggregate statistics over the last <paramref name="days"/> days: headline
+    /// totals and the busiest channels, talkgroups, source radios and tone sets.
+    /// </summary>
+    /// <param name="days">Window length in days (1–90, default 7).</param>
+    [HttpGet("stats")]
+    [ProducesResponseType(typeof(TransmissionStats), StatusCodes.Status200OK)]
+    public async Task<TransmissionStats> GetStats([FromQuery] int days = 7)
+    {
+        days = Math.Clamp(days, 1, 90);
+        var stats = await _db.GetTransmissionStatsAsync(DateTime.UtcNow.AddDays(-days), top: 10);
+        stats.Days = days;
+        return stats;
+    }
+
+    /// <summary>
     /// Gets all years for which transmission data exists.
     /// </summary>
     /// <returns>List of years (e.g., ["2023", "2024"]).</returns>
