@@ -199,7 +199,7 @@ public class MixedScanTests
         device.HoldFrequency(155.0);
 
         // Wait for the 150ms LockOn delay plus decoder setup
-        await Task.Delay(400);
+        await WaitForDecoderStart(mockDecoder);
 
         // Populate the pre-roll buffer by raising OnAudio events on the mock decoder
         var audioChunk = new byte[4096];
@@ -224,6 +224,21 @@ public class MixedScanTests
             It.IsAny<LinkedList<byte[]>>()), Times.Once);
 
         device.Stop();
+    }
+
+    /// <summary>
+    /// Waits until the device has subscribed to the decoder's events and started it. The
+    /// handlers are attached just before StartAsync is called, so this replaces a fixed sleep
+    /// that was too short on a busy CI runner (events raised earlier reach no subscriber).
+    /// </summary>
+    private static async Task WaitForDecoderStart(Mock<IDecoder> decoder)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!decoder.Invocations.Any(i => i.Method.Name == nameof(IDecoder.StartAsync)))
+        {
+            Assert.True(DateTime.UtcNow < deadline, "Decoder was never started");
+            await Task.Delay(10);
+        }
     }
 
     /// <summary>
@@ -257,7 +272,7 @@ public class MixedScanTests
             decoderFactory.Object, transcription.Object, recording.Object, channelService.Object);
 
         device.HoldFrequency(155.0);
-        await Task.Delay(400);
+        await WaitForDecoderStart(mockDecoder);
 
         // Simulate audio from TX1 → fire activity → buffer cleared
         var tx1Chunk = new byte[4096];

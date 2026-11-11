@@ -160,6 +160,22 @@ public class RtlDevice : BackgroundService, IRadioSource
             });
         };
 
+        _toneDetector.OnStreamToneDetected += (tone, freq) =>
+        {
+            var channel = _parallelPipelines?.FirstOrDefault(p => p.Channel.Frequency == freq)?.Channel;
+            if (channel == null) return;
+            // Same as a tone heard on a parallel channel's decoder: record it with the tone label
+            // and keep the clip open for the dispatch voice that follows.
+            HandleParallelActivity(channel, null, null, tone.Name);
+            RaiseRadioEvent(new RadioEvent
+            {
+                Type = "TONE_OUT",
+                Label = tone.Name,
+                ToneA = tone.FrequencyA,
+                ToneB = tone.FrequencyB
+            }, channel);
+        };
+
         _mdc.OnPacket += (pkt) => {
             // Treat the MDC1200 unit ID like a P25 radio ID: attribute it to the current
             // transmission via the normal activity path so it lands on the recording's
@@ -522,12 +538,12 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// Stamps the current channel context onto a detected signaling event, persists it,
     /// and broadcasts it to clients. Fire-and-forget persistence mirrors the recording path.
     /// </summary>
-    private void RaiseRadioEvent(RadioEvent e)
+    private void RaiseRadioEvent(RadioEvent e, Channel? channel = null)
     {
         e.Id = Guid.NewGuid().ToString();
         e.Timestamp = DateTime.UtcNow.ToString("o");
-        e.Frequency = _state.CurrentChannel?.Frequency ?? _state.CurrentFrequency ?? 0;
-        e.AlphaTag = _state.CurrentChannel?.AlphaTag;
+        e.Frequency = channel?.Frequency ?? _state.CurrentChannel?.Frequency ?? _state.CurrentFrequency ?? 0;
+        e.AlphaTag = channel?.AlphaTag ?? _state.CurrentChannel?.AlphaTag;
         // Link the event to the recording it coincides with (if any) so the UI can
         // jump to it in the transmission history.
         e.TransmissionId ??= _recordingService.CurrentRecordingId;
@@ -576,6 +592,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         _parallelActivityTimeouts.Clear();
         _parallelLastAudioReset.Clear();
         _parallelLastTones.Clear();
+        _toneDetector.ResetStreams();
     }
 
     private void StartScanning()
@@ -976,7 +993,10 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// </summary>
     private void HandleParallelAudio(Channel channel, byte[] audio)
     {
-        _toneDetector.ProcessAudio(audio);
+        // Each channel gets its own tone-detection state: the detector is stateful, and
+        // interleaving different channels' chunks into one state breaks Tone A -> Tone B
+        // timing and sustained-tone runs.
+        _toneDetector.ProcessAudio(audio, channel.Frequency);
         // MDC1200 is decoded per-channel inside each ChannelPipeline (analog modes),
         // which attributes the unit ID to the correct channel; the shared decoder here
         // could neither decode interleaved multi-channel audio nor attribute it.
