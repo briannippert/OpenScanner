@@ -42,10 +42,14 @@ echo "========================================="
 echo " OpenScanner Uninstaller"
 echo "========================================="
 
-if systemctl list-unit-files 2>/dev/null | grep -q "^$UNIT.service"; then
+# Ask systemd directly rather than grepping a listing: under `set -o pipefail`,
+# `systemctl list-unit-files | grep -q` fails whenever grep matches early and
+# closes the pipe on systemctl, which read as "not installed" and left the
+# service running while its files were deleted.
+if [ -f "$SERVICE_FILE" ] || systemctl is-active --quiet "$UNIT" || systemctl is-enabled --quiet "$UNIT" 2>/dev/null; then
     log_info "Stopping and disabling $UNIT..."
     systemctl stop "$UNIT" || true
-    systemctl disable --quiet "$UNIT" || true
+    systemctl disable --quiet "$UNIT" 2>/dev/null || true
 else
     log_info "Service $UNIT is not installed."
 fi
