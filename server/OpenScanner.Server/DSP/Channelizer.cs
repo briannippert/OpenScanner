@@ -1,3 +1,7 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+
 namespace OpenScanner.Server.DSP;
 
 /// <summary>
@@ -11,12 +15,22 @@ namespace OpenScanner.Server.DSP;
 /// their decimation factor (as this did before 2026) is unrelated to the selectivity a channel
 /// actually needs, and left a 12.5 kHz-spaced neighbour sitting inside the passband.
 /// </summary>
+/// <remarks>
+/// This runs once per channel on every wideband IQ sample (2.4 MSPS), so the per-input-sample
+/// path is kept minimal: a lookup table for u8 conversion, locals for the DC blocker and NCO
+/// state, and float delay lines laid out so each FIR output is one contiguous SIMD dot product.
+/// Everything after the filters (metering, demod) runs at the 48 kHz output rate and stays in
+/// double precision.
+/// </remarks>
 public class Channelizer
 {
     private readonly int _inputRate;
     private readonly int _outputRate;
     private readonly double _offsetHz;
     private readonly bool _amMode;
+
+    // u8 RTL-SDR sample -> [-1, 1]; shared by all channelizers.
+    private static readonly double[] U8ToUnit = BuildU8Table();
 
     // NCO, as a recursive complex rotator. Multiplying by a fixed unit phasor each sample costs
     // one complex multiply instead of a Math.Cos/Math.Sin pair — at 2.4 Msps that pair was
@@ -40,25 +54,19 @@ public class Channelizer
     // Stage 1 decimation
     private readonly int _decim1;
     private readonly double[] _filter1;
-    private readonly double[] _delayI1;
-    private readonly double[] _delayQ1;
-    private int _writePtr1;
+    private readonly FirState _fir1;
     private int _decimCount1;
 
     // Stage 2 decimation
     private readonly int _decim2;
     private readonly double[] _filter2;
-    private readonly double[] _delayI2;
-    private readonly double[] _delayQ2;
-    private int _writePtr2;
+    private readonly FirState? _fir2;
     private int _decimCount2;
 
     // Channel filter: runs at the output rate on complex baseband and provides all of the
     // selectivity. Empty when the caller asks for no channel shaping.
     private readonly double[] _filter3;
-    private readonly double[] _delayI3;
-    private readonly double[] _delayQ3;
-    private int _writePtr3;
+    private readonly FirState? _fir3;
 
     // FM demodulator state (previous IQ sample for phase differencing)
     private double _prevI;
@@ -185,8 +193,7 @@ public class Channelizer
         double cutoff1 = 0.8 * (intermediateRate / 2.0);
         int taps1 = BlackmanTaps(inputRate, transitionHz: intermediateRate - keepHz - cutoff1, minimum: 33);
         _filter1 = DesignLowPass(cutoff1 / inputRate, taps1);
-        _delayI1 = new double[taps1];
-        _delayQ1 = new double[taps1];
+        _fir1 = new FirState(_filter1);
 
         if (_decim2 > 1)
         {
@@ -194,14 +201,11 @@ public class Channelizer
             double cutoff2 = 0.8 * (outputRate / 2.0);
             int taps2 = BlackmanTaps(intermediateRate, transitionHz: outputRate - keepHz - cutoff2, minimum: 21);
             _filter2 = DesignLowPass(cutoff2 / intermediateRate, taps2);
-            _delayI2 = new double[taps2];
-            _delayQ2 = new double[taps2];
+            _fir2 = new FirState(_filter2);
         }
         else
         {
             _filter2 = Array.Empty<double>();
-            _delayI2 = Array.Empty<double>();
-            _delayQ2 = Array.Empty<double>();
         }
 
         // Stage 3: the actual channel filter, and the only one sized for selectivity. A 2 kHz
@@ -211,14 +215,11 @@ public class Channelizer
         {
             int taps3 = BlackmanTaps(outputRate, transitionHz: 2000, minimum: 31);
             _filter3 = DesignLowPass(channelCutoffHz / outputRate, taps3);
-            _delayI3 = new double[taps3];
-            _delayQ3 = new double[taps3];
+            _fir3 = new FirState(_filter3);
         }
         else
         {
             _filter3 = Array.Empty<double>();
-            _delayI3 = Array.Empty<double>();
-            _delayQ3 = Array.Empty<double>();
         }
 
         // FM gain: scale atan2 output (radians) so peak deviation maps to ~80% of s16le range.
@@ -242,6 +243,7 @@ public class Channelizer
     /// <summary>
     /// Process a chunk of wideband unsigned 8-bit IQ data and produce narrowband s16le audio.
     /// Call repeatedly with consecutive chunks; internal state is maintained between calls.
+    /// Safe to call concurrently on different instances with the same input buffer.
     /// </summary>
     /// <param name="iq">RTL-SDR output: unsigned 8-bit interleaved I,Q pairs</param>
     /// <param name="length">Number of bytes to process (must be even)</param>
@@ -250,151 +252,127 @@ public class Channelizer
     public int ProcessIQ(byte[] iq, int length, byte[] output)
     {
         int outIdx = 0;
+        double[] lut = U8ToUnit;
+        FirState fir1 = _fir1;
+        int decim1 = _decim1;
+        int decimCount1 = _decimCount1;
+
+        // Per-input-sample state lives in locals for the loop and is written back at the end.
+        double dcI = _dcI, dcQ = _dcQ, dcAlpha = _dcAlpha;
+        double ncoRe = _ncoRe, ncoIm = _ncoIm;
+        double stepRe = _ncoStepRe, stepIm = _ncoStepIm;
+        int sinceNormalize = _ncoSinceNormalize;
 
         for (int i = 0; i + 1 < length; i += 2)
         {
-            // Convert unsigned 8-bit to float [-1, 1]
-            double rawI = (iq[i] - 127.5) * (1.0 / 127.5);
-            double rawQ = (iq[i + 1] - 127.5) * (1.0 / 127.5);
+            double rawI = lut[iq[i]];
+            double rawQ = lut[iq[i + 1]];
 
             // Track and subtract the input DC offset. 127.5 is only the nominal centre; the
             // real one moves with gain and temperature, and whatever is left of it is the
             // dongle's centre spike.
-            _dcI += _dcAlpha * (rawI - _dcI);
-            _dcQ += _dcAlpha * (rawQ - _dcQ);
-            rawI -= _dcI;
-            rawQ -= _dcQ;
+            dcI += dcAlpha * (rawI - dcI);
+            dcQ += dcAlpha * (rawQ - dcQ);
+            rawI -= dcI;
+            rawQ -= dcQ;
 
             // NCO frequency shift: complex multiply by the current phasor, then advance the
             // phasor by one fixed step. Identical to multiplying by e^(j*phase) each sample.
-            double sI = rawI * _ncoRe - rawQ * _ncoIm;
-            double sQ = rawI * _ncoIm + rawQ * _ncoRe;
+            fir1.Push((float)(rawI * ncoRe - rawQ * ncoIm), (float)(rawI * ncoIm + rawQ * ncoRe));
 
-            double nextRe = _ncoRe * _ncoStepRe - _ncoIm * _ncoStepIm;
-            _ncoIm = _ncoRe * _ncoStepIm + _ncoIm * _ncoStepRe;
-            _ncoRe = nextRe;
+            double nextRe = ncoRe * stepRe - ncoIm * stepIm;
+            ncoIm = ncoRe * stepIm + ncoIm * stepRe;
+            ncoRe = nextRe;
 
-            if (++_ncoSinceNormalize >= NcoNormalizeInterval)
+            if (++sinceNormalize >= NcoNormalizeInterval)
             {
-                _ncoSinceNormalize = 0;
-                double mag = Math.Sqrt(_ncoRe * _ncoRe + _ncoIm * _ncoIm);
-                if (mag > 1e-12) { _ncoRe /= mag; _ncoIm /= mag; }
+                sinceNormalize = 0;
+                double mag = Math.Sqrt(ncoRe * ncoRe + ncoIm * ncoIm);
+                if (mag > 1e-12) { ncoRe /= mag; ncoIm /= mag; }
             }
 
-            // Stage 1: push into delay line
-            _delayI1[_writePtr1] = sI;
-            _delayQ1[_writePtr1] = sQ;
-            _writePtr1 = (_writePtr1 + 1) % _filter1.Length;
+            if (++decimCount1 < decim1) continue;
+            decimCount1 = 0;
 
-            _decimCount1++;
-            if (_decimCount1 < _decim1) continue;
-            _decimCount1 = 0;
+            // Stage 1: anti-alias FIR output at the intermediate rate
+            fir1.Compute(out float fI, out float fQ);
 
-            // Stage 1: compute FIR output
-            double fI1 = 0, fQ1 = 0;
-            int rp = _writePtr1;
-            for (int k = 0; k < _filter1.Length; k++)
+            // Stage 2 (if applicable): anti-alias FIR down to the output rate
+            if (_fir2 != null)
             {
-                rp--;
-                if (rp < 0) rp += _filter1.Length;
-                fI1 += _filter1[k] * _delayI1[rp];
-                fQ1 += _filter1[k] * _delayQ1[rp];
-            }
-
-            // Stage 2 (if applicable)
-            double fI, fQ;
-            if (_decim2 > 1)
-            {
-                _delayI2[_writePtr2] = fI1;
-                _delayQ2[_writePtr2] = fQ1;
-                _writePtr2 = (_writePtr2 + 1) % _filter2.Length;
-
-                _decimCount2++;
-                if (_decimCount2 < _decim2) continue;
+                _fir2.Push(fI, fQ);
+                if (++_decimCount2 < _decim2) continue;
                 _decimCount2 = 0;
-
-                fI = 0; fQ = 0;
-                int rp2 = _writePtr2;
-                for (int k = 0; k < _filter2.Length; k++)
-                {
-                    rp2--;
-                    if (rp2 < 0) rp2 += _filter2.Length;
-                    fI += _filter2[k] * _delayI2[rp2];
-                    fQ += _filter2[k] * _delayQ2[rp2];
-                }
-            }
-            else
-            {
-                fI = fI1;
-                fQ = fQ1;
+                _fir2.Compute(out fI, out fQ);
             }
 
             // Stage 3: the channel filter. No decimation here — it runs at the output rate,
             // which is what makes a sharp filter affordable.
-            if (_filter3.Length > 0)
+            if (_fir3 != null)
             {
-                _delayI3[_writePtr3] = fI;
-                _delayQ3[_writePtr3] = fQ;
-                _writePtr3 = (_writePtr3 + 1) % _filter3.Length;
-
-                fI = 0; fQ = 0;
-                int rp3 = _writePtr3;
-                for (int k = 0; k < _filter3.Length; k++)
-                {
-                    rp3--;
-                    if (rp3 < 0) rp3 += _filter3.Length;
-                    fI += _filter3[k] * _delayI3[rp3];
-                    fQ += _filter3[k] * _delayQ3[rp3];
-                }
+                _fir3.Push(fI, fQ);
+                _fir3.Compute(out fI, out fQ);
             }
 
-            // Meter after the channel filter, so this reads in-channel power rather than
-            // everything the decimation chain let through.
-            _iqPowerAccum += fI * fI + fQ * fQ;
-            _iqPowerCount++;
-
-            // Demodulate
-            double sample;
-            if (_amMode)
-            {
-                double envelope = Math.Sqrt(fI * fI + fQ * fQ);
-                // Remove DC with single-pole IIR highpass
-                _amDcEstimate = AmDcAlpha * _amDcEstimate + (1.0 - AmDcAlpha) * envelope;
-                sample = (envelope - _amDcEstimate) * 4.0; // Gain to fill range
-            }
-            else
-            {
-                // FM quadrature discriminator: angle between consecutive IQ samples
-                double dot = fI * _prevI + fQ * _prevQ;
-                double cross = fQ * _prevI - fI * _prevQ;
-                double phaseD = Math.Atan2(cross, dot);
-                // Its mean is the carrier's offset from where we tuned; voice modulation
-                // averages out over the window, leaving the frequency error behind.
-                _phaseDiffAccum += phaseD;
-                sample = phaseD * _fmScale;
-            }
-            _prevI = fI;
-            _prevQ = fQ;
-
-            if (_iqPowerCount >= IqPowerWindow)
-            {
-                double rmsMag = Math.Sqrt(_iqPowerAccum / _iqPowerCount);
-                _signalPowerDb = 20.0 * Math.Log10(rmsMag + 1e-12);
-                _frequencyOffsetHz = _phaseDiffAccum / _iqPowerCount * _outputRate / (2.0 * Math.PI);
-                _iqPowerAccum = 0;
-                _phaseDiffAccum = 0;
-                _iqPowerCount = 0;
-            }
-
-            // Clamp and convert to s16le
-            if (sample > 1.0) sample = 1.0;
-            else if (sample < -1.0) sample = -1.0;
-            short pcm = (short)(sample * 32000);
+            short pcm = Demodulate(fI, fQ);
             output[outIdx++] = (byte)(pcm & 0xFF);
             output[outIdx++] = (byte)((pcm >> 8) & 0xFF);
         }
 
+        _decimCount1 = decimCount1;
+        _dcI = dcI; _dcQ = dcQ;
+        _ncoRe = ncoRe; _ncoIm = ncoIm;
+        _ncoSinceNormalize = sinceNormalize;
         return outIdx;
+    }
+
+    /// <summary>
+    /// Meter and demodulate one channel-filtered baseband sample into a clamped s16 PCM value.
+    /// Runs at the output rate, so double precision costs nothing here.
+    /// </summary>
+    private short Demodulate(double fI, double fQ)
+    {
+        // Meter after the channel filter, so this reads in-channel power rather than
+        // everything the decimation chain let through.
+        _iqPowerAccum += fI * fI + fQ * fQ;
+        _iqPowerCount++;
+
+        double sample;
+        if (_amMode)
+        {
+            double envelope = Math.Sqrt(fI * fI + fQ * fQ);
+            // Remove DC with single-pole IIR highpass
+            _amDcEstimate = AmDcAlpha * _amDcEstimate + (1.0 - AmDcAlpha) * envelope;
+            sample = (envelope - _amDcEstimate) * 4.0; // Gain to fill range
+        }
+        else
+        {
+            // FM quadrature discriminator: angle between consecutive IQ samples
+            double dot = fI * _prevI + fQ * _prevQ;
+            double cross = fQ * _prevI - fI * _prevQ;
+            double phaseD = Math.Atan2(cross, dot);
+            // Its mean is the carrier's offset from where we tuned; voice modulation
+            // averages out over the window, leaving the frequency error behind.
+            _phaseDiffAccum += phaseD;
+            sample = phaseD * _fmScale;
+        }
+        _prevI = fI;
+        _prevQ = fQ;
+
+        if (_iqPowerCount >= IqPowerWindow)
+        {
+            double rmsMag = Math.Sqrt(_iqPowerAccum / _iqPowerCount);
+            _signalPowerDb = 20.0 * Math.Log10(rmsMag + 1e-12);
+            _frequencyOffsetHz = _phaseDiffAccum / _iqPowerCount * _outputRate / (2.0 * Math.PI);
+            _iqPowerAccum = 0;
+            _phaseDiffAccum = 0;
+            _iqPowerCount = 0;
+        }
+
+        // Clamp and convert to s16le
+        if (sample > 1.0) sample = 1.0;
+        else if (sample < -1.0) sample = -1.0;
+        return (short)(sample * 32000);
     }
 
     /// <summary>
@@ -405,13 +383,109 @@ public class Channelizer
     {
         _ncoRe = 1.0; _ncoIm = 0; _ncoSinceNormalize = 0;
         _dcI = 0; _dcQ = 0;
-        Array.Clear(_delayI1); Array.Clear(_delayQ1); _writePtr1 = 0; _decimCount1 = 0;
-        Array.Clear(_delayI2); Array.Clear(_delayQ2); _writePtr2 = 0; _decimCount2 = 0;
-        Array.Clear(_delayI3); Array.Clear(_delayQ3); _writePtr3 = 0;
+        _fir1.Reset(); _decimCount1 = 0;
+        _fir2?.Reset(); _decimCount2 = 0;
+        _fir3?.Reset();
         _prevI = 0; _prevQ = 0;
         _amDcEstimate = 0;
         _iqPowerAccum = 0; _phaseDiffAccum = 0; _iqPowerCount = 0;
         _signalPowerDb = -90.0; _frequencyOffsetHz = 0;
+    }
+
+    private static double[] BuildU8Table()
+    {
+        var t = new double[256];
+        for (int b = 0; b < 256; b++)
+            t[b] = (b - 127.5) * (1.0 / 127.5);
+        return t;
+    }
+
+    /// <summary>
+    /// Complex FIR filter state. Samples are stored interleaved (I, Q) in a ring buffer that is
+    /// written twice (at p and p + taps), so the most recent <c>taps</c> samples are always one
+    /// contiguous run and the filter output is a single dot product with no wraparound.
+    /// Coefficients are stored time-reversed and duplicated (h, h) to line up with (I, Q) lanes.
+    /// </summary>
+    private sealed class FirState
+    {
+        private readonly int _taps;
+        private readonly float[] _coef;   // 2 * taps
+        private readonly float[] _delay;  // 4 * taps (2 * taps complex samples)
+        private int _pos;                 // next write slot, in complex samples [0, taps)
+
+        public FirState(double[] filter)
+        {
+            _taps = filter.Length;
+            _coef = new float[2 * _taps];
+            for (int j = 0; j < _taps; j++)
+            {
+                // Window slot j (0 = oldest) pairs with h[taps - 1 - j].
+                float h = (float)filter[_taps - 1 - j];
+                _coef[2 * j] = h;
+                _coef[2 * j + 1] = h;
+            }
+            _delay = new float[4 * _taps];
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Push(float i, float q)
+        {
+            int w = _pos * 2;
+            int mirror = w + 2 * _taps;
+            float[] d = _delay;
+            d[w] = i; d[w + 1] = q;
+            d[mirror] = i; d[mirror + 1] = q;
+            if (++_pos == _taps) _pos = 0;
+        }
+
+        public void Compute(out float outI, out float outQ)
+        {
+            // Window = complex slots [_pos, _pos + taps), oldest first. Indices stay within
+            // _delay because _pos < taps and the buffer holds 2 * taps complex samples.
+            int len = _coef.Length;
+            ref float x = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_delay), _pos * 2);
+            ref float h = ref MemoryMarshal.GetArrayDataReference(_coef);
+            float sI = 0, sQ = 0;
+            int k = 0;
+
+            if (Vector128.IsHardwareAccelerated && len >= 8)
+            {
+                // Lanes alternate I, Q, I, Q (start offset is always even).
+                var acc0 = Vector128<float>.Zero;
+                var acc1 = Vector128<float>.Zero;
+                for (; k <= len - 8; k += 8)
+                {
+                    acc0 = Vector128.MultiplyAddEstimate(
+                        Vector128.LoadUnsafe(ref x, (nuint)k), Vector128.LoadUnsafe(ref h, (nuint)k), acc0);
+                    acc1 = Vector128.MultiplyAddEstimate(
+                        Vector128.LoadUnsafe(ref x, (nuint)(k + 4)), Vector128.LoadUnsafe(ref h, (nuint)(k + 4)), acc1);
+                }
+                if (k <= len - 4)
+                {
+                    acc0 = Vector128.MultiplyAddEstimate(
+                        Vector128.LoadUnsafe(ref x, (nuint)k), Vector128.LoadUnsafe(ref h, (nuint)k), acc0);
+                    k += 4;
+                }
+                var acc = acc0 + acc1;
+                sI = acc.GetElement(0) + acc.GetElement(2);
+                sQ = acc.GetElement(1) + acc.GetElement(3);
+            }
+
+            for (; k < len; k += 2)
+            {
+                sI += Unsafe.Add(ref x, k) * Unsafe.Add(ref h, k);
+                sQ += Unsafe.Add(ref x, k + 1) * Unsafe.Add(ref h, k + 1);
+            }
+
+            outI = sI;
+            outQ = sQ;
+        }
+
+        public void Reset()
+        {
+            Array.Clear(_delay);
+            _pos = 0;
+        }
     }
 
     /// <summary>

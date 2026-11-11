@@ -889,13 +889,10 @@ public class RtlDevice : BackgroundService, IRadioSource
                     await _iqDumpStream.WriteAsync(buffer, 0, bytesRead, token);
 
                 // Distribute IQ to ALL channel pipelines (never skip - audio data must be continuous)
-                if (_parallelPipelines != null)
+                var pipelines = _parallelPipelines;
+                if (pipelines != null)
                 {
-                    foreach (var pipeline in _parallelPipelines)
-                    {
-                        try { pipeline.ProcessIQ(buffer, bytesRead); }
-                        catch (Exception ex) { _logger.LogError(ex, $"Error in pipeline for {pipeline.Channel.AlphaTag}"); }
-                    }
+                    DistributeIQ(pipelines, buffer, bytesRead);
                 }
 
                 // Rate-limited FFT for spectrum display (~50 Hz)
@@ -926,6 +923,37 @@ public class RtlDevice : BackgroundService, IRadioSource
             if (ReferenceEquals(_scannerProcess, process)) _scannerProcess = null;
         }
         return totalBytesRead;
+    }
+
+    /// <summary>
+    /// Feed one IQ chunk to every parallel pipeline. Channelizing (the DSP-heavy part) runs
+    /// across cores since each pipeline only reads the shared buffer and writes its own state.
+    /// Dispatch (decoder feed, squelch, events) then runs sequentially on this thread, because
+    /// the event handlers share the tone detector, scanner state and recording service.
+    /// Both phases finish before the next read reuses <paramref name="buffer"/>.
+    /// </summary>
+    private void DistributeIQ(List<ChannelPipeline> pipelines, byte[] buffer, int bytesRead)
+    {
+        if (pipelines.Count > 1)
+        {
+            Parallel.For(0, pipelines.Count, i => ChannelizeSafe(pipelines[i], buffer, bytesRead));
+        }
+        else if (pipelines.Count == 1)
+        {
+            ChannelizeSafe(pipelines[0], buffer, bytesRead);
+        }
+
+        foreach (var pipeline in pipelines)
+        {
+            try { pipeline.DispatchAudio(); }
+            catch (Exception ex) { _logger.LogError(ex, $"Error in pipeline for {pipeline.Channel.AlphaTag}"); }
+        }
+    }
+
+    private void ChannelizeSafe(ChannelPipeline pipeline, byte[] buffer, int bytesRead)
+    {
+        try { pipeline.ChannelizeIQ(buffer, bytesRead); }
+        catch (Exception ex) { _logger.LogError(ex, $"Error channelizing {pipeline.Channel.AlphaTag}"); }
     }
 
     /// <summary>
