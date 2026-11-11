@@ -278,6 +278,9 @@ public class UpdateService : IUpdateService, IHostedService
 
     private async Task RunUpdateAsync()
     {
+        // Once the apply script has been handed the unpacked release, that directory
+        // is no longer ours to touch — whatever systemd-run then reports.
+        var handedOff = false;
         try
         {
             if (!AppPaths.IsInstalled)
@@ -343,6 +346,7 @@ public class UpdateService : IUpdateService, IHostedService
 
             SetState(UpdateState.Success, "finalize");
             Emit("finalize", "Release verified. Swapping it in and restarting…");
+            handedOff = true;
             LaunchFinalizer(applyScript, newApp, AppPaths.Home!);
         }
         catch (OperationCanceledException)
@@ -355,10 +359,11 @@ public class UpdateService : IUpdateService, IHostedService
         }
         finally
         {
-            bool handedOff;
-            lock (_lock) { _running = false; handedOff = _state == UpdateState.Success; }
-            // On success the apply script owns the staging dir; otherwise don't leave
-            // a partial download or unpacked release behind.
+            lock (_lock) { _running = false; }
+            // Before the hand-off, don't leave a partial download or unpacked release
+            // behind. After it, the apply script owns the staging dir and removes it
+            // itself: deleting it here pulls the release out from under a script that
+            // may already be running, which then has nothing to swap in.
             if (!handedOff && AppPaths.IsInstalled)
             {
                 try { if (Directory.Exists(AppPaths.StagingDir)) Directory.Delete(AppPaths.StagingDir, recursive: true); }
@@ -429,7 +434,13 @@ public class UpdateService : IUpdateService, IHostedService
             // The script runs in its own cgroup, then stops us, swaps, and restarts.
             if (proc == null || !proc.WaitForExit(10_000) || proc.ExitCode != 0)
             {
-                var err = proc is { HasExited: true } ? proc.StandardError.ReadToEnd().Trim() : "timed out";
+                string err;
+                if (proc is { HasExited: true })
+                {
+                    var stderr = proc.StandardError.ReadToEnd().Trim();
+                    err = stderr.Length > 0 ? stderr : $"systemd-run exited with code {proc.ExitCode}";
+                }
+                else err = "systemd-run did not return";
                 Fail($"Failed to launch the update finalizer: {err}");
                 return;
             }

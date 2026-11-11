@@ -103,6 +103,52 @@ sudo test -d "$HOME_DIR/app.failed" || fail "Failed release was not kept for ins
 log_success "Broken release rolled back."
 
 # ---------------------------------------------------------------
+log_info "Step 4b: In-app update, end to end..."
+# Steps 3 and 4 call apply_update.sh directly. This drives the server's own
+# updater the way the Update button does — download, verify, unpack, hand off to
+# a transient systemd unit that stops the very service that launched it — against
+# a release served from this machine.
+FAKE="$WORK/fake-release"
+mkdir -p "$FAKE"
+cp "$TARBALL" "$FAKE/"
+(cd "$FAKE" && sha256sum "$(basename "$TARBALL")" > SHA256SUMS)
+cat > "$FAKE/latest.json" <<JSON
+{"tag_name":"v999.0.0","name":"Test release","body":"","html_url":"http://127.0.0.1:8765/",
+ "assets":[{"name":"$(basename "$TARBALL")","browser_download_url":"http://127.0.0.1:8765/$(basename "$TARBALL")"},
+           {"name":"SHA256SUMS","browser_download_url":"http://127.0.0.1:8765/SHA256SUMS"}]}
+JSON
+python3 -m http.server 8765 --bind 127.0.0.1 --directory "$FAKE" > /dev/null 2>&1 &
+FAKE_PID=$!
+trap 'kill "$FAKE_PID" 2>/dev/null || true; sudo rm -rf "$WORK"' EXIT
+
+echo '{"Update":{"LatestReleaseUrl":"http://127.0.0.1:8765/latest.json"}}' | sudo tee "$HOME_DIR/config/appsettings.json" > /dev/null
+sudo systemctl restart openscanner
+running_version > /dev/null || fail "Server did not come back after pointing it at the test release."
+# Marks the app directory that is running now; after the update it must be app.prev.
+sudo touch "$HOME_DIR/app/BEFORE_UPDATE"
+
+START_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:80/api/update/start)
+[ "$START_CODE" = "202" ] || fail "POST /api/update/start returned $START_CODE."
+
+UPDATED=false
+for _ in $(seq 1 90); do
+    if sudo test -f "$HOME_DIR/app.prev/BEFORE_UPDATE" && ! sudo test -e "$HOME_DIR/app/BEFORE_UPDATE" \
+        && ! sudo test -e "$HOME_DIR/staging" && systemctl is-active --quiet openscanner; then
+        UPDATED=true
+        break
+    fi
+    sleep 2
+done
+if [ "$UPDATED" != true ]; then
+    sudo journalctl -u openscanner-selfupdate -n 40 --no-pager || true
+    curl -s http://localhost:80/api/update/status || true
+    fail "The in-app update did not swap the release in."
+fi
+running_version > /dev/null || fail "Server did not answer after the in-app update."
+kill "$FAKE_PID" 2>/dev/null || true
+log_success "In-app update downloaded, verified and swapped the release in."
+
+# ---------------------------------------------------------------
 log_info "Step 5: Uninstall keeps data..."
 sudo cp "$HOME_DIR/certs/openscanner.pfx" "$WORK/openscanner.pfx"
 sudo "$HOME_DIR/app/scripts/uninstall.sh" || fail "uninstall.sh failed."
