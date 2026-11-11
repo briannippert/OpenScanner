@@ -166,6 +166,12 @@ public interface IDatabase
     /// </summary>
     Task<IEnumerable<CallLog>> GetUntranscribedSinceAsync(DateTime sinceUtc);
 
+    /// <summary>
+    /// Counts transmissions per UTC hour since <paramref name="sinceUtc"/>, oldest
+    /// first. Hours with no transmissions are omitted.
+    /// </summary>
+    Task<IEnumerable<ActivityBucket>> GetTransmissionHourlyCountsAsync(DateTime sinceUtc);
+
     // Fire Tones
     
     /// <summary>

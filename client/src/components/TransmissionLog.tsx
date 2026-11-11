@@ -292,7 +292,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                     <FavoritesList key={favoritesRefreshKey} filter={filter} toneOutIds={toneOutIds} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
                 ) : (
                     <>
-                        {liveLogs.length > 0 && <ActivityHeatmap logs={liveLogs} />}
+                        <ActivityHeatmap />
                         <List dense component="nav">
                             {years.length === 0 ? (
                                 <EmptyState icon={<Folder />} title="No archived recordings" hint="Older recordings are grouped by date here." />

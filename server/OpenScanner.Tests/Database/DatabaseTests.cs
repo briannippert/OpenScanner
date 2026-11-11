@@ -151,6 +151,25 @@ public class DatabaseTests : IDisposable
     }
 
     [Fact]
+    public async Task GetTransmissionHourlyCounts_ShouldBucketByUtcHour_WithinWindow()
+    {
+        CallLog At(string id, string timestamp) => new(id, timestamp, 155.0, "PD", "d", null, null, null, 1.0, null, null, null);
+        await _db.SaveTransmissionAsync(At("h1", "2026-03-10T14:05:00.0000000Z"));
+        await _db.SaveTransmissionAsync(At("h2", "2026-03-10T14:59:59.9990000Z"));
+        await _db.SaveTransmissionAsync(At("h3", "2026-03-10T15:00:00.0000000Z"));
+        await _db.SaveTransmissionAsync(At("h4", "2026-03-12T03:30:00.0000000Z"));
+        // Before the window: must not be counted.
+        await _db.SaveTransmissionAsync(At("h5", "2026-03-09T23:59:59.0000000Z"));
+
+        var since = new DateTime(2026, 3, 10, 0, 0, 0, DateTimeKind.Utc);
+        var buckets = (await _db.GetTransmissionHourlyCountsAsync(since)).ToList();
+
+        Assert.Equal(
+            new[] { ("2026-03-10T14:00:00Z", 2), ("2026-03-10T15:00:00Z", 1), ("2026-03-12T03:00:00Z", 1) },
+            buckets.Select(b => (b.Hour, b.Count)));
+    }
+
+    [Fact]
     public async Task GetAliasCandidates_ShouldGroupDistinctSrcAndTgPerChannel_WithinWindow()
     {
         var now = DateTime.UtcNow.ToString("o");

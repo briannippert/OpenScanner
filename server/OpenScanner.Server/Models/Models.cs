@@ -107,6 +107,18 @@ public class Channel
 }
 
 /// <summary>
+/// Number of transmissions in one hour, for the activity heatmap.
+/// </summary>
+public class ActivityBucket
+{
+    /// <summary>Start of the hour, UTC (ISO 8601, e.g. 2026-11-11T20:00:00Z).</summary>
+    public string Hour { get; set; } = string.Empty;
+
+    /// <summary>Number of transmissions that started in that hour.</summary>
+    public int Count { get; set; }
+}
+
+/// <summary>
 /// Represents a recorded transmission log.
 /// </summary>
 public class CallLog

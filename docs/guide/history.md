@@ -10,6 +10,8 @@ Every transmission is recorded and listed in the history panel, with its channel
 | **Favorites** | Recordings you have starred. |
 | **Browse** | Everything, organised as Year → Month → Day → Channel. |
 
+The **Browse** view opens with an activity heatmap: how busy each hour of each weekday has been over the last four weeks, in your local time.
+
 In **Recent** and **Favorites** you can filter to **Tone-outs** to see only transmissions that followed a [fire tone-out](fire-tones.md).
 
 ## Search
