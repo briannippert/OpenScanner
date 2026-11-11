@@ -95,10 +95,8 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
         {
             try
             {
-                var whisperRoot = FindWhisperRoot();
-                var modelPath = Path.Combine(whisperRoot, $"models/ggml-{modelName}.bin");
-                if (File.Exists(modelPath)) { SetModelStatus($"ready:{modelName}"); return; }
-                EnsureModelAvailable(whisperRoot, modelName);
+                if (File.Exists(AppPaths.WhisperModelPath(modelName))) { SetModelStatus($"ready:{modelName}"); return; }
+                EnsureModelAvailable(modelName);
             }
             catch (Exception ex)
             {
@@ -307,36 +305,20 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
     private static string SafeForLog(string? value) =>
         (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
 
-    // Walk up from the working directory to locate the cloned whisper.cpp folder.
-    private static string FindWhisperRoot()
-    {
-        var currentDir = new DirectoryInfo(Directory.GetCurrentDirectory());
-        for (int i = 0; i < 6 && currentDir != null; i++)
-        {
-            var probe = Path.Combine(currentDir.FullName, "whisper.cpp");
-            if (Directory.Exists(probe)) return probe;
-
-            probe = Path.Combine(currentDir.FullName, "../whisper.cpp");
-            if (Directory.Exists(probe)) return Path.GetFullPath(probe);
-
-            currentDir = currentDir.Parent;
-        }
-        return Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "../../whisper.cpp"));
-    }
-
     private void SetModelStatus(string status)
     {
         try { _db.SetSettingAsync("TranscriptionModelStatus", status).GetAwaiter().GetResult(); }
         catch (Exception ex) { _logger.LogWarning(ex, "Failed to write TranscriptionModelStatus"); }
     }
 
-    // Ensure the ggml model file for `modelName` exists under whisperRoot/models,
+    // Ensure the ggml model file for `modelName` exists in the models directory,
     // downloading it via whisper.cpp's download-ggml-model.sh if missing. Returns
     // true when the model is present. Surfaces progress via the
     // TranscriptionModelStatus setting so the web UI can show it.
-    private bool EnsureModelAvailable(string whisperRoot, string modelName)
+    private bool EnsureModelAvailable(string modelName)
     {
-        var modelPath = Path.Combine(whisperRoot, $"models/ggml-{modelName}.bin");
+        var modelsDir = AppPaths.WhisperModelsDir;
+        var modelPath = AppPaths.WhisperModelPath(modelName);
         if (File.Exists(modelPath)) return true;
 
         _modelDownloadLock.Wait();
@@ -345,7 +327,7 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
             // Re-check now that we hold the lock (another worker may have fetched it).
             if (File.Exists(modelPath)) return true;
 
-            var script = Path.Combine(whisperRoot, "models/download-ggml-model.sh");
+            var script = AppPaths.WhisperDownloadScript;
             if (!File.Exists(script))
             {
                 _logger.LogError("Model download script not found at {Script}", script);
@@ -356,16 +338,20 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
             _logger.LogInformation("Downloading Whisper model '{Model}'...", SafeForLog(modelName));
             SetModelStatus($"downloading:{modelName}");
 
+            Directory.CreateDirectory(modelsDir);
             var psi = new ProcessStartInfo("bash")
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                WorkingDirectory = whisperRoot
+                WorkingDirectory = modelsDir
             };
             psi.ArgumentList.Add(script);
             psi.ArgumentList.Add(modelName);
+            // Explicit target: the script's default is its own directory, which in a
+            // release install is inside the app dir that updates replace.
+            psi.ArgumentList.Add(modelsDir);
 
             try
             {
@@ -512,20 +498,19 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
             return null;
         }
 
-        var whisperRoot = FindWhisperRoot();
-        var whisperBin = Path.Combine(whisperRoot, "build/bin/whisper-cli");
-        var modelPath = Path.Combine(whisperRoot, $"models/ggml-{modelName}.bin");
+        var whisperBin = AppPaths.WhisperCli;
+        var modelPath = AppPaths.WhisperModelPath(modelName);
 
         if (!File.Exists(whisperBin))
         {
-            _logger.LogError($"Whisper binary not found at {whisperBin}. Search root was: {whisperRoot}");
+            _logger.LogError("Whisper binary not found at {WhisperBin}.", whisperBin);
             return null;
         }
 
         // Download the selected model on demand if it isn't present yet. Blocks
         // this worker until ready (every queued clip needs the same model, so
         // there is nothing else to do meanwhile).
-        if (!EnsureModelAvailable(whisperRoot, modelName))
+        if (!EnsureModelAvailable(modelName))
         {
             _logger.LogError("Transcription model '{Model}' is not available and could not be downloaded.", SafeForLog(modelName));
             return null;
@@ -549,7 +534,7 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
-            WorkingDirectory = whisperRoot
+            WorkingDirectory = Path.GetDirectoryName(whisperBin)!
         };
 
         try

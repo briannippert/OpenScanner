@@ -34,7 +34,7 @@ public class Database : IDatabase
         }
         else
         {
-            _dataDir = Path.GetFullPath(Path.Combine(root, "../../data"));
+            _dataDir = AppPaths.DataDir;
         }
 
         var configConnString = configuration.GetConnectionString("DefaultConnection");

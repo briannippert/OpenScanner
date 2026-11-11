@@ -10,7 +10,6 @@ const status = (over: Partial<UpdateStatus> = {}): UpdateStatus => ({
     state: 'idle',
     currentVersion: '0.1.70',
     currentCommit: 'abcdef1234567890',
-    commitsBehind: 0,
     updateAvailable: false,
     log: [],
     lastCheckedUtc: new Date(Date.now() - 25 * 60_000).toISOString(),
@@ -51,7 +50,6 @@ describe('UpdateManager — manual check', () => {
             state: 'available',
             updateAvailable: true,
             latestTag: 'v0.2.0',
-            commitsBehind: 4,
             lastCheckedUtc: new Date().toISOString(),
         }));
 
@@ -65,7 +63,7 @@ describe('UpdateManager — manual check', () => {
 
         // The primary action flips from "Up to date" to offering the new release.
         expect(await screen.findByRole('button', { name: /Update to v0\.2\.0/ })).toBeDefined();
-        expect(screen.getByText(/latest v0\.2\.0 \(4 behind\)/)).toBeDefined();
+        expect(screen.getByText(/latest v0\.2\.0/)).toBeDefined();
         expect(screen.getByText('Checked just now')).toBeDefined();
     });
 
@@ -96,7 +94,7 @@ describe('UpdateManager — manual check', () => {
         );
     });
 
-    it('is disabled mid-update so a check cannot race the build', async () => {
+    it('is disabled mid-update so a check cannot race the install', async () => {
         jsonOnce(status());
         renderDialog({ state: 'updating' });
         await waitFor(() =>

@@ -13,7 +13,7 @@ public enum UpdateState
     Available,
     /// <summary>An update is currently being applied.</summary>
     Updating,
-    /// <summary>The update built successfully; the service is restarting.</summary>
+    /// <summary>The release was downloaded and verified; the service is restarting into it.</summary>
     Success,
     /// <summary>The update failed; the running build is unchanged and the log is retained.</summary>
     Failed,
@@ -32,7 +32,7 @@ public record UpdateStatus
     /// <summary>Currently running app version (nbgv informational version).</summary>
     public string CurrentVersion { get; init; } = "";
 
-    /// <summary>Currently running git commit.</summary>
+    /// <summary>Git commit the running build was produced from.</summary>
     public string CurrentCommit { get; init; } = "";
 
     /// <summary>Tag of the latest GitHub release, if a check has run.</summary>
@@ -47,13 +47,10 @@ public record UpdateStatus
     /// <summary>URL of the latest release on GitHub.</summary>
     public string? ReleaseUrl { get; init; }
 
-    /// <summary>Number of commits the running checkout is behind the latest release tag.</summary>
-    public int CommitsBehind { get; init; }
-
-    /// <summary>True when the latest release differs from (and is ahead of) the running commit.</summary>
+    /// <summary>True when the latest release is newer than the running build and installable on this machine.</summary>
     public bool UpdateAvailable { get; init; }
 
-    /// <summary>Current step of an in-progress update (fetch|reset|build|finalize).</summary>
+    /// <summary>Current step of an in-progress update (download|verify|extract|finalize).</summary>
     public string? Phase { get; init; }
 
     /// <summary>Accumulated update output (bounded), newest last.</summary>

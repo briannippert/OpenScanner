@@ -63,7 +63,7 @@ const UpdateManager: React.FC<Props> = ({ open, onClose, log, state, onSeed }) =
     if (el) el.scrollTop = el.scrollHeight;
   }, [log]);
 
-  // Once the build succeeds, poll for the restart to complete (commit changes).
+  // Once the release is staged, poll for the restart to complete (commit changes).
   useEffect(() => {
     if (!open || state !== 'success' || restarted) return;
     const before = status?.currentCommit;
@@ -157,7 +157,7 @@ const UpdateManager: React.FC<Props> = ({ open, onClose, log, state, onSeed }) =
             <Chip
               size="small"
               color={available ? 'warning' : 'default'}
-              label={`latest ${status.latestTag}${status.commitsBehind ? ` (${status.commitsBehind} behind)` : ''}`}
+              label={`latest ${status.latestTag}`}
               sx={{ fontFamily: MONO }}
             />
           </>
@@ -179,7 +179,7 @@ const UpdateManager: React.FC<Props> = ({ open, onClose, log, state, onSeed }) =
       )}
       {state === 'success' && !restarted && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          Build succeeded — the service is restarting. This page will reconnect automatically.
+          Update downloaded and verified — the service is restarting. This page will reconnect automatically.
         </Alert>
       )}
       {failed && (

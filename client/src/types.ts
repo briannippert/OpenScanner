@@ -132,7 +132,6 @@ export interface UpdateStatus {
     latestName?: string;
     releaseNotes?: string;
     releaseUrl?: string;
-    commitsBehind: number;
     updateAvailable: boolean;
     phase?: string;
     log: string[];

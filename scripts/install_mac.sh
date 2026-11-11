@@ -34,7 +34,7 @@ for arg in "$@"; do
 done
 
 if [ "$(uname)" != "Darwin" ]; then
-    log_error "This script is for macOS. On Linux/Raspberry Pi use ./scripts/install_service.sh"
+    log_error "This script is for macOS. On Linux/Raspberry Pi use scripts/install.sh (see README)"
     exit 1
 fi
 

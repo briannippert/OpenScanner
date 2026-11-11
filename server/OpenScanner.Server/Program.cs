@@ -8,6 +8,11 @@ using OpenScanner.Server.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Release installs keep machine-local overrides outside the app directory, which is
+// replaced wholesale on every update.
+if (AppPaths.LocalConfigFile is { } localConfig)
+    builder.Configuration.AddJsonFile(localConfig, optional: true, reloadOnChange: false);
+
 // Debug: Print loaded configuration sources
 Console.WriteLine("Loaded Configuration Sources:");
 foreach (var source in builder.Configuration.Sources)
@@ -100,8 +105,7 @@ app.UseSwaggerUi(config =>
 });
 
 // Static Files (Frontend)
-var cwd = Directory.GetCurrentDirectory();
-var clientDistPath = Path.GetFullPath(Path.Combine(cwd, "../../client/dist"));
+var clientDistPath = AppPaths.ClientDist;
 if (Directory.Exists(clientDistPath))
 {
     app.UseStaticFiles(new StaticFileOptions
@@ -112,7 +116,7 @@ if (Directory.Exists(clientDistPath))
 }
 
 // Static Files (Audio Recordings)
-var recordingsPath = Path.GetFullPath(Path.Combine(cwd, "../../data/recordings"));
+var recordingsPath = AppPaths.RecordingsDir;
 if (!Directory.Exists(recordingsPath)) Directory.CreateDirectory(recordingsPath);
 
 var provider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
@@ -162,7 +166,7 @@ app.Map("/ws/audio", async (HttpContext context) =>
 // SPA Fallback
 app.MapFallback(async context =>
 {
-    var indexPath = Path.Combine(cwd, "../../client/dist/index.html");
+    var indexPath = Path.Combine(clientDistPath, "index.html");
     if (File.Exists(indexPath))
     {
         await context.Response.SendFileAsync(indexPath);

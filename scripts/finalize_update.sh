@@ -1,29 +1,29 @@
 #!/bin/bash
-# finalize_update.sh — swap a freshly-built server into place and restart the service.
+# finalize_update.sh — one-time bridge from a git-clone install to a release install.
 #
-# Invoked (detached, in its own transient systemd unit) by UpdateService after a
-# successful staging build, so that stopping the openscanner service does not kill
-# this script mid-swap:
+# Releases are now prebuilt artifacts installed under /opt/openscanner (see
+# install.sh), and the in-app updater swaps them in with apply_update.sh. This
+# file exists only for devices still running a build from *before* that change.
+# Their updater does `git reset --hard <tag>`, builds from source into a staging
+# dir, and then runs this script from the freshly reset checkout:
 #
 #   systemd-run --collect --unit=openscanner-selfupdate --property=Type=oneshot \
 #       /bin/bash <repo>/scripts/finalize_update.sh <staging> <publish> <unit>
 #
-# Args: $1=staging dir  $2=publish dir  $3=systemd unit (default: openscanner)
+# Instead of swapping that source build in, hand over to the release installer,
+# which downloads the matching artifact and migrates data, certs and models out
+# of this checkout. After that the device updates from artifacts and never runs
+# this script again.
 set -u
 
-STAGING="${1:?staging dir required}"
-PUBLISH="${2:?publish dir required}"
+STAGING="${1:-}"
 UNIT="${3:-openscanner}"
-BACKUP="${PUBLISH%/}_backup"
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-log() { echo "[finalize] $*"; }
+log() { echo "[bridge] $*"; }
 
-# The service — and therefore the whole self-update — runs as root, while the
-# checkout belongs to the operator. Every step that writes into the repo (git
-# reset, npm build, the swap below) leaves root-owned files behind, which then
-# block the next update and any manual `install_service.sh` run. Hand the tree
-# back to whoever owns .git so the repo is never left half root-owned.
+# The old updater ran git and the build as root inside the operator's checkout.
+# Hand the tree back so it is not left half root-owned.
 restore_ownership() {
     [ "$(id -u)" -eq 0 ] || return 0
     local owner
@@ -31,13 +31,11 @@ restore_ownership() {
     case "$owner" in
         ""|root:*) return 0 ;;
     esac
-    log "Restoring ownership of $REPO_ROOT to $owner"
     chown -R "$owner" "$REPO_ROOT" || log "WARN: chown failed"
 }
 
-# Whatever happens, never leave the service down or the repo root-owned: the
-# build steps have already run as root by the time we get here, so every exit
-# path — including the aborts below — needs the ownership fixup.
+# Whatever happens, never leave the service down. If the installer failed it has
+# already put the old install back, so this restarts the old version.
 cleanup() {
     restore_ownership
     if ! systemctl is-active --quiet "$UNIT"; then
@@ -47,37 +45,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [ ! -d "$STAGING" ] || [ -z "$(ls -A "$STAGING" 2>/dev/null)" ]; then
-    log "ERROR: staging dir '$STAGING' is missing or empty; aborting swap"
+# The source build the old updater just produced is not used.
+[ -n "$STAGING" ] && [ -d "$STAGING" ] && rm -rf "$STAGING"
+
+log "Migrating this install to release artifacts under /opt/openscanner"
+if bash "$REPO_ROOT/scripts/install.sh" --migrate-from "$REPO_ROOT"; then
+    log "Done. This checkout is no longer used."
+else
+    log "ERROR: migration failed; the previous install is unchanged. Re-run: sudo $REPO_ROOT/scripts/install.sh"
     exit 1
 fi
-
-log "Stopping $UNIT"
-systemctl stop "$UNIT" || true
-
-# Keep the previous build for rollback.
-if [ -d "$PUBLISH" ]; then
-    rm -rf "$BACKUP"
-    cp -a "$PUBLISH" "$BACKUP" || log "WARN: could not snapshot previous build"
-fi
-
-log "Swapping in new build"
-if command -v rsync >/dev/null 2>&1; then
-    if ! rsync -a --delete "$STAGING"/ "$PUBLISH"/; then
-        log "ERROR: rsync failed; rolling back"
-        [ -d "$BACKUP" ] && rsync -a --delete "$BACKUP"/ "$PUBLISH"/
-    fi
-else
-    mkdir -p "$PUBLISH"
-    rm -rf "${PUBLISH:?}/"*
-    if ! cp -a "$STAGING"/. "$PUBLISH"/; then
-        log "ERROR: cp failed; rolling back"
-        [ -d "$BACKUP" ] && cp -a "$BACKUP"/. "$PUBLISH"/
-    fi
-fi
-
-chmod +x "$PUBLISH/OpenScanner.Server" 2>/dev/null || true
-
-log "Starting $UNIT"
-systemctl start "$UNIT"
-log "Done"

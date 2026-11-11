@@ -468,7 +468,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// <inheritdoc />
     public void StartDumping(string label)
     {
-        var dataDir = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "../../data/samples"));
+        var dataDir = AppPaths.SamplesDir;
         if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
 
         // Sanitize the user-supplied label to a safe filename token: this strips path

@@ -23,7 +23,7 @@ OpenScanner is a high-performance, web-based digital radio scanner designed for 
     - **Channel Management**: Full database control to add, edit, or delete channels. Includes frequency hold and scan resume.
 - **GPS Integration**: Live tracking of location, altitude (Imperial units), and satellite count.
 - **Swagger Documentation**: Full OpenAPI/Swagger UI for API exploration.
-- **Service-Ready**: Automated installer configures OpenScanner as a systemd service on port 80.
+- **Service-Ready**: One-line installer sets OpenScanner up as a systemd service on ports 80/443, with in-app updates from prebuilt releases.
 
 ## Hardware Requirements
 
@@ -34,18 +34,14 @@ OpenScanner is a high-performance, web-based digital radio scanner designed for 
 
 ## Quick Start
 
-### 1. Clone & Install
-The unified installer handles everything: it installs required system libraries and radio drivers (DSD-FME, mbelib), builds the .NET backend and React frontend, and sets up Whisper AI.
+### 1. Install
+One command installs the latest release — no repo clone, .NET SDK or Node needed on the device:
 
 ```bash
-# Clone the repository
-git clone https://github.com/briannippert/OpenScanner.git
-cd OpenScanner
-
-# Run the installer (do NOT run with sudo, it will prompt for password when needed)
-chmod +x scripts/*.sh
-./scripts/install_service.sh
+curl -fsSL https://github.com/briannippert/OpenScanner/releases/latest/download/install.sh | sudo bash
 ```
+
+The installer downloads the prebuilt release for your CPU (64-bit ARM or x86-64) and verifies its checksum, installs the required system libraries, builds the radio decoders (DSD-FME, mbelib) from source, sets up Whisper AI, and registers the `openscanner` systemd service. It needs a Debian-based 64-bit OS (Raspberry Pi OS, Ubuntu, Debian).
 
 ### 2. Access the UI
 Once installed, open your browser to:
@@ -56,8 +52,23 @@ For API documentation, visit:
 
 ## Installation Options
 
-- **Full Install**: `./scripts/install_service.sh` (Builds everything and installs the systemd service).
-- **Dependencies Only**: `./scripts/install_service.sh --deps-only` (Installs all required system libraries, radio drivers, and Whisper models, then exits without building the app or installing the service).
+Pass options after `bash -s --`, e.g. `curl -fsSL …/install.sh | sudo bash -s -- --version v0.1.300`.
+
+- `--version <tag>`: install a specific release instead of the latest.
+- `--tarball <path>`: install from a release tarball you already downloaded (offline installs).
+- `--deps-only`: install the system libraries and radio decoders, then stop.
+- `--no-model`: skip pre-downloading the Whisper model (the server fetches it on first use).
+
+Everything lives under `/opt/openscanner`:
+
+| Path | Contents | Kept across updates |
+|---|---|---|
+| `app/` | The installed release (server, web client, whisper-cli) | Replaced |
+| `app.prev/` | The previous release, for rollback | Replaced |
+| `data/` | Database, recordings, IQ samples | Yes |
+| `certs/` | Self-signed HTTPS certificate | Yes |
+| `whisper/models/` | Whisper models | Yes |
+| `config/appsettings.json` | Your overrides of the server's `appsettings.json` | Yes |
 
 ## Running on macOS
 
@@ -96,18 +107,49 @@ dotnet run -c Release --urls "http://0.0.0.0:8080"
 
 ## Updating
 
-To update OpenScanner to the latest version, simply navigate to the project directory and re-run the installation script. This will pull the latest changes, rebuild components, and restart the service:
+Open **Software Update** in the web UI and click **Update**. The server downloads the new release, verifies its SHA-256 checksum, swaps it in and restarts. If the new version fails to start, the previous one is restored automatically.
 
-```bash
-./scripts/install_service.sh
-```
+You can also re-run the install command at any time; it moves the device to the latest release and repairs the install.
+
+### Upgrading from a git-clone install
+
+Older versions were built on the device from a git clone. Those installs move to the release layout on their own: click **Update** in the web UI (or re-run `./scripts/install_service.sh` in the old checkout). Your database, recordings, certificate, Whisper models and PowerDMS setting are moved to `/opt/openscanner`; afterwards the old checkout is unused and can be deleted.
 
 ## Management
 
 - **Status Check**: `systemctl status openscanner`
 - **View Logs**: `journalctl -u openscanner -f`
-- **Uninstall Service**: `./scripts/uninstall_service.sh`
-- **Data Location**: Database and recordings are stored in the `/data` directory in the project root.
+- **Uninstall**: `sudo /opt/openscanner/app/scripts/uninstall.sh` (keeps your data; add `--purge` to delete it too)
+- **Data Location**: Database and recordings are stored in `/opt/openscanner/data`.
+
+## Development
+
+Building from source needs the .NET 10 SDK and Node 22. The server build also builds the client:
+
+```bash
+git clone https://github.com/briannippert/OpenScanner.git
+cd OpenScanner
+
+# Radio decoders + system libraries (Linux; on macOS use ./scripts/install_mac.sh)
+sudo ./scripts/install.sh --deps-only
+
+# Whisper for local transcription (optional)
+git clone https://github.com/ggerganov/whisper.cpp.git
+cmake -S whisper.cpp -B whisper.cpp/build && cmake --build whisper.cpp/build -j --config Release
+
+cd server/OpenScanner.Server
+dotnet run --urls "http://0.0.0.0:8080"
+```
+
+Run from a checkout, the server keeps its data in `data/` at the repo root. Set `OPENSCANNER_HOME` to use the installed layout instead.
+
+## Releases
+
+Releases are cut manually: **Actions → Release → Run workflow** on `main`. The workflow builds a self-contained server, the web client and `whisper-cli` for `linux-x64` and `linux-arm64`, and publishes `openscanner-linux-<arch>.tar.gz`, `SHA256SUMS` and `install.sh` as a GitHub release. Devices pick it up from there. Running the workflow from another branch publishes a pre-release, which devices ignore.
+
+To build a tarball locally: `scripts/build_whisper.sh /tmp/whisper && scripts/package_release.sh linux-x64 dist --whisper-dir /tmp/whisper`.
+
+Third-party licences are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## Acknowledgments
 

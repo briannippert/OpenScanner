@@ -39,8 +39,7 @@ public class RecordingCleanupService : BackgroundService
         _minFreeBytes = configured is > 0 ? configured.Value : DefaultMinFreeBytes;
 
         // Mirror the recordings location used by RecordingService.
-        _recordingsPath = Path.GetFullPath(
-            Path.Combine(Directory.GetCurrentDirectory(), "../../data/recordings"));
+        _recordingsPath = AppPaths.RecordingsDir;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
