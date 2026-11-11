@@ -1,0 +1,76 @@
+site_name: OpenScanner
+site_description: Help and user guide for OpenScanner, a web-based digital radio scanner for the Raspberry Pi.
+site_url: https://briannippert.github.io/OpenScanner/
+repo_url: https://github.com/briannippert/OpenScanner
+repo_name: briannippert/OpenScanner
+edit_uri: edit/main/docs/
+copyright: OpenScanner is MIT licensed.
+
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  font:
+    text: Inter
+    code: Roboto Mono
+  palette:
+    # The app itself is dark-only, so dark is the default here too.
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.instant
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+extra_css:
+  - stylesheets/openscanner.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.keys
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Install: install.md
+      - First run: first-run.md
+  - User guide:
+      - The dashboard: guide/dashboard.md
+      - Channels: guide/channels.md
+      - History and playback: guide/history.md
+      - Transcription: guide/transcription.md
+      - Fire tone-outs: guide/fire-tones.md
+      - Radio aliases: guide/aliases.md
+      - Settings: guide/settings.md
+  - Maintenance:
+      - Updating: updating.md
+      - Troubleshooting: troubleshooting.md
+  - Development: development.md

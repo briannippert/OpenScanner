@@ -7,6 +7,8 @@ OpenScanner is a high-performance, web-based digital radio scanner designed for 
 
 ![OpenScanner UI](screenshot.png)
 
+**📖 [Help and user guide](https://briannippert.github.io/OpenScanner/)** — installation, first run, every feature, and troubleshooting.
+
 ## Key Features
 
 - **Digital Voice Decoding**: Stable P25 Phase 1 decoding via `rtl_fm` and `dsd-fme`.

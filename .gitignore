@@ -49,3 +49,6 @@ whisper.cpp/
 
 # Installer-generated HTTPS cert (self-signed, per-device)
 /certs/
+
+# MkDocs build output
+/site/
