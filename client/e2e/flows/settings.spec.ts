@@ -25,7 +25,6 @@ test.describe('Settings', () => {
         latestName: 'Release 9.9.9',
         releaseNotes: 'Big update!',
         releaseUrl: 'https://github.com/briannippert/OpenScanner/releases/tag/v9.9.9',
-        commitsBehind: 3,
         updateAvailable: true,
         log: [],
       } });

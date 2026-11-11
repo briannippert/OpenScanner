@@ -85,8 +85,7 @@ public class BackfillTranscriptionService : IBackfillService
                     : $"Found {pending.Count} clip(s) to re-transcribe.";
             }
 
-            var recordingsDir = Path.GetFullPath(
-                Path.Combine(Directory.GetCurrentDirectory(), "../../data/recordings"));
+            var recordingsDir = AppPaths.RecordingsDir;
 
             foreach (var log in pending)
             {

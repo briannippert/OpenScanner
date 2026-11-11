@@ -1,13 +1,71 @@
 name: Release
 
+# Manual only: Actions → Release → "Run workflow". Builds the release artifacts
+# that install.sh and the in-app updater install, and publishes them as a GitHub
+# release tagged v<version> (version comes from Nerdbank.GitVersioning).
+#
+# Run it from main for a real release. Run from any other branch and the result
+# is marked as a pre-release, which devices ignore (they follow releases/latest),
+# so the pipeline can be tried out safely.
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  build:
+    name: Build (${{ matrix.rid }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # Ubuntu 22.04 on purpose: its older glibc keeps whisper-cli runnable on
+          # Raspberry Pi OS (Debian 12) and other current distros.
+          - rid: linux-x64
+            runner: ubuntu-22.04
+          - rid: linux-arm64
+            runner: ubuntu-22.04-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Nerdbank.GitVersioning needs full history
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+
+      - name: Build whisper-cli
+        run: scripts/build_whisper.sh "$RUNNER_TEMP/whisper"
+
+      - name: Package release
+        run: scripts/package_release.sh ${{ matrix.rid }} dist --whisper-dir "$RUNNER_TEMP/whisper"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openscanner-${{ matrix.rid }}
+          path: dist/openscanner-${{ matrix.rid }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
   release:
-    name: Create Release
+    name: Publish Release
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -22,35 +80,41 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Install NBGV
-        run: dotnet tool install -g nbgv
-
-      - name: Get Version
+      - name: Get version
         id: nbgv
         run: |
-          VERSION=$(nbgv get-version -v SemVer2)
-          NPM_VERSION=$(nbgv get-version -v NpmPackageVersion)
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
-          echo "NPM_VERSION=$NPM_VERSION" >> $GITHUB_OUTPUT
+          dotnet tool install -g nbgv
+          echo "VERSION=$(nbgv get-version -v SemVer2)" >> "$GITHUB_OUTPUT"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
         with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: client/package-lock.json
+          path: dist
+          merge-multiple: true
 
-      - name: Sync package.json version
-        working-directory: ./client
+      - name: Assemble release assets
+        working-directory: dist
         run: |
-          npm version ${{ steps.nbgv.outputs.NPM_VERSION }} --no-git-tag-version
+          cp ../scripts/install.sh install.sh
+          sha256sum openscanner-linux-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          ls -lh
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.nbgv.outputs.TAG }}
-          name: Release ${{ steps.nbgv.outputs.VERSION }}
-          generate_release_notes: true
-          draft: false
-          prerelease: false
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.nbgv.outputs.VERSION }}
+        run: |
+          flags=()
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then flags+=(--prerelease); fi
+          # gh uploads the assets to a draft and only then publishes, so
+          # releases/latest never points at a release without its artifacts.
+          gh release create "v$VERSION" \
+            dist/openscanner-linux-x64.tar.gz \
+            dist/openscanner-linux-arm64.tar.gz \
+            dist/install.sh \
+            dist/SHA256SUMS \
+            --target "$GITHUB_SHA" \
+            --title "Release $VERSION" \
+            --generate-notes \
+            "${flags[@]}"

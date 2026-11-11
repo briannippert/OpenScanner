@@ -1,32 +1,46 @@
 name: Installer Test
 
+# Builds a release tarball from the PR and runs the real install → update →
+# rollback → uninstall → legacy-migration cycle against it on the runner.
 on:
   push:
     branches: [ "main" ]
     paths:
-      - 'scripts/install_service.sh'
-      - 'scripts/uninstall_service.sh'
-      - 'scripts/test_installer.sh'
+      - 'scripts/**'
+      - 'server/OpenScanner.Server/AppPaths.cs'
+      - 'server/OpenScanner.Server/Program.cs'
+      - 'server/OpenScanner.Server/OpenScanner.Server.csproj'
       - '.github/workflows/installer-test.yml'
   pull_request:
     branches: [ "main" ]
     paths:
-      - 'scripts/install_service.sh'
-      - 'scripts/uninstall_service.sh'
-      - 'scripts/test_installer.sh'
+      - 'scripts/**'
+      - 'server/OpenScanner.Server/AppPaths.cs'
+      - 'server/OpenScanner.Server/Program.cs'
+      - 'server/OpenScanner.Server/OpenScanner.Server.csproj'
       - '.github/workflows/installer-test.yml'
 
 jobs:
   test-installer:
     name: Installer
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: client/package-lock.json
+
     - name: Run Installer Test
-      run: |
-        chmod +x scripts/*.sh
-        ./scripts/test_installer.sh
+      run: ./scripts/test_installer.sh

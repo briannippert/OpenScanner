@@ -131,7 +131,7 @@ public class RecordingService : IRecordingService
         var filename = $"rec_{now}_{channel.Frequency}.raw";
         
         // Ensure data dir exists
-        var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../data/recordings");
+        var dataDir = AppPaths.RecordingsDir;
         if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
 
         var newPath = Path.Combine(dataDir, filename);
@@ -280,7 +280,7 @@ public class RecordingService : IRecordingService
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var filename = $"rec_{now}_{channel.Frequency}.raw";
-        var dataDir = Path.Combine(Directory.GetCurrentDirectory(), "../../data/recordings");
+        var dataDir = AppPaths.RecordingsDir;
         if (!Directory.Exists(dataDir)) Directory.CreateDirectory(dataDir);
         var path = Path.Combine(dataDir, filename);
 

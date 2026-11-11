@@ -673,15 +673,12 @@ public class SupportService : ISupportService
 
     private string GetDatabasePath()
     {
-        var root = Directory.GetCurrentDirectory();
-        var dataDir = Path.GetFullPath(Path.Combine(root, "../../data"));
-        return Path.Combine(dataDir, "openscanner.db");
+        return Path.Combine(AppPaths.DataDir, "openscanner.db");
     }
 
     private static string GetRecordingsPath()
     {
-        var root = Directory.GetCurrentDirectory();
-        return Path.GetFullPath(Path.Combine(root, "../../data/recordings"));
+        return AppPaths.RecordingsDir;
     }
 
     /// <inheritdoc />
@@ -720,7 +717,7 @@ public class SupportService : ISupportService
         long diskFree = 0, diskTotal = 0;
         try
         {
-            var drive = new DriveInfo(Directory.GetCurrentDirectory());
+            var drive = new DriveInfo(AppPaths.DataDir);
             diskFree = drive.AvailableFreeSpace;
             diskTotal = drive.TotalSize;
         }
@@ -733,7 +730,7 @@ public class SupportService : ISupportService
     {
         try
         {
-            var drive = new DriveInfo(Directory.GetCurrentDirectory());
+            var drive = new DriveInfo(AppPaths.DataDir);
             return new
             {
                 Drive = drive.Name,
