@@ -1016,7 +1016,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             }
         }
 
-        UpdateParallelState();
+        UpdateParallelStateThrottled();
     }
 
     /// <summary>
@@ -1153,6 +1153,22 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// <summary>
     /// Build and broadcast the ParallelChannelState array to the UI.
     /// </summary>
+    private long _lastParallelStateTicks;
+
+    /// <summary>
+    /// Per-audio-chunk variant of <see cref="UpdateParallelState"/>: audio arrives for every
+    /// active channel on every IQ chunk (~70 Hz each), and rebuilding the state array that often
+    /// is wasted work since the broadcaster sends at most every 100 ms. Activity start/end and
+    /// the 5 Hz meter tick still call the unthrottled version, so transitions are not delayed.
+    /// </summary>
+    private void UpdateParallelStateThrottled()
+    {
+        long now = Environment.TickCount64;
+        if (now - Interlocked.Read(ref _lastParallelStateTicks) < 100) return;
+        Interlocked.Exchange(ref _lastParallelStateTicks, now);
+        UpdateParallelState();
+    }
+
     private void UpdateParallelState()
     {
         if (_parallelPipelines == null) return;
