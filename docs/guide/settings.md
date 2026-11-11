@@ -41,6 +41,10 @@ Shows how much disk is used, and how much of that is recordings and the database
 
 Recordings are also cleaned up automatically when the disk runs low; see [Automatic cleanup](history.md#automatic-cleanup).
 
+## Diagnostics
+
+Opens the two diagnostic tools, **System Debug** and **RF Spectrum Debug**. See [Diagnostic tools](../troubleshooting.md#diagnostic-tools) for what each one shows.
+
 ## About
 
 The installed **Software Version** and the **Git Commit** it was built from. Include these when reporting a problem.

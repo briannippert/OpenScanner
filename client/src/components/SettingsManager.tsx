@@ -6,6 +6,8 @@ import {
 } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import BugReportIcon from '@mui/icons-material/BugReport';
+import MonitorIcon from '@mui/icons-material/Monitor';
 import FormDialog from './common/FormDialog';
 import { apiFetch } from './common/apiBase';
 import type { ScannerState } from '../types';
@@ -31,6 +33,9 @@ interface Props {
     onRecordingsDeleted?: () => void;
     /** Live scanner state, for the measured frequency offset shown beside the PPM setting. */
     scannerState?: ScannerState;
+    /** Open the diagnostic tools. Settings closes itself first; these just open the tool. */
+    onOpenSystemDebug?: () => void;
+    onOpenRfDebug?: () => void;
 }
 
 /**
@@ -106,7 +111,10 @@ const Row: React.FC<{ label: string; description?: string; control: React.ReactN
     </Box>
 );
 
-const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted, scannerState }) => {
+const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted, scannerState, onOpenSystemDebug, onOpenRfDebug }) => {
+    // The tools are dialogs of their own, so leave Settings before opening one.
+    const openTool = (openIt: () => void) => () => { onClose(); openIt(); };
+
     const [settings, setSettings] = useState<Record<string, string>>({});
     const [systemInfo, setSystemInfo] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(false);
@@ -636,6 +644,33 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted, 
                                 <Typography variant="caption" color="text.secondary">Loading…</Typography>
                             )}
                         </Section>
+
+                        {(onOpenSystemDebug || onOpenRfDebug) && (
+                            <Section title="Diagnostics">
+                                {onOpenSystemDebug && (
+                                    <Row
+                                        label="System Debug"
+                                        description="CPU, memory and temperature, service and SDR status, the transcription queue, GPS, and the support package download."
+                                        control={
+                                            <Button size="small" variant="outlined" startIcon={<BugReportIcon />} onClick={openTool(onOpenSystemDebug)} sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
+                                                Open
+                                            </Button>
+                                        }
+                                    />
+                                )}
+                                {onOpenRfDebug && (
+                                    <Row
+                                        label="RF Spectrum Debug"
+                                        description="Live waterfall of the raw RF around a frequency. Scanning and decoding pause while it is open."
+                                        control={
+                                            <Button size="small" variant="outlined" startIcon={<MonitorIcon />} onClick={openTool(onOpenRfDebug)} sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
+                                                Open
+                                            </Button>
+                                        }
+                                    />
+                                )}
+                            </Section>
+                        )}
 
                         {(systemInfo.Version || systemInfo.Commit) && (
                             <Section title="About">

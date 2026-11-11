@@ -52,7 +52,7 @@ Most often the dongle is off frequency.
 
 ## No transcripts
 
-- Open **System Debug** and look at **Transcription Queue** and the service statuses.
+- Open **System Debug** (Settings → Diagnostics) and look at **Transcription Queue** and the service statuses.
 - The first transcription after an install, or after changing the model, waits for the model to download. Check the model status in **Settings → Transcription**.
 - On slower hardware a large model can fall behind. Try a smaller [model](guide/transcription.md#model).
 - To transcribe recordings that were missed, use [Transcription Backfill](guide/transcription.md#catching-up-on-missed-transcripts).
@@ -77,7 +77,7 @@ That is expected. The HTTPS certificate is self-signed, generated on your device
 
 ## Diagnostic tools
 
-Both are in the header.
+Both are under **Settings → Diagnostics**. You can also open either from the [command palette](guide/dashboard.md#command-palette).
 
 ### System Debug
 

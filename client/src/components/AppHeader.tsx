@@ -13,12 +13,10 @@ import UsbOffIcon from '@mui/icons-material/UsbOff';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
-import BugReportIcon from '@mui/icons-material/BugReport';
 import SettingsIcon from '@mui/icons-material/Settings';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import VolumeOffIcon from '@mui/icons-material/VolumeOff';
 import SearchIcon from '@mui/icons-material/Search';
-import MonitorIcon from '@mui/icons-material/Monitor';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
 import BadgeIcon from '@mui/icons-material/Badge';
@@ -43,8 +41,6 @@ interface Props {
   onToggleFullscreen: () => void;
   onOpenFireTones: () => void;
   onOpenSettings: () => void;
-  onOpenDebug: () => void;
-  onOpenSystemDebug: () => void;
   onOpenStats: () => void;
   onOpenAliases: () => void;
   updateAvailable?: boolean;
@@ -68,7 +64,7 @@ const Clock = () => {
 
 const AppHeader: React.FC<Props> = ({
   isHardwareConnected, deviceName, devicePort, gps, volume, onVolumeChange, manualHold, onResume,
-  isFullscreen, onToggleFullscreen, onOpenFireTones, onOpenSettings, onOpenDebug, onOpenSystemDebug, onOpenStats,
+  isFullscreen, onToggleFullscreen, onOpenFireTones, onOpenSettings, onOpenStats,
   onOpenAliases, updateAvailable, onOpenUpdate, onOpenPalette,
 }) => {
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
@@ -88,6 +84,8 @@ const AppHeader: React.FC<Props> = ({
   };
 
   // The toolbar actions, shared between the desktop icon row and the mobile menu.
+  // Kept to what is used day to day: the diagnostic tools (System Debug, RF
+  // Spectrum Debug) live under Settings → Diagnostics.
   // Software Update is always listed: it's the only way into the update dialog,
   // and gating it on updateAvailable meant you couldn't check on demand until the
   // server's 30-minute poll had already found something. The UPDATE chip below
@@ -101,8 +99,6 @@ const AppHeader: React.FC<Props> = ({
     { label: 'Radio Aliases', icon: <BadgeIcon />, onClick: onOpenAliases },
     { label: 'Settings', icon: <SettingsIcon />, onClick: onOpenSettings },
     { label: isFullscreen ? 'Exit Fullscreen' : 'Fullscreen', icon: isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />, onClick: onToggleFullscreen },
-    { label: 'RF Spectrum Debug', icon: <MonitorIcon />, onClick: onOpenDebug },
-    { label: 'System Debug', icon: <BugReportIcon />, onClick: onOpenSystemDebug },
   ];
 
   return (

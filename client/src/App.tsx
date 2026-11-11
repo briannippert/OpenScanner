@@ -232,8 +232,6 @@ function App() {
           onToggleFullscreen={toggleFullscreen}
           onOpenFireTones={dialog.fireTones.open}
           onOpenSettings={dialog.settings.open}
-          onOpenDebug={openDebug}
-          onOpenSystemDebug={dialog.systemDebug.open}
           onOpenStats={dialog.stats.open}
           onOpenAliases={dialog.aliases.open}
           updateAvailable={updateAvailable}
@@ -331,6 +329,8 @@ function App() {
               onRecordingsDeleted={clearCallLog}
               // Only needed while open; withholding it lets the closed dialog skip state updates.
               scannerState={dialogs.isOpen('settings') ? scannerState : undefined}
+              onOpenSystemDebug={dialog.systemDebug.open}
+              onOpenRfDebug={openDebug}
             />
           )}
           {dialogs.wasOpened('aliases') && (
@@ -369,6 +369,7 @@ function App() {
               onOpenAliases={dialog.aliases.open}
               onOpenStats={dialog.stats.open}
               onOpenDebug={openDebug}
+              onOpenSystemDebug={dialog.systemDebug.open}
               onToggleFullscreen={toggleFullscreen}
             />
           )}
