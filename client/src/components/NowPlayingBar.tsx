@@ -29,7 +29,10 @@ const fmt = (s: number) => {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 };
 
-const Waveform: React.FC<{ peaks: number[]; progress: number; color: string; onSeek: (fraction: number) => void }> = ({ peaks, progress, color, onSeek }) => {
+/** Seconds moved per arrow-key press on the scrubber. */
+const KEY_SEEK_SEC = 5;
+
+const Waveform: React.FC<{ peaks: number[]; progress: number; duration: number; color: string; onSeek: (fraction: number) => void }> = ({ peaks, progress, duration, color, onSeek }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const theme = useTheme();
   const draggingRef = useRef(false);
@@ -72,14 +75,32 @@ const Waveform: React.FC<{ peaks: number[]; progress: number; color: string; onS
     onSeek(Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)));
   };
 
+  // Keyboard control, matching what role="slider" promises to assistive tech.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const step = duration > 0 ? KEY_SEEK_SEC / duration : 0.05;
+    let next: number;
+    switch (e.key) {
+      case 'ArrowLeft': case 'ArrowDown': next = progress - step; break;
+      case 'ArrowRight': case 'ArrowUp': next = progress + step; break;
+      case 'Home': next = 0; break;
+      case 'End': next = 1; break;
+      default: return;
+    }
+    e.preventDefault();
+    onSeek(Math.max(0, Math.min(1, next)));
+  };
+
   return (
     <canvas
       ref={canvasRef}
       role="slider"
+      tabIndex={0}
       aria-label="Seek"
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(progress * 100)}
+      aria-valuetext={`${fmt(progress * duration)} of ${fmt(duration)}`}
+      onKeyDown={onKeyDown}
       style={{ width: '100%', height: 36, display: 'block', cursor: 'pointer', touchAction: 'none' }}
       onPointerDown={(e) => { draggingRef.current = true; e.currentTarget.setPointerCapture(e.pointerId); seekFromEvent(e.clientX); }}
       onPointerMove={(e) => { if (draggingRef.current) seekFromEvent(e.clientX); }}
@@ -142,7 +163,7 @@ const NowPlayingBar: React.FC<Props> = ({ nowPlaying, isPaused, getPosition, pla
       </Tooltip>
 
       <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-        <Waveform peaks={nowPlaying.peaks} progress={progress} color={accent} onSeek={seekFraction} />
+        <Waveform peaks={nowPlaying.peaks} progress={progress} duration={duration} color={accent} onSeek={seekFraction} />
       </Box>
 
       <Tooltip title="Playback speed">

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import TransmissionLog from './TransmissionLog';
@@ -151,9 +151,58 @@ describe('TransmissionLog Component', () => {
         fireEvent.change(searchInput, { target: { value: 'Search' } });
 
         await waitFor(() => {
-            expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/history/search?q=Search'));
+            expect(fetchMock).toHaveBeenCalledWith(
+                expect.stringContaining('/api/history/search?q=Search'),
+                expect.objectContaining({ signal: expect.any(AbortSignal) }),
+            );
             expect(screen.getByText('Search Result')).toBeInTheDocument();
         });
+    });
+
+    it('ignores a slow search response once the query has changed', async () => {
+        // The first query's response is held back until after the second has rendered.
+        let releaseFirst: (rows: CallLog[]) => void = () => {};
+        const row = (id: string, alphaTag: string): CallLog =>
+            ({ id, frequency: 155, timestamp: '2023-01-01T12:00:00Z', alphaTag, description: '', duration: 2 });
+
+        fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+            if (url.includes('q=first')) {
+                return new Promise((resolve, reject) => {
+                    init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+                    releaseFirst = rows => resolve({ json: async () => rows });
+                });
+            }
+            if (url.includes('q=second')) return Promise.resolve({ json: async () => [row('s', 'Second Result')] });
+            return Promise.resolve({ json: async () => [] });
+        });
+
+        render(<TransmissionLog liveLogs={[]} playingId={null} onPlay={mockOnPlay} onDelete={mockOnDelete} />);
+        const searchInput = screen.getByPlaceholderText('Search logs…');
+
+        fireEvent.change(searchInput, { target: { value: 'first' } });
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('q=first'), expect.anything()));
+
+        fireEvent.change(searchInput, { target: { value: 'second' } });
+        await screen.findByText('Second Result');
+
+        await act(async () => { releaseFirst([row('f', 'First Result')]); });
+        expect(screen.queryByText('First Result')).not.toBeInTheDocument();
+        expect(screen.getByText('Second Result')).toBeInTheDocument();
+    });
+
+    it('clears the search with the clear button', async () => {
+        fetchMock.mockImplementation(() => Promise.resolve({ json: async () => [] }));
+        render(<TransmissionLog liveLogs={mockLogs} playingId={null} onPlay={mockOnPlay} onDelete={mockOnDelete} />);
+        await waitForInit();
+
+        const searchInput = screen.getByPlaceholderText('Search logs…') as HTMLInputElement;
+        expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+
+        fireEvent.change(searchInput, { target: { value: 'abc' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+
+        expect(searchInput.value).toBe('');
+        await waitFor(() => expect(screen.getByText('Police Dispatch')).toBeInTheDocument());
     });
     // The app re-renders on every scanner state update (up to 10/s). The log panel
     // holds up to 100 rows of MUI components, so it must sit those renders out.

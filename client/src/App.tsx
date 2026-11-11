@@ -15,6 +15,7 @@ import { useAudioPipeline } from './hooks/useAudioPipeline';
 import { useScannerSocket } from './hooks/useScannerSocket';
 import { useDialogs } from './hooks/useDialogs';
 import { apiJson } from './components/common/apiBase';
+import { sameFrequency } from './lib/frequency';
 import type { Channel, RadioEvent, UpdateStatus } from './types';
 
 function App() {
@@ -161,8 +162,7 @@ function App() {
   // Hold/resume a channel from the grid.
   const handleHold = useCallback(async (ch: Channel) => {
     if (window.audioCtx && window.audioCtx.state === 'suspended') window.audioCtx.resume();
-    const isHolding = manualHold !== undefined && Math.abs(manualHold - ch.frequency) < 0.0001;
-    if (isHolding) {
+    if (sameFrequency(manualHold, ch.frequency)) {
       sendCommand('scan');
     } else {
       if (ch.avoid) await handleSaveChannel({ ...ch, avoid: false });
@@ -174,7 +174,7 @@ function App() {
     const newAvoid = !ch.avoid;
     await handleSaveChannel({ ...ch, avoid: newAvoid });
     // Stop holding a channel we've just started avoiding.
-    if (newAvoid && manualHold !== undefined && Math.abs(manualHold - ch.frequency) < 0.0001) {
+    if (newAvoid && sameFrequency(manualHold, ch.frequency)) {
       sendCommand('scan');
     }
   }, [manualHold, sendCommand, handleSaveChannel]);
@@ -217,7 +217,7 @@ function App() {
         display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw',
         bgcolor: 'background.default', overflow: 'hidden', position: 'relative',
       }}>
-        <ConnectionOverlay isConnected={scanner.isConnected} reconnectAt={scanner.reconnectAt} />
+        <ConnectionOverlay isConnected={scanner.isConnected} hasConnected={scanner.hasConnected} reconnectAt={scanner.reconnectAt} />
 
         <AppHeader
           isHardwareConnected={scannerState.isHardwareConnected}
@@ -237,6 +237,7 @@ function App() {
           onOpenAliases={dialog.aliases.open}
           updateAvailable={updateAvailable}
           onOpenUpdate={dialog.update.open}
+          onOpenPalette={dialog.palette.open}
         />
 
         <Box sx={{ flexGrow: 1, p: { xs: 1, sm: 2 }, height: '100%', overflowY: { xs: 'auto', md: 'hidden' } }}>

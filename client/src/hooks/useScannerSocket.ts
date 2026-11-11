@@ -28,6 +28,8 @@ export function useScannerSocket() {
     setUpdateState(state);
   }, []);
   const [isConnected, setIsConnected] = useState(false);
+  // False until the socket has opened once: "not connected yet" is not "connection lost".
+  const [hasConnected, setHasConnected] = useState(false);
   const [reconnectAt, setReconnectAt] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   // Distinguish "still loading" from a genuinely empty dataset for skeletons.
@@ -199,7 +201,7 @@ export function useScannerSocket() {
 
     const connectControlWs = () => {
       wsControl.current = new WebSocket(wsControlUrl);
-      wsControl.current.onopen = () => { setIsConnected(true); setReconnectAt(null); };
+      wsControl.current.onopen = () => { setIsConnected(true); setHasConnected(true); setReconnectAt(null); };
       wsControl.current.onclose = () => {
         setIsConnected(false);
         if (!closed) {
@@ -270,6 +272,7 @@ export function useScannerSocket() {
     updateState,
     seedUpdate,
     isConnected,
+    hasConnected,
     reconnectAt,
     errorMsg,
     channelsLoaded,

@@ -16,6 +16,8 @@ import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import SettingsIcon from '@mui/icons-material/Settings';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
+import VolumeOffIcon from '@mui/icons-material/VolumeOff';
+import SearchIcon from '@mui/icons-material/Search';
 import MonitorIcon from '@mui/icons-material/Monitor';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
@@ -45,9 +47,11 @@ interface Props {
   onOpenAliases: () => void;
   updateAvailable?: boolean;
   onOpenUpdate: () => void;
+  onOpenPalette: () => void;
 }
 
 const MONO = '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
+const PRE_MUTE_KEY = 'scannerVolumeBeforeMute';
 const gpsMono = { fontFamily: MONO, color: 'text.primary' } as const;
 
 /** Wall clock. Owns its one-second timer so the tick re-renders only this text. */
@@ -63,17 +67,32 @@ const Clock = () => {
 const AppHeader: React.FC<Props> = ({
   isHardwareConnected, deviceName, devicePort, gps, volume, onVolumeChange, manualHold, onResume,
   isFullscreen, onToggleFullscreen, onOpenFireTones, onOpenSettings, onOpenDebug, onOpenSystemDebug,
-  onOpenAliases, updateAvailable, onOpenUpdate,
+  onOpenAliases, updateAvailable, onOpenUpdate, onOpenPalette,
 }) => {
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const hasFix = gps?.time && gps.fix >= 2;
+
+  // Mute remembers the level to come back to, across reloads too (volume itself is persisted).
+  const muted = volume === 0;
+  const toggleMute = () => {
+    if (!muted) {
+      try { localStorage.setItem(PRE_MUTE_KEY, String(volume)); } catch { /* storage unavailable */ }
+      onVolumeChange(0);
+      return;
+    }
+    let previous = NaN;
+    try { previous = parseFloat(localStorage.getItem(PRE_MUTE_KEY) ?? ''); } catch { /* storage unavailable */ }
+    onVolumeChange(previous > 0 && previous <= 1 ? previous : 1);
+  };
 
   // The toolbar actions, shared between the desktop icon row and the mobile menu.
   // Software Update is always listed: it's the only way into the update dialog,
   // and gating it on updateAvailable meant you couldn't check on demand until the
   // server's 30-minute poll had already found something. The UPDATE chip below
   // stays gated — that's the "there's something waiting" nudge.
+  const paletteShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl+K';
   const actions = [
+    { label: `Search commands (${paletteShortcut})`, icon: <SearchIcon />, onClick: onOpenPalette },
     { label: 'Software Update', icon: <SystemUpdateIcon />, onClick: onOpenUpdate },
     { label: 'Fire Tone Outs', icon: <NotificationsActiveIcon />, onClick: onOpenFireTones },
     { label: 'Radio Aliases', icon: <BadgeIcon />, onClick: onOpenAliases },
@@ -173,8 +192,18 @@ const AppHeader: React.FC<Props> = ({
           </Tooltip>
         )}
 
-        <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 2, width: { xs: 80, sm: 120, md: 150 } }}>
-          <VolumeUpIcon sx={{ color: 'text.secondary', fontSize: 20 }} />
+        <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 1, width: { xs: 96, sm: 132, md: 162 } }}>
+          <Tooltip title={muted ? 'Unmute' : 'Mute'}>
+            <IconButton
+              size="small"
+              onClick={toggleMute}
+              aria-label={muted ? 'Unmute' : 'Mute'}
+              aria-pressed={muted}
+              sx={{ color: muted ? 'warning.main' : 'text.secondary', flexShrink: 0 }}
+            >
+              {muted ? <VolumeOffIcon sx={{ fontSize: 20 }} /> : <VolumeUpIcon sx={{ fontSize: 20 }} />}
+            </IconButton>
+          </Tooltip>
           <Slider
             size="small"
             value={volume}

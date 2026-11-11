@@ -12,6 +12,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import MonitorIcon from '@mui/icons-material/Monitor';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import type { Channel } from '../types';
+import { sameFrequency } from '../lib/frequency';
 
 interface Command {
   id: string;
@@ -59,7 +60,7 @@ const CommandPalette: React.FC<Props> = ({
   const commands = useMemo<Command[]>(() => {
     const run = (fn: () => void) => () => { fn(); onClose(); };
     const channelCmds: Command[] = channels.map(ch => {
-      const held = manualHold !== undefined && Math.abs(manualHold - ch.frequency) < 0.0001;
+      const held = sameFrequency(manualHold, ch.frequency);
       return {
         id: `ch-${ch.frequency}`,
         label: held ? `Resume from ${ch.alphaTag}` : `Hold ${ch.alphaTag}`,

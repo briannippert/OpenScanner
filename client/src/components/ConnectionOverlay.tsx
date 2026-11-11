@@ -3,6 +3,8 @@ import { Box, Paper, Typography, CircularProgress } from '@mui/material';
 
 interface Props {
   isConnected: boolean;
+  /** Whether the socket has opened at least once since the page loaded. */
+  hasConnected: boolean;
   /** Epoch ms of the next reconnect attempt, or null when none is scheduled. */
   reconnectAt: number | null;
 }
@@ -11,7 +13,7 @@ interface Props {
  * Full-screen blocker shown while the control socket is down. Owns its own countdown
  * timer so the once-a-second tick re-renders this overlay rather than the whole app.
  */
-const ConnectionOverlay = ({ isConnected, reconnectAt }: Props) => {
+const ConnectionOverlay = ({ isConnected, hasConnected, reconnectAt }: Props) => {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -21,6 +23,20 @@ const ConnectionOverlay = ({ isConnected, reconnectAt }: Props) => {
   }, [isConnected, reconnectAt]);
 
   if (isConnected) return null;
+
+  // First connection of a page load: nothing has been lost yet, so don't raise an alarm.
+  // If that first attempt fails, a retry gets scheduled and the full message takes over.
+  if (!hasConnected && reconnectAt == null) {
+    return (
+      <Box sx={{
+        position: 'absolute', inset: 0, zIndex: 9999, bgcolor: 'rgba(0,0,0,0.5)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1.5,
+      }}>
+        <CircularProgress size={20} />
+        <Typography color="text.secondary" role="status">Connecting to OpenScanner server…</Typography>
+      </Box>
+    );
+  }
 
   const seconds = reconnectAt != null ? Math.max(0, Math.ceil((reconnectAt - now) / 1000)) : null;
 
@@ -33,7 +49,9 @@ const ConnectionOverlay = ({ isConnected, reconnectAt }: Props) => {
       <Paper role="alert" sx={{ p: 4, textAlign: 'center', borderColor: 'error.main', minWidth: 300 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1.5, mb: 1 }}>
           <CircularProgress size={20} color="error" />
-          <Typography variant="h5" color="error" fontWeight={700}>CONNECTION LOST</Typography>
+          <Typography variant="h5" color="error" fontWeight={700}>
+            {hasConnected ? 'CONNECTION LOST' : 'CANNOT REACH SERVER'}
+          </Typography>
         </Box>
         <Typography color="text.secondary">
           {seconds != null && seconds > 0

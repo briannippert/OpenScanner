@@ -13,6 +13,7 @@ import {
     CircularProgress,
     InputAdornment,
     Tooltip,
+    Button,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import {
@@ -35,6 +36,7 @@ import {
     SearchOff,
     Inbox,
     Campaign,
+    Close,
 } from '@mui/icons-material';
 import { Chip } from '@mui/material';
 import type { CallLog, Channel } from '../types';
@@ -201,26 +203,31 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
 
     // Search handler
     useEffect(() => {
+        // Aborting on every change means a slow response to an earlier query can never
+        // land after, and overwrite, the results of a later one.
+        const controller = new AbortController();
         const timer = setTimeout(() => {
             if (!searchQuery.trim()) {
                 setSearchResults(null);
+                setLoading(false);
                 return;
             }
 
             setLoading(true);
-            fetch(`/api/history/search?q=${encodeURIComponent(searchQuery)}`)
+            fetch(`/api/history/search?q=${encodeURIComponent(searchQuery)}`, { signal: controller.signal })
                 .then(res => res.json())
                 .then(data => {
                     setSearchResults(data);
                     setLoading(false);
                 })
                 .catch(err => {
+                    if (controller.signal.aborted) return; // superseded by a newer query
                     console.error("Search failed:", err);
                     setLoading(false);
                 });
-        }, 500);
+        }, searchQuery.trim() ? 500 : 0); // clearing the box takes effect at once
 
-        return () => clearTimeout(timer);
+        return () => { clearTimeout(timer); controller.abort(); };
     }, [searchQuery]);
 
     return (
@@ -236,13 +243,22 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                     placeholder="Search logs…"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Escape' && searchQuery) { e.stopPropagation(); setSearchQuery(''); } }}
                     slotProps={{
+                        htmlInput: { 'aria-label': 'Search logs' },
                         input: {
                             startAdornment: (
                                 <InputAdornment position="start">
                                     <Search sx={{ color: 'text.secondary' }} />
                                 </InputAdornment>
                             ),
+                            endAdornment: searchQuery ? (
+                                <InputAdornment position="end">
+                                    <IconButton size="small" edge="end" onClick={() => setSearchQuery('')} aria-label="Clear search" title="Clear search">
+                                        <Close fontSize="small" />
+                                    </IconButton>
+                                </InputAdornment>
+                            ) : undefined,
                         },
                     }}
                     sx={{
@@ -394,21 +410,66 @@ const FavoritesList = ({ filter, toneOutIds, playingId, onPlay, onDelete, onFavo
     );
 };
 
+/**
+ * A list fetched the first time a Browse tree node is expanded. Tracks loading and
+ * failure so the node can show them, instead of sitting open and empty either way.
+ */
+function useLazyList<T>(url: string) {
+    const [items, setItems] = useState<T[]>([]);
+    const [status, setStatus] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
+
+    const load = useCallback(() => {
+        setStatus('loading');
+        fetch(url)
+            .then(res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            })
+            .then((data: T[]) => { setItems(data); setStatus('loaded'); })
+            .catch(err => { console.error(`Failed to load ${url}:`, err); setStatus('error'); });
+    }, [url]);
+
+    /** Call when the node is being expanded: loads once, and again after a failure. */
+    const ensureLoaded = () => { if (status === 'idle' || status === 'error') load(); };
+
+    return { items, setItems, status, load, ensureLoaded };
+}
+
+/** Loading / failed / empty row shown inside an expanded tree node. */
+const NodeStatus = ({ status, empty, depth, onRetry }: { status: 'idle' | 'loading' | 'loaded' | 'error'; empty: boolean; depth: number; onRetry: () => void }) => {
+    if (status === 'loading') {
+        return (
+            <Box sx={{ ...indent(depth), py: 1, display: 'flex', alignItems: 'center', gap: 1 }} role="status">
+                <CircularProgress size={14} />
+                <Typography variant="caption" color="text.secondary">Loading…</Typography>
+            </Box>
+        );
+    }
+    if (status === 'error') {
+        return (
+            <Box sx={{ ...indent(depth), py: 0.5, display: 'flex', alignItems: 'center', gap: 1 }} role="alert">
+                <Typography variant="caption" color="error">Couldn't load this.</Typography>
+                <Button size="small" onClick={onRetry}>Retry</Button>
+            </Box>
+        );
+    }
+    if (status === 'loaded' && empty) {
+        return (
+            <Typography variant="caption" color="text.secondary" sx={{ ...indent(depth), py: 1, display: 'block' }}>
+                Nothing here.
+            </Typography>
+        );
+    }
+    return null;
+};
+
 const YearNode = ({ year, powerDmsDept, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string; powerDmsDept: string | null } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
-    const [months, setMonths] = useState<string[]>([]);
-    const [loaded, setLoaded] = useState(false);
+    const list = useLazyList<string>(`/api/history/${year}/months`);
+    const months = list.items;
 
     const handleToggle = () => {
-        if (!open && !loaded) {
-            fetch(`/api/history/${year}/months`)
-                .then(res => res.json())
-                .then(data => {
-                    setMonths(data);
-                    setLoaded(true);
-                })
-                .catch(err => console.error(`Failed to fetch months for ${year}:`, err));
-        }
+        if (!open) list.ensureLoaded();
         setOpen(!open);
     };
 
@@ -420,6 +481,7 @@ const YearNode = ({ year, powerDmsDept, playingId, onPlay, onDelete, onFavoriteT
                 {open ? <ExpandLess /> : <ExpandMore />}
             </ListItemButton>
             <Collapse in={open} timeout="auto" unmountOnExit>
+                <NodeStatus status={list.status} empty={months.length === 0} depth={2} onRetry={list.load} />
                 <List component="div" disablePadding>
                     {months.map(month => (
                         <MonthNode key={month} year={year} month={month} powerDmsDept={powerDmsDept} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle} />
@@ -432,22 +494,14 @@ const YearNode = ({ year, powerDmsDept, playingId, onPlay, onDelete, onFavoriteT
 
 const MonthNode = ({ year, month, powerDmsDept, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string; month: string; powerDmsDept: string | null } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
-    const [days, setDays] = useState<string[]>([]);
-    const [loaded, setLoaded] = useState(false);
+    const list = useLazyList<string>(`/api/history/${year}/${month}/days`);
+    const days = list.items;
 
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const monthName = monthNames[parseInt(month) - 1] || month;
 
     const handleToggle = () => {
-        if (!open && !loaded) {
-            fetch(`/api/history/${year}/${month}/days`)
-                .then(res => res.json())
-                .then(data => {
-                    setDays(data);
-                    setLoaded(true);
-                })
-                .catch(err => console.error(`Failed to fetch days for ${year}-${month}:`, err));
-        }
+        if (!open) list.ensureLoaded();
         setOpen(!open);
     };
 
@@ -459,6 +513,7 @@ const MonthNode = ({ year, month, powerDmsDept, playingId, onPlay, onDelete, onF
                 {open ? <ExpandLess /> : <ExpandMore />}
             </ListItemButton>
             <Collapse in={open} timeout="auto" unmountOnExit>
+                <NodeStatus status={list.status} empty={days.length === 0} depth={3} onRetry={list.load} />
                 <List component="div" disablePadding>
                     {days.map(day => (
                         <DayNode key={day} year={year} month={month} day={day} powerDmsDept={powerDmsDept} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={onFavoriteToggle} />
@@ -471,8 +526,8 @@ const MonthNode = ({ year, month, powerDmsDept, playingId, onPlay, onDelete, onF
 
 const DayNode = ({ year, month, day, powerDmsDept, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string; month: string; day: string; powerDmsDept: string | null } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
-    const [channels, setChannels] = useState<Channel[]>([]);
-    const [loaded, setLoaded] = useState(false);
+    const list = useLazyList<Channel>(`/api/history/${year}/${month}/${day}/channels`);
+    const channels = list.items;
     const [logExists, setLogExists] = useState<boolean | null>(null);
 
     // Check whether a PowerDMS daily log exists for this date
@@ -485,15 +540,7 @@ const DayNode = ({ year, month, day, powerDmsDept, playingId, onPlay, onDelete, 
     }, [powerDmsDept, year, month, day]);
 
     const handleToggle = () => {
-        if (!open && !loaded) {
-            fetch(`/api/history/${year}/${month}/${day}/channels`)
-                .then(res => res.json())
-                .then(data => {
-                    setChannels(data);
-                    setLoaded(true);
-                })
-                .catch(err => console.error(`Failed to fetch channels for ${year}-${month}-${day}:`, err));
-        }
+        if (!open) list.ensureLoaded();
         setOpen(!open);
     };
 
@@ -525,6 +572,7 @@ const DayNode = ({ year, month, day, powerDmsDept, playingId, onPlay, onDelete, 
                 {open ? <ExpandLess /> : <ExpandMore />}
             </ListItemButton>
             <Collapse in={open} timeout="auto" unmountOnExit>
+                <NodeStatus status={list.status} empty={channels.length === 0} depth={4} onRetry={list.load} />
                 <List component="div" disablePadding>
                     {channels.map((ch, idx) => (
                         <ChannelNode
@@ -542,19 +590,14 @@ const DayNode = ({ year, month, day, powerDmsDept, playingId, onPlay, onDelete, 
 
 const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete, onFavoriteToggle }: { year: string; month: string; day: string; channel: Channel } & LogNodeProps) => {
     const [open, setOpen] = useState(false);
-    const [logs, setLogs] = useState<CallLog[]>([]);
-    const [loaded, setLoaded] = useState(false);
+    const list = useLazyList<CallLog>(
+        `/api/history/filter?year=${year}&month=${month}&day=${day}&alphaTag=${encodeURIComponent(channel.alphaTag)}&frequency=${channel.frequency}`,
+    );
+    const logs = list.items;
+    const setLogs = list.setItems;
 
     const handleToggle = () => {
-        if (!open && !loaded) {
-            fetch(`/api/history/filter?year=${year}&month=${month}&day=${day}&alphaTag=${encodeURIComponent(channel.alphaTag)}&frequency=${channel.frequency}`)
-                .then(res => res.json())
-                .then(data => {
-                    setLogs(data);
-                    setLoaded(true);
-                })
-                .catch(err => console.error(`Failed to filter history for ${channel.alphaTag}:`, err));
-        }
+        if (!open) list.ensureLoaded();
         setOpen(!open);
     };
 
@@ -576,6 +619,7 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete, o
                 {open ? <ExpandLess /> : <ExpandMore />}
             </ListItemButton>
             <Collapse in={open} timeout="auto" unmountOnExit>
+                <NodeStatus status={list.status} empty={logs.length === 0} depth={5} onRetry={list.load} />
                 <List component="div" disablePadding>
                     {logs.map(log => (
                         <LogItem key={log.id} log={log} tree playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={onFavoriteToggle} />
