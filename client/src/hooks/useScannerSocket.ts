@@ -66,6 +66,29 @@ export function useScannerSocket() {
     else sendCommand('scan');
   }, [scannerApi, sendCommand]);
 
+  /**
+   * Run a write request and report failure to the user. Resolves to the response on
+   * success and null on failure, having already set the error message that App shows in
+   * its snackbar: a save that the server rejects must not look like one that worked.
+   */
+  const request = useCallback(async (what: string, url: string, init?: RequestInit): Promise<Response | null> => {
+    try {
+      const res = await fetch(url, init);
+      if (res.ok) return res;
+      console.error(`${what} failed with status`, res.status);
+      setErrorMsg(`${what} failed (the server returned ${res.status}).`);
+    } catch (e) {
+      console.error(`${what} failed:`, e);
+      setErrorMsg(`${what} failed: could not reach the server.`);
+    }
+    return null;
+  }, []);
+
+  const jsonBody = (body: unknown): RequestInit => ({
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
   const refreshChannels = useCallback(() => {
     fetch('/api/channels')
       .then(res => res.json())
@@ -83,42 +106,22 @@ export function useScannerSocket() {
   const handleSaveChannel = useCallback(async (channel: Channel) => {
     const method = channel.id ? 'PUT' : 'POST';
     const url = channel.id ? `/api/channels/${channel.id}` : '/api/channels';
-    try {
-      await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(channel) });
-      refreshChannels();
-    } catch (e) {
-      console.error('Save channel failed:', e);
-    }
-  }, [refreshChannels]);
+    if (await request('Saving the channel', url, { method, ...jsonBody(channel) })) refreshChannels();
+  }, [request, refreshChannels]);
 
   const handleDeleteChannel = useCallback(async (id: number) => {
-    try {
-      await fetch(`/api/channels/${id}`, { method: 'DELETE' });
-      refreshChannels();
-    } catch (e) {
-      console.error('Delete channel failed:', e);
-    }
-  }, [refreshChannels]);
+    if (await request('Deleting the channel', `/api/channels/${id}`, { method: 'DELETE' })) refreshChannels();
+  }, [request, refreshChannels]);
 
   const handleSaveFireTone = useCallback(async (tone: FireToneSet) => {
     const method = tone.id ? 'PUT' : 'POST';
     const url = tone.id ? `/api/firetones/${tone.id}` : '/api/firetones';
-    try {
-      await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tone) });
-      refreshFireTones();
-    } catch (e) {
-      console.error('Save fire tone failed:', e);
-    }
-  }, [refreshFireTones]);
+    if (await request('Saving the fire tone-out', url, { method, ...jsonBody(tone) })) refreshFireTones();
+  }, [request, refreshFireTones]);
 
   const handleDeleteFireTone = useCallback(async (id: number) => {
-    try {
-      await fetch(`/api/firetones/${id}`, { method: 'DELETE' });
-      refreshFireTones();
-    } catch (e) {
-      console.error('Delete fire tone failed:', e);
-    }
-  }, [refreshFireTones]);
+    if (await request('Deleting the fire tone-out', `/api/firetones/${id}`, { method: 'DELETE' })) refreshFireTones();
+  }, [request, refreshFireTones]);
 
   const refreshAliases = useCallback(() => {
     fetch('/api/aliases')
@@ -137,40 +140,22 @@ export function useScannerSocket() {
   const handleSaveAlias = useCallback(async (alias: RadioAlias) => {
     const method = alias.id ? 'PUT' : 'POST';
     const url = alias.id ? `/api/aliases/${alias.id}` : '/api/aliases';
-    try {
-      await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(alias) });
-      refreshAliases();
-    } catch (e) {
-      console.error('Save alias failed:', e);
-    }
-  }, [refreshAliases]);
+    if (await request('Saving the alias', url, { method, ...jsonBody(alias) })) refreshAliases();
+  }, [request, refreshAliases]);
 
   const handleDeleteAlias = useCallback(async (id: number) => {
-    try {
-      await fetch(`/api/aliases/${id}`, { method: 'DELETE' });
-      refreshAliases();
-    } catch (e) {
-      console.error('Delete alias failed:', e);
-    }
-  }, [refreshAliases]);
+    if (await request('Deleting the alias', `/api/aliases/${id}`, { method: 'DELETE' })) refreshAliases();
+  }, [request, refreshAliases]);
 
   // Additive import: fills in blanks server-side without overwriting existing names.
   // Returns the number of aliases added.
   const importAliases = useCallback(async (list: RadioAlias[]): Promise<number> => {
-    try {
-      const res = await fetch('/api/aliases/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(list),
-      });
-      const data = await res.json().catch(() => ({ added: 0 }));
-      refreshAliases();
-      return data?.added ?? 0;
-    } catch (e) {
-      console.error('Import aliases failed:', e);
-      return 0;
-    }
-  }, [refreshAliases]);
+    const res = await request('Importing aliases', '/api/aliases/import', { method: 'POST', ...jsonBody(list) });
+    if (!res) return 0;
+    const data = await res.json().catch(() => ({ added: 0 }));
+    refreshAliases();
+    return data?.added ?? 0;
+  }, [request, refreshAliases]);
 
   // App-wide per-channel name lookup for SRC/TG, rebuilt when aliases change.
   const aliasIndex = useMemo(() => {
@@ -186,23 +171,14 @@ export function useScannerSocket() {
   );
 
   const deleteEntry = useCallback(async (id: string) => {
-    try {
-      const response = await fetch(`/api/history/${id}`, { method: 'DELETE' });
-      if (response.ok) setCallLog(prev => prev.filter(log => log.id !== id));
-      else console.error('Delete failed with status:', response.status);
-    } catch (e) {
-      console.error('Delete failed:', e);
+    if (await request('Deleting the recording', `/api/history/${id}`, { method: 'DELETE' })) {
+      setCallLog(prev => prev.filter(log => log.id !== id));
     }
-  }, []);
+  }, [request]);
 
   const clearEvents = useCallback(async () => {
-    try {
-      await fetch('/api/events', { method: 'DELETE' });
-      setRadioEvents([]);
-    } catch (err) {
-      console.error('Failed to clear events:', err);
-    }
-  }, []);
+    if (await request('Clearing tone-out events', '/api/events', { method: 'DELETE' })) setRadioEvents([]);
+  }, [request]);
 
   // Initial data load + control WebSocket with auto-reconnect.
   useEffect(() => {

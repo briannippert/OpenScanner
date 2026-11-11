@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import TransmissionLog from './TransmissionLog';
@@ -97,17 +97,32 @@ describe('TransmissionLog Component', () => {
         }
     });
 
-    it('calls onDelete when delete button is clicked', async () => {
-         render(<TransmissionLog liveLogs={mockLogs} playingId={null} onPlay={mockOnPlay} onDelete={mockOnDelete} />);
-         await waitForInit();
-         
-         const row = screen.getByText('Fire Dispatch').closest('li');
-         if (row) {
-             const buttonsInRow = row.querySelectorAll('button');
-             // 0: Star, 1: Play, 2: Delete
-             fireEvent.click(buttonsInRow[2]);
-             expect(mockOnDelete).toHaveBeenCalledWith('2');
-         }
+    it('asks for confirmation before deleting, then calls onDelete', async () => {
+        render(<TransmissionLog liveLogs={mockLogs} playingId={null} onPlay={mockOnPlay} onDelete={mockOnDelete} />);
+        await waitForInit();
+
+        const row = screen.getByText('Fire Dispatch').closest('li') as HTMLElement;
+        fireEvent.click(within(row).getByRole('button', { name: 'Delete recording' }));
+
+        // Nothing is deleted until the dialog is confirmed.
+        expect(mockOnDelete).not.toHaveBeenCalled();
+        const dialog = await screen.findByRole('dialog');
+        expect(within(dialog).getByText('Delete recording?')).toBeInTheDocument();
+
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+        expect(mockOnDelete).toHaveBeenCalledWith('2');
+    });
+
+    it('does not delete when the confirmation is cancelled', async () => {
+        render(<TransmissionLog liveLogs={mockLogs} playingId={null} onPlay={mockOnPlay} onDelete={mockOnDelete} />);
+        await waitForInit();
+
+        const row = screen.getByText('Fire Dispatch').closest('li') as HTMLElement;
+        fireEvent.click(within(row).getByRole('button', { name: 'Delete recording' }));
+        const dialog = await screen.findByRole('dialog');
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+        expect(mockOnDelete).not.toHaveBeenCalled();
     });
 
     it('searches logs when typing in search bar', async () => {

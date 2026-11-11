@@ -9,6 +9,7 @@ import AddIcon from '@mui/icons-material/Add';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import type { FireToneSet } from '../types';
 import FormDialog from './common/FormDialog';
+import ConfirmDialog from './common/ConfirmDialog';
 import EmptyState from './common/EmptyState';
 
 interface Props {
@@ -25,6 +26,9 @@ const MONO = '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 const FireToneManager: React.FC<Props> = ({ open, onClose, tones, onSave, onDelete }) => {
     const [editing, setEditing] = useState<FireToneSet | null>(null);
     const [isFormOpen, setIsFormOpen] = useState(false);
+    // Kept after the confirm closes so its text does not blank out during the fade.
+    const [deleteTarget, setDeleteTarget] = useState<FireToneSet | null>(null);
+    const [confirmOpen, setConfirmOpen] = useState(false);
 
     const handleEdit = (tone: FireToneSet) => {
         setEditing(tone);
@@ -134,7 +138,7 @@ const FireToneManager: React.FC<Props> = ({ open, onClose, tones, onSave, onDele
                                 <IconButton onClick={() => handleEdit(tone)} color="info" aria-label={`Edit ${tone.name}`}>
                                     <EditIcon />
                                 </IconButton>
-                                <IconButton onClick={() => tone.id && onDelete(tone.id)} color="error" aria-label={`Delete ${tone.name}`}>
+                                <IconButton onClick={() => { setDeleteTarget(tone); setConfirmOpen(true); }} color="error" aria-label={`Delete ${tone.name}`}>
                                     <DeleteIcon />
                                 </IconButton>
                             </Box>
@@ -142,6 +146,14 @@ const FireToneManager: React.FC<Props> = ({ open, onClose, tones, onSave, onDele
                     ))}
                 </List>
             )}
+            <ConfirmDialog
+                open={confirmOpen}
+                title="Delete fire tone-out?"
+                onConfirm={() => { setConfirmOpen(false); if (deleteTarget?.id) onDelete(deleteTarget.id); }}
+                onCancel={() => setConfirmOpen(false)}
+            >
+                This removes <strong>{deleteTarget?.name}</strong>. The scanner will stop alerting on its tones.
+            </ConfirmDialog>
         </FormDialog>
     );
 };

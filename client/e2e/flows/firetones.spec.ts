@@ -79,11 +79,15 @@ test.describe('Fire Tone Management', () => {
     });
 
     // Click item to edit
-    const listItem = page.getByRole('listitem').filter({ hasText: toneToDelete.name });
-    
-    // Delete
+    const listItem = page.getByRole('dialog').getByRole('listitem').filter({ hasText: toneToDelete.name });
+
+    // Delete asks first; nothing is sent until it is confirmed.
     await listItem.locator('button:has(svg[data-testid="DeleteIcon"])').click();
-    
+    const confirm = page.getByRole('dialog', { name: /Delete fire tone-out/ });
+    await expect(confirm).toBeVisible();
+    expect(deleteRequested).toBe(false);
+    await confirm.getByRole('button', { name: 'Delete' }).click();
+
     await expect.poll(() => deleteRequested).toBeTruthy();
   });
 });

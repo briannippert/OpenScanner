@@ -44,6 +44,7 @@ import EmptyState from './common/EmptyState';
 import PanelSkeleton from './common/PanelSkeleton';
 import SegmentedControl from './common/SegmentedControl';
 import ActivityHeatmap from './ActivityHeatmap';
+import ConfirmDialog from './common/ConfirmDialog';
 
 type LogTab = 'recent' | 'favorites' | 'browse';
 type LogFilter = 'all' | 'tones';
@@ -80,6 +81,21 @@ export interface HighlightRequest {
 const HighlightContext = createContext<HighlightRequest | null>(null);
 /** Per-channel SRC/TG display-name resolver, provided to the deeply-nested rows. */
 const AliasContext = createContext<NameFor | null>(null);
+/**
+ * Asks the panel to confirm deleting a recording, then runs `proceed`. One dialog for the
+ * whole panel, reached through context, so each row stays as light as it was.
+ */
+type RequestDelete = (log: CallLog, proceed: () => void) => void;
+const DeleteContext = createContext<RequestDelete | null>(null);
+
+/** "today 14:03:22" style label for a recording, in the viewer's time zone. */
+const formatLogTime = (timestamp: string): string => {
+    const d = new Date(timestamp.endsWith('Z') ? timestamp : timestamp + 'Z');
+    const isToday = d.toDateString() === new Date().toDateString();
+    return isToday
+        ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        : `${d.toLocaleDateString([], { month: '2-digit', day: '2-digit' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+};
 
 interface Props {
     liveLogs: CallLog[];
@@ -143,6 +159,19 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     const showLinked = !!linkedLog && highlight?.id === linkedLog.id
         && !liveLogs.some(l => l.id === linkedLog.id);
 
+    // Deleting a recording removes its audio file for good, so rows ask first. The target
+    // is kept after the dialog closes so its text does not blank out during the fade.
+    const [deleteTarget, setDeleteTarget] = useState<{ log: CallLog; proceed: () => void } | null>(null);
+    const [deleteOpen, setDeleteOpen] = useState(false);
+    const requestDelete = useCallback<RequestDelete>((log, proceed) => {
+        setDeleteTarget({ log, proceed });
+        setDeleteOpen(true);
+    }, []);
+    const confirmDelete = () => {
+        setDeleteOpen(false);
+        deleteTarget?.proceed();
+    };
+
     // Stable identity, like handleFavoriteToggle: search-result rows are memoized too.
     const handleDelete = useCallback((id: string) => {
         setSearchResults(prev => prev ? prev.filter(log => log.id !== id) : null);
@@ -197,6 +226,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     return (
         <AliasContext.Provider value={nameFor ?? null}>
         <HighlightContext.Provider value={highlight ?? null}>
+        <DeleteContext.Provider value={requestDelete}>
         <Box data-testid="transmission-log" sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <Box sx={{ p: 1.5, borderBottom: '1px solid', borderColor: 'surface.border', display: 'flex', flexDirection: 'column', gap: 1.25 }}>
                 <TextField
@@ -309,7 +339,21 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                     </>
                 )}
             </Box>
+            <ConfirmDialog
+                open={deleteOpen}
+                title="Delete recording?"
+                confirmLabel="Delete"
+                onConfirm={confirmDelete}
+                onCancel={() => setDeleteOpen(false)}
+            >
+                {deleteTarget && (
+                    <>
+                        This permanently deletes the recording from <strong>{deleteTarget.log.alphaTag || `${deleteTarget.log.frequency.toFixed(3)} MHz`}</strong> ({formatLogTime(deleteTarget.log.timestamp)}) and its audio file. This cannot be undone.
+                    </>
+                )}
+            </ConfirmDialog>
         </Box>
+        </DeleteContext.Provider>
         </HighlightContext.Provider>
         </AliasContext.Provider>
     );
@@ -548,6 +592,7 @@ const LogItemInner = ({ log, tree, playingId, onPlay, onDelete, onFavoriteToggle
     const [isFavorite, setIsFavorite] = useState(log.isFavorite ?? false);
     const highlight = useContext(HighlightContext);
     const nameFor = useContext(AliasContext);
+    const requestDelete = useContext(DeleteContext);
     const itemRef = useRef<HTMLLIElement>(null);
 
     // Per-channel SRC/TG display names (fall back to the raw number; raw kept on hover).
@@ -641,7 +686,12 @@ const LogItemInner = ({ log, tree, playingId, onPlay, onDelete, onFavoriteToggle
                                 </IconButton>
                             </>
                         )}
-                        <IconButton size="small" onClick={() => onDelete(log.id)} aria-label="Delete recording">
+                        <IconButton
+                            size="small"
+                            onClick={() => (requestDelete ? requestDelete(log, () => onDelete(log.id)) : onDelete(log.id))}
+                            aria-label="Delete recording"
+                            title="Delete recording"
+                        >
                             <Delete sx={{ color: 'text.disabled', fontSize: 18 }} />
                         </IconButton>
                     </Box>
@@ -682,14 +732,7 @@ const LogItemInner = ({ log, tree, playingId, onPlay, onDelete, onFavoriteToggle
                         <Box component="span" display="block">
                             <Box display="flex" alignItems="center" gap={0.75} mt={0.3} flexWrap="wrap">
                                 <Typography variant="caption" sx={{ ...monoFont, color: 'text.disabled', fontSize: '0.68rem' }}>
-                                    {(() => {
-                                        const d = new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z');
-                                        const now = new Date();
-                                        const isToday = d.toDateString() === now.toDateString();
-                                        return isToday
-                                            ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-                                            : `${d.toLocaleDateString([], { month: '2-digit', day: '2-digit' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-                                    })()}
+                                    {formatLogTime(log.timestamp)}
                                 </Typography>
                                 <Typography variant="caption" sx={{ color: 'surface.borderStrong', fontSize: '0.65rem' }}>·</Typography>
                                 <Typography variant="caption" sx={{ ...monoFont, color: 'text.disabled', fontSize: '0.68rem' }}>
