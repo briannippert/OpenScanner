@@ -413,6 +413,9 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
     // Resample an input recording (raw 48k s16le or an encoded file) to 16 kHz mono
     // WAV with the radio voice-filter chain. Shared by the local and remote backends.
     // Returns true when the output file was produced.
+    /// <summary>Upper bound for resampling one clip for Whisper.</summary>
+    private const int FfmpegConvertTimeoutMs = 120_000;
+
     private bool ConvertTo16kWav(string audioPath, string tempWavPath)
     {
         var convertStart = new ProcessStartInfo(PlatformTools.Ffmpeg)
@@ -422,6 +425,10 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        convertStart.ArgumentList.Add("-nostdin");
+        convertStart.ArgumentList.Add("-hide_banner");
+        convertStart.ArgumentList.Add("-loglevel");
+        convertStart.ArgumentList.Add("error");
 
         if (Path.GetExtension(audioPath).Equals(".raw", StringComparison.OrdinalIgnoreCase))
         {
@@ -446,17 +453,18 @@ public class WhisperTranscriptionService : ITranscriptionService, IDisposable
         convertStart.ArgumentList.Add(tempWavPath);
         convertStart.ArgumentList.Add("-y");
 
-        using (var proc = Process.Start(convertStart))
+        var result = ProcessRunner.Run(convertStart, FfmpegConvertTimeoutMs);
+        if (result == null)
         {
-            if (proc != null)
-            {
-                var stderr = proc.StandardError.ReadToEnd();
-                proc.WaitForExit();
-                if (proc.ExitCode != 0)
-                {
-                    _logger.LogError($"FFmpeg conversion failed with exit code {proc.ExitCode}. Stderr: {stderr}");
-                }
-            }
+            _logger.LogError("FFmpeg could not be started.");
+        }
+        else if (result.TimedOut)
+        {
+            _logger.LogError($"FFmpeg conversion timed out. Stderr: {result.StdErr}");
+        }
+        else if (result.ExitCode != 0)
+        {
+            _logger.LogError($"FFmpeg conversion failed with exit code {result.ExitCode}. Stderr: {result.StdErr}");
         }
 
         return File.Exists(tempWavPath);

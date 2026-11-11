@@ -7,6 +7,9 @@ namespace OpenScanner.Server.Services;
 
 public class RecordingService : IRecordingService
 {
+    /// <summary>Upper bound for converting one recording to MP3.</summary>
+    private const int FfmpegConvertTimeoutMs = 120_000;
+
     private readonly IDatabase _db;
     private readonly ILogger<RecordingService> _logger;
     private readonly ITranscriptionService _transcriptionService;
@@ -388,6 +391,10 @@ public class RecordingService : IRecordingService
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
+                // Keep stderr to real problems (the default banner and stats are not errors).
+                convertStart.ArgumentList.Add("-nostdin");
+                convertStart.ArgumentList.Add("-hide_banner");
+                convertStart.ArgumentList.Add("-loglevel"); convertStart.ArgumentList.Add("error");
                 // Input: raw 48k mono s16le
                 convertStart.ArgumentList.Add("-f"); convertStart.ArgumentList.Add("s16le");
                 convertStart.ArgumentList.Add("-ar"); convertStart.ArgumentList.Add("48000");
@@ -400,14 +407,16 @@ public class RecordingService : IRecordingService
                 convertStart.ArgumentList.Add(mp3Path);
                 convertStart.ArgumentList.Add("-y");
 
-                using (var proc = Process.Start(convertStart))
+                // Both streams are drained concurrently and the call is bounded, so a chatty or
+                // wedged ffmpeg can't freeze the recording thread.
+                var result = ProcessRunner.Run(convertStart, FfmpegConvertTimeoutMs);
+                if (result == null)
+                    _logger.LogError("FFmpeg could not be started.");
+                else
                 {
-                    string output = proc?.StandardOutput.ReadToEnd() ?? string.Empty;
-                    string error = proc?.StandardError.ReadToEnd() ?? string.Empty;
-                    proc?.WaitForExit();
-
-                    if (!string.IsNullOrEmpty(output)) _logger.LogInformation($"FFmpeg Output: {output}");
-                    if (!string.IsNullOrEmpty(error)) _logger.LogError($"FFmpeg Error: {error}");
+                    if (result.TimedOut) _logger.LogError($"FFmpeg timed out converting {recordingPath}.");
+                    if (!string.IsNullOrWhiteSpace(result.StdOut)) _logger.LogInformation($"FFmpeg Output: {result.StdOut}");
+                    if (!string.IsNullOrWhiteSpace(result.StdErr)) _logger.LogError($"FFmpeg Error: {result.StdErr}");
                 }
 
                 if (File.Exists(mp3Path))
