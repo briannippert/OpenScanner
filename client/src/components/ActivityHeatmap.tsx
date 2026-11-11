@@ -1,39 +1,45 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Typography, Tooltip } from '@mui/material';
-import type { CallLog } from '../types';
 import { green } from '../viz/ramp';
 import { surface } from '../theme/tokens';
-
-interface Props {
-  logs: CallLog[];
-}
+import { toActivityGrid, type ActivityBucket } from '../lib/activityGrid';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOUR_TICKS = [0, 6, 12, 18];
+/** Four full weeks, so every weekday is represented equally. */
+const WINDOW_DAYS = 28;
 
 /**
- * Recent-activity heatmap: transmissions by day-of-week × hour-of-day.
- * Sequential single-hue (scanner green) magnitude ramp, per the dataviz method.
+ * Activity heatmap: transmissions by day-of-week × hour-of-day over the last four
+ * weeks. Sequential single-hue (scanner green) magnitude ramp, per the dataviz
+ * method.
+ *
+ * The counts come from the server, aggregated over the whole window. (They used
+ * to be derived from the in-memory "recent" list, which is capped at 100
+ * transmissions — on a busy scanner that is a few hours, so most of the grid was
+ * always empty.)
  */
-const ActivityHeatmap: React.FC<Props> = ({ logs }) => {
-  const { grid, max } = useMemo(() => {
-    const g: number[][] = Array.from({ length: 7 }, () => new Array(24).fill(0));
-    let m = 0;
-    for (const log of logs) {
-      const d = new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z');
-      if (isNaN(d.getTime())) continue;
-      const day = d.getDay();
-      const hour = d.getHours();
-      g[day][hour] += 1;
-      if (g[day][hour] > m) m = g[day][hour];
-    }
-    return { grid: g, max: m };
-  }, [logs]);
+const ActivityHeatmap: React.FC = () => {
+  const [buckets, setBuckets] = useState<ActivityBucket[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/history/activity?days=${WINDOW_DAYS}`)
+      .then(r => r.json())
+      .then((data: unknown) => { if (!cancelled) setBuckets(Array.isArray(data) ? data as ActivityBucket[] : []); })
+      .catch(err => { console.error('Failed to fetch activity:', err); if (!cancelled) setBuckets([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const { counts: grid, max, total } = useMemo(() => toActivityGrid(buckets ?? []), [buckets]);
+
+  // Nothing recorded in the window (or still loading): no empty grid.
+  if (total === 0) return null;
 
   return (
     <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'surface.border' }}>
       <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase' }}>
-        Recent Activity Pattern
+        Activity Pattern · Last 4 Weeks
       </Typography>
       <Box sx={{ mt: 1, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 0.5, alignItems: 'center' }}>
         {DAYS.map((label, day) => (

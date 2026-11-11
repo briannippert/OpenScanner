@@ -45,6 +45,21 @@ public class HistoryController : ControllerBase
     }
 
     /// <summary>
+    /// Transmission counts per UTC hour over the last <paramref name="days"/> days,
+    /// for the activity heatmap. Buckets are UTC so each client can place them in
+    /// its own time zone; hours with no transmissions are omitted.
+    /// </summary>
+    /// <param name="days">Window length in days (1–90, default 28: four full weeks,
+    /// so every weekday is represented equally).</param>
+    [HttpGet("activity")]
+    [ProducesResponseType(typeof(IEnumerable<ActivityBucket>), StatusCodes.Status200OK)]
+    public async Task<IEnumerable<ActivityBucket>> GetActivity([FromQuery] int days = 28)
+    {
+        days = Math.Clamp(days, 1, 90);
+        return await _db.GetTransmissionHourlyCountsAsync(DateTime.UtcNow.AddDays(-days));
+    }
+
+    /// <summary>
     /// Gets all years for which transmission data exists.
     /// </summary>
     /// <returns>List of years (e.g., ["2023", "2024"]).</returns>

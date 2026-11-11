@@ -314,6 +314,15 @@ public class Database : IDatabase
     }
 
     /// <inheritdoc />
+    public async Task<IEnumerable<ActivityBucket>> GetTransmissionHourlyCountsAsync(DateTime sinceUtc)
+    {
+        using var conn = GetConnection();
+        return await conn.QueryAsync<ActivityBucket>(
+            SqlLoader.GetSql("Transmissions/GetHourlyCounts.sql"),
+            new { Since = sinceUtc.ToUniversalTime().ToString("o") });
+    }
+
+    /// <inheritdoc />
     public async Task<CallLog?> GetTransmissionByIdAsync(string id)
     {
         using var conn = GetConnection();

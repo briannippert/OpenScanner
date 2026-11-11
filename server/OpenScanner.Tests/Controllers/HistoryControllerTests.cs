@@ -18,6 +18,27 @@ public class HistoryControllerTests
         _controller = new HistoryController(_dbMock.Object);
     }
 
+    [Theory]
+    [InlineData(28, 28)]
+    [InlineData(7, 7)]
+    // Out-of-range windows are clamped rather than rejected.
+    [InlineData(0, 1)]
+    [InlineData(5000, 90)]
+    public async Task GetActivity_QueriesTheRequestedWindow(int requestedDays, int expectedDays)
+    {
+        DateTime? since = null;
+        _dbMock.Setup(db => db.GetTransmissionHourlyCountsAsync(It.IsAny<DateTime>()))
+            .Callback<DateTime>(d => since = d)
+            .ReturnsAsync(new List<ActivityBucket> { new() { Hour = "2026-03-10T14:00:00Z", Count = 2 } });
+
+        var result = await _controller.GetActivity(requestedDays);
+
+        Assert.Single(result);
+        Assert.NotNull(since);
+        var windowDays = (DateTime.UtcNow - since!.Value).TotalDays;
+        Assert.InRange(windowDays, expectedDays - 0.01, expectedDays + 0.01);
+    }
+
     [Fact]
     public async Task GetHistory_ReturnsLogs()
     {
