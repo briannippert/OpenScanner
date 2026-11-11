@@ -229,26 +229,61 @@ public class WebSocketBroadcaster
 
     private DateTime _lastStateBroadcast = DateTime.MinValue;
     private ScannerState? _lastSentState;
+    private ScannerState? _pendingState;
+    private bool _flushScheduled;
+    private readonly object _stateLock = new();
+    private const int StateIntervalMs = 100;
 
+    /// <summary>
+    /// Sends state updates at most every <see cref="StateIntervalMs"/> ms. Updates that arrive
+    /// inside the window are coalesced: the newest one is held and sent when the window ends,
+    /// so the final state of a burst (e.g. "activity ended") is never dropped.
+    /// </summary>
     private void BroadcastState(ScannerState state)
     {
-        var now = DateTime.UtcNow;
-        
-        // Always send if critical state changed (Status or Connection)
-        bool criticalUpdate = _lastSentState == null || 
-                              _lastSentState.Status != state.Status || 
-                              _lastSentState.IsHardwareConnected != state.IsHardwareConnected;
-
-        if (!criticalUpdate && (now - _lastStateBroadcast).TotalMilliseconds < 100) 
+        ScannerState? toSend = null;
+        lock (_stateLock)
         {
-            return;
+            var now = DateTime.UtcNow;
+            bool criticalUpdate = _lastSentState == null ||
+                                  _lastSentState.Status != state.Status ||
+                                  _lastSentState.IsHardwareConnected != state.IsHardwareConnected;
+            double sinceLast = (now - _lastStateBroadcast).TotalMilliseconds;
+
+            if (criticalUpdate || sinceLast >= StateIntervalMs)
+            {
+                _lastStateBroadcast = now;
+                _lastSentState = state;
+                _pendingState = null;
+                toSend = state;
+            }
+            else
+            {
+                _pendingState = state;
+                if (!_flushScheduled)
+                {
+                    _flushScheduled = true;
+                    Task.Delay(StateIntervalMs - (int)sinceLast + 1).ContinueWith(_ => FlushPendingState());
+                }
+            }
         }
 
-        _lastStateBroadcast = now;
-        _lastSentState = state;
+        if (toSend != null) _ = BroadcastJson(new { type = "STATE_UPDATE", payload = toSend });
+    }
 
-        var msg = new { type = "STATE_UPDATE", payload = state };
-        _ = BroadcastJson(msg);
+    private void FlushPendingState()
+    {
+        ScannerState? toSend;
+        lock (_stateLock)
+        {
+            _flushScheduled = false;
+            toSend = _pendingState;
+            _pendingState = null;
+            if (toSend == null) return;
+            _lastStateBroadcast = DateTime.UtcNow;
+            _lastSentState = toSend;
+        }
+        _ = BroadcastJson(new { type = "STATE_UPDATE", payload = toSend });
     }
 
     private void BroadcastLog(CallLog log)
