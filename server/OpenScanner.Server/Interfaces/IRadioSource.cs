@@ -1,3 +1,4 @@
+using OpenScanner.Server.Audio;
 using OpenScanner.Server.Models;
 
 namespace OpenScanner.Server.Interfaces;
@@ -20,7 +21,7 @@ public interface IRadioSource
     /// <summary>
     /// Event triggered when new audio data is available.
     /// </summary>
-    event Action<byte[]>? OnAudio;
+    event Action<AudioChunk>? OnAudio;
 
     /// <summary>
     /// Event triggered when a signaling event (fire tone-out or MDC1200) is detected.
@@ -44,10 +45,25 @@ public interface IRadioSource
     void ReloadChannels();
 
     /// <summary>
-    /// Sets the squelch threshold.
+    /// Sets the squelch threshold, in dB of SNR above the measured noise floor.
     /// </summary>
-    /// <param name="db">The threshold in dB.</param>
+    /// <param name="db">The threshold in dB above the noise floor.</param>
     void SetSquelch(double db);
+
+    /// <summary>
+    /// Sets the RTL-SDR tuner gain, in dB. A value of 0 selects the tuner's automatic gain (AGC).
+    /// The setting is persisted and applied to subsequent captures.
+    /// </summary>
+    /// <param name="db">The tuner gain in dB, or 0 for AUTO.</param>
+    void SetGain(double db);
+
+    /// <summary>
+    /// Sets the crystal frequency error correction, in parts per million. Generic (non-TCXO)
+    /// dongles are commonly 20-60 ppm off, which at VHF is several kHz — enough to push a
+    /// narrowband channel out of the passband. Persisted and applied to subsequent captures.
+    /// </summary>
+    /// <param name="ppm">The correction in ppm; 0 for none.</param>
+    void SetPpm(double ppm);
 
     /// <summary>
     /// Starts the radio source scanning process.

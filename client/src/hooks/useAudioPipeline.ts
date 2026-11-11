@@ -1,4 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  createOpusDecoder,
+  detectAudioCodec,
+  parseAudioFormat,
+  type AudioFormat,
+  type StreamDecoder,
+} from '../audio/opusStream';
+
+/** Packets to hold while an Opus decoder is being constructed (~500 ms at 20 ms/packet). */
+const MAX_PENDING_PACKETS = 25;
 
 export interface NowPlaying {
   id: string;
@@ -56,8 +66,16 @@ export function useAudioPipeline(volume: number) {
   const workletSetupRef = useRef<Promise<AudioWorkletNode | null> | null>(null);
   const nextStartTime = useRef<number>(0); // fallback scheduler cursor
   const isPageHiddenRef = useRef(false);
-  const isParallelRef = useRef(false);
   const volumeRef = useRef(volume);
+
+  // Live-stream format, from the server's AUDIO_FORMAT frame on the audio socket itself. This
+  // used to be inferred from parallelChannels on the *control* socket, which had no ordering
+  // relationship to the samples — so a scan-mode switch could deinterleave stereo as mono.
+  const formatRef = useRef<AudioFormat | null>(null);
+  const decoderRef = useRef<StreamDecoder | null>(null);
+  const pendingPacketsRef = useRef<ArrayBuffer[]>([]);
+  /** Sticky once a decoder fails at runtime: reconnect asks for uncompressed PCM instead. */
+  const forcePcmRef = useRef(false);
 
   // Playback transport state.
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
@@ -79,8 +97,51 @@ export function useAudioPipeline(volume: number) {
 
   useEffect(() => { nowPlayingRef.current = nowPlaying; }, [nowPlaying]);
 
-  const setParallel = useCallback((parallel: boolean) => {
-    isParallelRef.current = parallel;
+  /**
+   * Hands decoded samples to the player: the ring-buffer worklet where available, otherwise
+   * scheduled buffer sources. Both the PCM and Opus paths funnel through here, so they share one
+   * analyser → filter → gain graph and the VU meter and spectrogram keep working unchanged.
+   */
+  const pushSamples = useCallback((left: Float32Array<ArrayBuffer>, right: Float32Array<ArrayBuffer>) => {
+    const ctx = window.audioCtx;
+    const analyser = audioAnalyserRef.current;
+    if (!ctx || !analyser) return;
+
+    const node = workletNodeRef.current;
+    if (node) {
+      // Preferred path: hand off to the ring-buffer worklet (contiguous
+      // playback, no per-frame boundary pops), transferring the buffers.
+      if (left === right) {
+        node.port.postMessage({ channels: [left] }, [left.buffer]);
+      } else {
+        node.port.postMessage({ channels: [left, right] }, [left.buffer, right.buffer]);
+      }
+      return;
+    }
+
+    // Fallback (no AudioWorklet, e.g. http://): schedule a buffer source
+    // into the analyser with a jitter buffer.
+    const frames = left.length;
+    const stereo = left !== right;
+    // Buffer rate is the source PCM rate (48000), not ctx.sampleRate:
+    // this declares the samples' true rate so the engine resamples
+    // correctly if the device context runs at a different rate.
+    const audioBuffer = ctx.createBuffer(stereo ? 2 : 1, frames, 48000);
+    audioBuffer.copyToChannel(left, 0);
+    if (stereo) audioBuffer.copyToChannel(right, 1);
+
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(analyser);
+
+    const currentTime = ctx.currentTime;
+    const JITTER_BUFFER = 0.2;
+    const MAX_DRIFT = 0.6;
+    if (nextStartTime.current < currentTime || nextStartTime.current > currentTime + MAX_DRIFT) {
+      nextStartTime.current = currentTime + JITTER_BUFFER;
+    }
+    source.start(nextStartTime.current);
+    nextStartTime.current += audioBuffer.duration;
   }, []);
 
   const ensureCtx = useCallback(async (): Promise<AudioContext | null> => {
@@ -168,9 +229,11 @@ export function useAudioPipeline(volume: number) {
   useEffect(() => {
     const onVisibilityChange = () => {
       isPageHiddenRef.current = document.visibilityState === 'hidden';
-      // Clear any stale buffered audio so we resume live, not behind.
+      // Clear any stale buffered audio so we resume live, not behind. Packets were dropped while
+      // hidden, so the Opus decoder needs its prediction state cleared too.
       if (document.visibilityState === 'visible') {
         workletNodeRef.current?.port.postMessage({ type: 'reset' });
+        decoderRef.current?.reset();
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -334,105 +397,156 @@ export function useAudioPipeline(volume: number) {
     }
   }, [isPaused, currentPosition]);
 
-  // Live audio WebSocket: streams raw Int16 PCM frames, scheduled to avoid gaps.
+  // Live audio WebSocket. The server sends whichever codec we ask for: Opus (~24 kbps) where the
+  // browser can decode it, raw Int16 PCM (768 kbps) otherwise.
   useEffect(() => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsAudioUrl = `${wsProtocol}//${window.location.host}/ws/audio`;
+    const wsAudioBase = `${wsProtocol}//${window.location.host}/ws/audio`;
     let closed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    // Guards against a slow decoder construction resolving after the format moved on again.
+    let decoderGeneration = 0;
 
-    const connectAudioWs = () => {
-      wsAudio.current = new WebSocket(wsAudioUrl);
+    const closeDecoder = () => {
+      decoderRef.current?.close();
+      decoderRef.current = null;
+      pendingPacketsRef.current = [];
+    };
+
+    const onDecoded = (channels: Float32Array<ArrayBuffer>[]) => {
+      if (channels.length === 0) return;
+      pushSamples(channels[0], channels.length > 1 ? channels[1] : channels[0]);
+    };
+
+    const onDecoderError = (err: unknown) => {
+      console.error('[Audio] Opus decoding failed; falling back to PCM:', err);
+      forcePcmRef.current = true;
+      closeDecoder();
+      wsAudio.current?.close(); // the reconnect below comes back asking for PCM
+    };
+
+    const applyFormat = (fmt: AudioFormat) => {
+      const prev = formatRef.current;
+      formatRef.current = fmt;
+      if (prev && prev.codec === fmt.codec && prev.channels === fmt.channels) return;
+
+      // Anything buffered describes the old format.
+      workletNodeRef.current?.port.postMessage({ type: 'reset' });
+      closeDecoder();
+      if (fmt.codec !== 'opus') return;
+
+      const generation = ++decoderGeneration;
+      void createOpusDecoder(fmt.channels, onDecoded, onDecoderError).then((decoder) => {
+        if (closed || generation !== decoderGeneration) {
+          decoder?.close();
+          return;
+        }
+        if (!decoder) {
+          onDecoderError(new Error('no Opus decoder available'));
+          return;
+        }
+        decoderRef.current = decoder;
+        // Packets that arrived while we were constructing, replayed in order.
+        for (const packet of pendingPacketsRef.current) decoder.decode(packet);
+        pendingPacketsRef.current = [];
+      });
+    };
+
+    const handlePcm = (data: ArrayBuffer) => {
+      const int16Array = new Int16Array(data);
+      const isStereo = formatRef.current?.channels === 2;
+
+      // Deinterleave Int16 → Float32.
+      let left: Float32Array<ArrayBuffer>;
+      let right: Float32Array<ArrayBuffer>;
+      if (isStereo && int16Array.length >= 2) {
+        const frameSamples = Math.floor(int16Array.length / 2);
+        left = new Float32Array(frameSamples);
+        right = new Float32Array(frameSamples);
+        for (let i = 0; i < frameSamples; i++) {
+          left[i] = int16Array[i * 2] / 32768;
+          right[i] = int16Array[i * 2 + 1] / 32768;
+        }
+      } else {
+        left = new Float32Array(int16Array.length);
+        for (let i = 0; i < int16Array.length; i++) left[i] = int16Array[i] / 32768;
+        right = left;
+      }
+
+      pushSamples(left, right);
+    };
+
+    const connectAudioWs = async () => {
+      const codec = forcePcmRef.current ? 'pcm' : await detectAudioCodec();
+      if (closed) return;
+      // The server treats a missing ?codec= as a pre-negotiation client, so always send one.
+      const ws = new WebSocket(`${wsAudioBase}?codec=${codec === 'opus' ? 'opus,pcm' : 'pcm'}`);
+      wsAudio.current = ws;
       // Receive frames as ArrayBuffer, not Blob. Blob forces a per-frame
       // `await event.data.arrayBuffer()` in the handler below, and that async
       // yield lets concurrently-arriving frames resolve out of order — which
       // reorders PCM and produces high-frequency popping. ArrayBuffer frames
       // are available synchronously, so enqueue order matches arrival order.
-      wsAudio.current.binaryType = 'arraybuffer';
-      wsAudio.current.onclose = () => { if (!closed) setTimeout(connectAudioWs, 3000); };
-      wsAudio.current.onmessage = async (event) => {
+      ws.binaryType = 'arraybuffer';
+      ws.onclose = () => {
+        closeDecoder();
+        formatRef.current = null;
+        if (!closed) reconnectTimer = setTimeout(() => { void connectAudioWs(); }, 3000);
+      };
+      ws.onmessage = (event) => {
+        if (typeof event.data === 'string') {
+          const fmt = parseAudioFormat(event.data);
+          if (fmt) applyFormat(fmt);
+          return;
+        }
         if (!(event.data instanceof ArrayBuffer)) return;
         if (isPageHiddenRef.current) return;
 
         try {
-          const ctx = await ensureCtx();
-          if (!ctx) return;
-          const node = await ensureLiveGraph(ctx);
-          const analyser = audioAnalyserRef.current;
-          if (!analyser) return;
-
-          const int16Array = new Int16Array(event.data);
-          const isStereo = isParallelRef.current;
-
-          // Deinterleave Int16 → Float32.
-          let left: Float32Array<ArrayBuffer>;
-          let right: Float32Array<ArrayBuffer>;
-          if (isStereo && int16Array.length >= 2) {
-            const frameSamples = Math.floor(int16Array.length / 2);
-            left = new Float32Array(frameSamples);
-            right = new Float32Array(frameSamples);
-            for (let i = 0; i < frameSamples; i++) {
-              left[i] = int16Array[i * 2] / 32768;
-              right[i] = int16Array[i * 2 + 1] / 32768;
+          if (formatRef.current?.codec === 'opus') {
+            // Dispatch synchronously: Opus frames carry prediction state, so reordering them
+            // corrupts the decoder rather than just producing a click. The decoder's own output
+            // callback is where samples meet the (possibly not-yet-built) audio graph.
+            void ensureGraphReady();
+            const decoder = decoderRef.current;
+            if (decoder) decoder.decode(event.data);
+            else if (pendingPacketsRef.current.length < MAX_PENDING_PACKETS) {
+              pendingPacketsRef.current.push(event.data);
             }
-          } else {
-            left = new Float32Array(int16Array.length);
-            for (let i = 0; i < int16Array.length; i++) left[i] = int16Array[i] / 32768;
-            right = left;
+            return;
           }
 
-          if (node) {
-            // Preferred path: hand off to the ring-buffer worklet (contiguous
-            // playback, no per-frame boundary pops), transferring the buffers.
-            if (left === right) {
-              node.port.postMessage({ channels: [left] }, [left.buffer]);
-            } else {
-              node.port.postMessage({ channels: [left, right] }, [left.buffer, right.buffer]);
-            }
-          } else {
-            // Fallback (no AudioWorklet, e.g. http://): schedule a buffer source
-            // into the analyser with a jitter buffer.
-            const frames = left.length;
-            const stereo = left !== right;
-            // Buffer rate is the source PCM rate (48000), not ctx.sampleRate:
-            // this declares the samples' true rate so the engine resamples
-            // correctly if the device context runs at a different rate.
-            const audioBuffer = ctx.createBuffer(stereo ? 2 : 1, frames, 48000);
-            audioBuffer.copyToChannel(left, 0);
-            if (stereo) audioBuffer.copyToChannel(right, 1);
-
-            const source = ctx.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(analyser);
-
-            const currentTime = ctx.currentTime;
-            const JITTER_BUFFER = 0.2;
-            const MAX_DRIFT = 0.6;
-            if (nextStartTime.current < currentTime || nextStartTime.current > currentTime + MAX_DRIFT) {
-              nextStartTime.current = currentTime + JITTER_BUFFER;
-            }
-            source.start(nextStartTime.current);
-            nextStartTime.current += audioBuffer.duration;
-          }
+          const data = event.data;
+          void ensureGraphReady().then((ready) => { if (ready) handlePcm(data); });
         } catch (err) {
           console.error('[Audio] Processing error:', err);
         }
       };
     };
 
+    const ensureGraphReady = async (): Promise<boolean> => {
+      const ctx = await ensureCtx();
+      if (!ctx) return false;
+      await ensureLiveGraph(ctx);
+      return audioAnalyserRef.current !== null;
+    };
+
     const resumeAudio = () => {
       if (window.audioCtx && window.audioCtx.state === 'suspended') window.audioCtx.resume();
     };
     window.addEventListener('click', resumeAudio);
-    connectAudioWs();
+    void connectAudioWs();
 
     return () => {
       closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       window.removeEventListener('click', resumeAudio);
+      closeDecoder();
       wsAudio.current?.close();
     };
-    // ensureCtx/ensureLiveGraph are stable (memoized with empty deps); listed to
+    // ensureCtx/ensureLiveGraph/pushSamples are stable (memoized with empty deps); listed to
     // satisfy exhaustive-deps without re-running the socket setup.
-  }, [ensureCtx, ensureLiveGraph]);
+  }, [ensureCtx, ensureLiveGraph, pushSamples]);
 
   return {
     isAudioInitialized,
@@ -448,6 +562,5 @@ export function useAudioPipeline(volume: number) {
     seek,
     setRate,
     stop,
-    setParallel,
   };
 }

@@ -16,10 +16,11 @@ public class NFM : DSDBase
     {
         int captureRate = 48000;
         int outputRate = 48000;
-        
-        // NFM decoder with optimized squelch and gain settings
+
+        // Analog voice keeps rtl_fm's squelch: it saves CPU and there is no decoder downstream
+        // whose sync it could break.
         // Simplified pipeline: no parallel MDC processing to avoid audio artifacts
-        return $"{PlatformTools.Stdbuf("-o0")}{PlatformTools.RtlFm} -f {channel.Frequency}M -M fm -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 -";
+        return $"{PlatformTools.Stdbuf("-o0")}{PlatformTools.RtlFm} -f {channel.Frequency}M -M fm -s {captureRate} -r {outputRate} {Tuning.RtlFmArgs()} -l 50 -t 30 -";
     }
 
     protected override Task OnStarted(CancellationToken token)

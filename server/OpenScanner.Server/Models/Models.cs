@@ -417,7 +417,13 @@ public record ParallelChannelState(
     int? SourceID = null,
     int? TargetID = null,
     string? SpeakerChain = null,
-    string? CurrentTone = null
+    string? CurrentTone = null,
+    /// <summary>
+    /// Measured frequency error of the received carrier, in Hz, or null when the channel is
+    /// idle. Over a transmitter known to be on-frequency this is the dongle's crystal error,
+    /// which is what makes the ppm setting calibratable instead of guesswork.
+    /// </summary>
+    double? MeasuredOffsetHz = null
 );
 
 /// <summary>
@@ -539,6 +545,7 @@ public record ScannerState(
     bool IsAudioStreaming = false,
     double? Squelch = null,
     double? Gain = null,
+    double? Ppm = null,
     string? DeviceName = null,
     string? DevicePort = null,
     SpectrumPoint[]? RfSpectrum = null,
