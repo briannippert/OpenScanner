@@ -1,20 +1,16 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { Suspense, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Box, Paper, Grid, Snackbar, Alert } from '@mui/material';
 import AppHeader from './components/AppHeader';
 import ScannerDisplay from './components/ScannerDisplay';
 import ChannelGrid from './components/ChannelGrid';
 import EventLog from './components/EventLog';
 import TransmissionLog from './components/TransmissionLog';
-import ChannelManager from './components/ChannelManager';
-import FireToneManager from './components/FireToneManager';
-import SettingsManager from './components/SettingsManager';
-import AliasManager from './components/AliasManager';
-import RfDebugDialog from './components/RfDebugDialog';
-import SystemDebugDialog from './components/SystemDebugDialog';
-import UpdateManager from './components/UpdateManager';
 import NowPlayingBar from './components/NowPlayingBar';
-import CommandPalette from './components/CommandPalette';
 import ConnectionOverlay from './components/ConnectionOverlay';
+import {
+  ChannelManager, FireToneManager, SettingsManager, AliasManager, RfDebugDialog,
+  SystemDebugDialog, UpdateManager, CommandPalette, preloadDialogs,
+} from './lazyDialogs';
 import { useAudioPipeline } from './hooks/useAudioPipeline';
 import { useScannerSocket } from './hooks/useScannerSocket';
 import { useDialogs } from './hooks/useDialogs';
@@ -46,6 +42,16 @@ function App() {
     refreshAliasCandidates,
   } = scanner;
   const manualHold = scannerState.manualHoldFrequency;
+
+  // Fetch the dialog code once the dashboard itself is up and idle.
+  useEffect(() => {
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(preloadDialogs, { timeout: 5000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = setTimeout(preloadDialogs, 2000);
+    return () => clearTimeout(id);
+  }, []);
 
   // Poll update availability for the ribbon indicator.
   useEffect(() => {
@@ -295,76 +301,94 @@ function App() {
           />
         )}
 
-        <ChannelManager
-          open={dialogs.isOpen('channels')}
-          onClose={dialog.channels.close}
-          channels={scanner.channels}
-          onSave={scanner.handleSaveChannel}
-          onDelete={scanner.handleDeleteChannel}
-        />
-        <FireToneManager
-          open={dialogs.isOpen('fireTones')}
-          onClose={dialog.fireTones.close}
-          tones={scanner.fireTones}
-          onSave={scanner.handleSaveFireTone}
-          onDelete={scanner.handleDeleteFireTone}
-        />
-        <SettingsManager
-          open={dialogs.isOpen('settings')}
-          onClose={dialog.settings.close}
-          onRecordingsDeleted={clearCallLog}
-          // Only needed while open; withholding it lets the closed dialog skip state updates.
-          scannerState={dialogs.isOpen('settings') ? scannerState : undefined}
-        />
-        <AliasManager
-          open={dialogs.isOpen('aliases')}
-          onClose={dialog.aliases.close}
-          candidates={scanner.aliasCandidates}
-          aliases={scanner.aliases}
-          onSave={scanner.handleSaveAlias}
-          onDelete={scanner.handleDeleteAlias}
-          onImport={scanner.importAliases}
-          onOpened={loadAliasCandidates}
-        />
-        <UpdateManager
-          open={dialogs.isOpen('update')}
-          onClose={dialog.update.close}
-          log={scanner.updateLog}
-          state={scanner.updateState}
-          onSeed={scanner.seedUpdate}
-        />
-        <CommandPalette
-          open={dialogs.isOpen('palette')}
-          onClose={dialog.palette.close}
-          channels={scanner.channels}
-          manualHold={manualHold}
-          onHold={handleHold}
-          onResume={resumeScan}
-          onSkip={skipCurrent}
-          onOpenSettings={dialog.settings.open}
-          onOpenFireTones={dialog.fireTones.open}
-          onOpenChannels={dialog.channels.open}
-          onOpenAliases={dialog.aliases.open}
-          onOpenDebug={openDebug}
-          onToggleFullscreen={toggleFullscreen}
-        />
-
-        <RfDebugDialog
-          open={dialogs.isOpen('rfDebug')}
-          onClose={closeDebug}
-          scannerState={scannerState}
-          debugFreq={debugFreq}
-          onDebugFreqChange={setDebugFreq}
-          debugGain={debugGain}
-          onDebugGainChange={setDebugGain}
-          onTune={tuneDebug}
-        />
-
-        <SystemDebugDialog
-          open={dialogs.isOpen('systemDebug')}
-          onClose={dialog.systemDebug.close}
-          onDownloadSupport={downloadSupportPackage}
-        />
+        {/* Dialogs are code-split and mounted on first open; after that they stay mounted
+            so their close animations and internal state behave as before. */}
+        <Suspense fallback={null}>
+          {dialogs.wasOpened('channels') && (
+            <ChannelManager
+              open={dialogs.isOpen('channels')}
+              onClose={dialog.channels.close}
+              channels={scanner.channels}
+              onSave={scanner.handleSaveChannel}
+              onDelete={scanner.handleDeleteChannel}
+            />
+          )}
+          {dialogs.wasOpened('fireTones') && (
+            <FireToneManager
+              open={dialogs.isOpen('fireTones')}
+              onClose={dialog.fireTones.close}
+              tones={scanner.fireTones}
+              onSave={scanner.handleSaveFireTone}
+              onDelete={scanner.handleDeleteFireTone}
+            />
+          )}
+          {dialogs.wasOpened('settings') && (
+            <SettingsManager
+              open={dialogs.isOpen('settings')}
+              onClose={dialog.settings.close}
+              onRecordingsDeleted={clearCallLog}
+              // Only needed while open; withholding it lets the closed dialog skip state updates.
+              scannerState={dialogs.isOpen('settings') ? scannerState : undefined}
+            />
+          )}
+          {dialogs.wasOpened('aliases') && (
+            <AliasManager
+              open={dialogs.isOpen('aliases')}
+              onClose={dialog.aliases.close}
+              candidates={scanner.aliasCandidates}
+              aliases={scanner.aliases}
+              onSave={scanner.handleSaveAlias}
+              onDelete={scanner.handleDeleteAlias}
+              onImport={scanner.importAliases}
+              onOpened={loadAliasCandidates}
+            />
+          )}
+          {dialogs.wasOpened('update') && (
+            <UpdateManager
+              open={dialogs.isOpen('update')}
+              onClose={dialog.update.close}
+              log={scanner.updateLog}
+              state={scanner.updateState}
+              onSeed={scanner.seedUpdate}
+            />
+          )}
+          {dialogs.wasOpened('palette') && (
+            <CommandPalette
+              open={dialogs.isOpen('palette')}
+              onClose={dialog.palette.close}
+              channels={scanner.channels}
+              manualHold={manualHold}
+              onHold={handleHold}
+              onResume={resumeScan}
+              onSkip={skipCurrent}
+              onOpenSettings={dialog.settings.open}
+              onOpenFireTones={dialog.fireTones.open}
+              onOpenChannels={dialog.channels.open}
+              onOpenAliases={dialog.aliases.open}
+              onOpenDebug={openDebug}
+              onToggleFullscreen={toggleFullscreen}
+            />
+          )}
+          {dialogs.wasOpened('rfDebug') && (
+            <RfDebugDialog
+              open={dialogs.isOpen('rfDebug')}
+              onClose={closeDebug}
+              scannerState={scannerState}
+              debugFreq={debugFreq}
+              onDebugFreqChange={setDebugFreq}
+              debugGain={debugGain}
+              onDebugGainChange={setDebugGain}
+              onTune={tuneDebug}
+            />
+          )}
+          {dialogs.wasOpened('systemDebug') && (
+            <SystemDebugDialog
+              open={dialogs.isOpen('systemDebug')}
+              onClose={dialog.systemDebug.close}
+              onDownloadSupport={downloadSupportPackage}
+            />
+          )}
+        </Suspense>
 
         <Snackbar open={showAudioPrompt} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
           <Alert severity="info" variant="filled" sx={{ width: '100%', cursor: 'pointer' }} onClick={audio.initAudio}>

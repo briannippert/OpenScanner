@@ -7,7 +7,7 @@ test.describe('Fire Tone Management', () => {
     // Note: It's hidden on xs screens according to styles, so ensure viewport is large enough
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.getByRole('button', { name: 'Fire Tone Outs' }).click();
-    await expect(page.getByText('Manage Fire Tone-Outs')).toBeVisible();
+    await expect(page.getByRole('dialog').getByText('Manage Fire Tone-Outs')).toBeVisible();
   });
 
   test('lists existing tones', async ({ page }) => {
