@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useContext, createContext } from 'react';
+import React, { useState, useEffect, useRef, useContext, useCallback, createContext, memo } from 'react';
 import {
     Box,
     List,
@@ -106,7 +106,8 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     const [powerDmsDept, setPowerDmsDept] = useState<string | null>(null);
     const [linkedLog, setLinkedLog] = useState<CallLog | null>(null);
 
-    const handleFavoriteToggle = () => setFavoritesRefreshKey(k => k + 1);
+    // Stable identity: it is passed to every row, and rows are memoized.
+    const handleFavoriteToggle = useCallback(() => setFavoritesRefreshKey(k => k + 1), []);
 
     // When a new highlight arrives, expand Recent Activity and clear any active
     // search so the target item is rendered and can be scrolled into view. This
@@ -535,7 +536,9 @@ const ChannelNode = ({ year, month, day, channel, playingId, onPlay, onDelete, o
     );
 };
 
-const LogItem =({ log, tree, playingId, onPlay, onDelete, onFavoriteToggle }: { log: CallLog; tree?: boolean } & LogNodeProps) => {
+type LogItemProps = { log: CallLog; tree?: boolean } & LogNodeProps;
+
+const LogItemInner = ({ log, tree, playingId, onPlay, onDelete, onFavoriteToggle }: LogItemProps) => {
     const [isFavorite, setIsFavorite] = useState(log.isFavorite ?? false);
     const highlight = useContext(HighlightContext);
     const nameFor = useContext(AliasContext);
@@ -753,4 +756,20 @@ const LogItem =({ log, tree, playingId, onPlay, onDelete, onFavoriteToggle }: { 
     );
 };
 
-export default TransmissionLog;
+/**
+ * A row is a dozen MUI components, and a list holds up to 100 of them, so rows
+ * must not re-render unless something they show changed. `playingId` is compared
+ * by what it means to this row (is *this* recording playing?), so starting
+ * playback re-renders two rows rather than all of them.
+ */
+const LogItem = memo(LogItemInner, (a, b) =>
+    a.log === b.log &&
+    a.tree === b.tree &&
+    a.onPlay === b.onPlay &&
+    a.onDelete === b.onDelete &&
+    a.onFavoriteToggle === b.onFavoriteToggle &&
+    (a.playingId === a.log.id) === (b.playingId === b.log.id));
+
+// Memoized: the app re-renders on every scanner state update (up to 10 per
+// second), and none of this panel's props change with those.
+export default memo(TransmissionLog);
