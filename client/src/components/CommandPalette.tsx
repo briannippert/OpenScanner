@@ -12,6 +12,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import MonitorIcon from '@mui/icons-material/Monitor';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import InsightsIcon from '@mui/icons-material/Insights';
+import BugReportIcon from '@mui/icons-material/BugReport';
 import type { Channel } from '../types';
 import { sameFrequency } from '../lib/frequency';
 
@@ -39,12 +40,13 @@ interface Props {
   onOpenAliases: () => void;
   onOpenStats: () => void;
   onOpenDebug: () => void;
+  onOpenSystemDebug: () => void;
   onToggleFullscreen: () => void;
 }
 
 const CommandPalette: React.FC<Props> = ({
   open, onClose, channels, manualHold, onHold, onResume, onSkip,
-  onOpenSettings, onOpenFireTones, onOpenChannels, onOpenAliases, onOpenStats, onOpenDebug, onToggleFullscreen,
+  onOpenSettings, onOpenFireTones, onOpenChannels, onOpenAliases, onOpenStats, onOpenDebug, onOpenSystemDebug, onToggleFullscreen,
 }) => {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
@@ -82,10 +84,11 @@ const CommandPalette: React.FC<Props> = ({
       { id: 'stats', label: 'Statistics', section: 'Actions', icon: <InsightsIcon fontSize="small" />, keywords: 'stats statistics heatmap activity busiest airtime charts', run: run(onOpenStats) },
       { id: 'settings', label: 'Open settings', section: 'Actions', icon: <SettingsIcon fontSize="small" />, keywords: 'settings preferences storage', run: run(onOpenSettings) },
       { id: 'debug', label: 'RF spectrum debug', section: 'Actions', icon: <MonitorIcon fontSize="small" />, keywords: 'rf spectrum debug waterfall', run: run(onOpenDebug) },
+      { id: 'systemDebug', label: 'System debug', section: 'Actions', icon: <BugReportIcon fontSize="small" />, keywords: 'system debug diagnostics cpu memory temperature services support package logs', run: run(onOpenSystemDebug) },
       { id: 'fullscreen', label: 'Toggle fullscreen', section: 'Actions', icon: <FullscreenIcon fontSize="small" />, keywords: 'fullscreen full screen', run: run(onToggleFullscreen) },
     ];
     return [...actionCmds, ...channelCmds];
-  }, [channels, manualHold, onHold, onResume, onSkip, onOpenChannels, onOpenFireTones, onOpenAliases, onOpenStats, onOpenSettings, onOpenDebug, onToggleFullscreen, onClose]);
+  }, [channels, manualHold, onHold, onResume, onSkip, onOpenChannels, onOpenFireTones, onOpenAliases, onOpenStats, onOpenSettings, onOpenDebug, onOpenSystemDebug, onToggleFullscreen, onClose]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

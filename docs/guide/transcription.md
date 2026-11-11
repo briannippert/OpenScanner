@@ -35,4 +35,4 @@ How many recordings are transcribed at once. With a large model, keep this at **
 
 ## Catching up on missed transcripts
 
-If transcription was off or failing for a while, open **System Debug** from the header and use **Transcription Backfill**. It transcribes recordings from the last 24 hours that have no transcript, at low priority so live transmissions come first.
+If transcription was off or failing for a while, open **System Debug** (Settings → Diagnostics) and use **Transcription Backfill**. It transcribes recordings from the last 24 hours that have no transcript, at low priority so live transmissions come first.
