@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Box } from '@mui/material';
-import { viridisRGB } from '../viz/ramp';
+import { VIRIDIS_LUT } from '../viz/ramp';
 
 interface Props {
     analyser?: AnalyserNode;
@@ -53,14 +53,17 @@ const AudioSpectrogram: React.FC<Props> = ({ analyser, height = 150 }) => {
                 // Lower half of the spectrum (~0–4 kHz voice band).
                 const i = Math.floor((x / WIDTH) * (bufferLength / 2));
                 const value = dataArray[i];
-                let r = 0, g = 0, b = 0;
-                if (value >= FLOOR) {
-                    [r, g, b] = viridisRGB((value - FLOOR) / (255 - FLOOR));
-                }
                 const p = x * 4;
-                rowData.data[p] = r;
-                rowData.data[p + 1] = g;
-                rowData.data[p + 2] = b;
+                if (value >= FLOOR) {
+                    const c = Math.round(((value - FLOOR) / (255 - FLOOR)) * 255) * 3;
+                    rowData.data[p] = VIRIDIS_LUT[c];
+                    rowData.data[p + 1] = VIRIDIS_LUT[c + 1];
+                    rowData.data[p + 2] = VIRIDIS_LUT[c + 2];
+                } else {
+                    rowData.data[p] = 0;
+                    rowData.data[p + 1] = 0;
+                    rowData.data[p + 2] = 0;
+                }
                 rowData.data[p + 3] = 255;
             }
             rowCtx.putImageData(rowData, 0, 0);

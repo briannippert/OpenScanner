@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, Typography, Paper } from '@mui/material';
-import { viridisRGB } from '../viz/ramp';
+import { VIRIDIS_LUT } from '../viz/ramp';
 
 interface DataPoint {
     frequency: number;
@@ -73,12 +73,12 @@ const RfWaterfallDebug: React.FC<Props> = ({ data, height = 500 }) => {
                 const t = Math.max(0, Math.min(1, (db - minDb) / (maxDb - minDb)));
 
                 // Perceptual (viridis) magnitude ramp — matches the audio spectrogram.
-                const [r, g, b] = viridisRGB(t);
+                const c = Math.round(t * 255) * 3;
 
                 const i = x * 4;
-                imageData.data[i] = r;
-                imageData.data[i + 1] = g;
-                imageData.data[i + 2] = b;
+                imageData.data[i] = VIRIDIS_LUT[c];
+                imageData.data[i + 1] = VIRIDIS_LUT[c + 1];
+                imageData.data[i + 2] = VIRIDIS_LUT[c + 2];
                 imageData.data[i + 3] = 255;
             }
             rowCtx.putImageData(imageData, 0, 0);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useContext, useCallback, createContext, memo } from 'react';
+import React, { useState, useEffect, useRef, useContext, useCallback, useMemo, createContext, memo } from 'react';
 import {
     Box,
     List,
@@ -143,10 +143,16 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     const showLinked = !!linkedLog && highlight?.id === linkedLog.id
         && !liveLogs.some(l => l.id === linkedLog.id);
 
-    const handleDelete = (id: string) => {
+    // Stable identity, like handleFavoriteToggle: search-result rows are memoized too.
+    const handleDelete = useCallback((id: string) => {
         setSearchResults(prev => prev ? prev.filter(log => log.id !== id) : null);
         onDelete(id);
-    };
+    }, [onDelete]);
+
+    const recentLogs = useMemo(
+        () => liveLogs.filter(l => matchesFilter(l, filter, toneOutIds)),
+        [liveLogs, filter, toneOutIds],
+    );
 
     // Initial load of years
     useEffect(() => {
@@ -280,10 +286,10 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                         )}
                         {!loaded ? (
                             <Box sx={{ p: 2 }}><PanelSkeleton rows={6} rowHeight={44} /></Box>
-                        ) : liveLogs.filter(l => matchesFilter(l, filter, toneOutIds)).length === 0 ? (
+                        ) : recentLogs.length === 0 ? (
                             <EmptyState icon={<Inbox />} title="No recent activity" hint={filter === 'all' ? 'Live transmissions will appear here as they are received.' : 'No recordings match this filter.'} />
                         ) : (
-                            liveLogs.filter(l => matchesFilter(l, filter, toneOutIds)).map(log => (
+                            recentLogs.map(log => (
                                 <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
                             ))
                         )}

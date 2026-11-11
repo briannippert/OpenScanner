@@ -46,3 +46,21 @@ export const green = (t: number, alpha = 1) => toCss(sample(GREEN, t), alpha);
 /** Raw RGB tuple (for putImageData pixel writes). */
 export const viridisRGB = (t: number): RGB => sample(VIRIDIS, t);
 export const greenRGB = (t: number): RGB => sample(GREEN, t);
+
+/**
+ * Viridis as a 256-entry lookup table, three bytes (r, g, b) per entry.
+ *
+ * The canvas visualizers colour hundreds of pixels per frame. Calling viridisRGB for each
+ * one allocates an array per pixel (tens of thousands a second on the spectrogram);
+ * indexing this table allocates nothing. Entry i is viridisRGB(i / 255).
+ */
+export const VIRIDIS_LUT: Uint8ClampedArray = (() => {
+  const lut = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const [r, g, b] = sample(VIRIDIS, i / 255);
+    lut[i * 3] = r;
+    lut[i * 3 + 1] = g;
+    lut[i * 3 + 2] = b;
+  }
+  return lut;
+})();
