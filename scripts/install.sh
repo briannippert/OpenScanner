@@ -149,14 +149,18 @@ install_build_tools() {
 # 2. Radio decoders (mbelib + dsd-fme), built from source on the device
 # ----------------------------------------------------------------
 log_step "Checking radio decoders..."
-if ! command -v dsd-fme > /dev/null || ! ldconfig -p | grep -q libmbe; then
+# No `grep -q` on a pipe here: under pipefail it fails when grep matches early and
+# closes the pipe on the writer, which would read as "mbelib is missing".
+has_mbelib() { ldconfig -p | grep libmbe > /dev/null; }
+
+if ! command -v dsd-fme > /dev/null || ! has_mbelib; then
     log_info "Building mbelib and dsd-fme from source (one-time, a few minutes)..."
     install_build_tools
     apt-get install -y -qq libitpp-dev libsndfile1-dev libusb-1.0-0-dev libncurses-dev \
         librtlsdr-dev libcodec2-dev libpulse-dev libasound2-dev > /dev/null
     mkdir -p "$HOME_DIR/build_deps"
 
-    if ! ldconfig -p | grep -q libmbe || { [ ! -f /usr/local/include/mbelib.h ] && [ ! -f /usr/include/mbelib.h ]; }; then
+    if ! has_mbelib || { [ ! -f /usr/local/include/mbelib.h ] && [ ! -f /usr/include/mbelib.h ]; }; then
         log_info "Building mbelib..."
         [ -d "$HOME_DIR/build_deps/mbelib" ] || git clone --quiet https://github.com/szechyjs/mbelib.git "$HOME_DIR/build_deps/mbelib"
         rm -rf "$HOME_DIR/build_deps/mbelib/build"
@@ -239,7 +243,7 @@ bundled_whisper_ok() {
     local bin="$NEW/whisper/bin/whisper-cli" flag
     [ -x "$bin" ] || return 1
     for flag in $(cat "$NEW/whisper/REQUIRES" 2>/dev/null); do
-        grep -m1 -E '^(flags|Features)' /proc/cpuinfo | grep -qw "$flag" || return 1
+        grep -m1 -E '^(flags|Features)' /proc/cpuinfo | grep -w "$flag" > /dev/null || return 1
     done
     "$bin" --help > /dev/null 2>&1
 }
