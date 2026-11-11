@@ -149,6 +149,50 @@ public class ToneDetectorTests
         Assert.False(fired);
     }
 
+    private async Task<ToneDetector> MakeTwoToneDetector()
+    {
+        var toneSet = new FireToneSet { Name = "Test Station", FrequencyA = 600, FrequencyB = 800 };
+        _dbMock.Setup(db => db.GetAllFireTonesAsync()).ReturnsAsync(new[] { toneSet });
+        var detector = new ToneDetector(_dbMock.Object, _loggerMock.Object, _time);
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (detector.ToneCount == 0 && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
+        return detector;
+    }
+
+    [Fact]
+    public async Task KeyedStreams_DoNotMixToneAAndToneBFromDifferentChannels()
+    {
+        var detector = await MakeTwoToneDetector();
+        var fired = new List<double>();
+        detector.OnStreamToneDetected += (_, key) => fired.Add(key);
+
+        // Channel 1 carries tone A and channel 2 tone B, interleaved as parallel scanning
+        // delivers them. Neither channel heard a complete A-then-B page.
+        detector.ProcessAudio(GenerateSineWave(600, 0.5, 48000), 460.0);
+        detector.ProcessAudio(GenerateSineWave(800, 0.5, 48000), 461.0);
+
+        Assert.Empty(fired);
+    }
+
+    [Fact]
+    public async Task KeyedStreams_DetectToneSequenceOnSingleChannelAndReportItsKey()
+    {
+        var detector = await MakeTwoToneDetector();
+        var fired = new List<double>();
+        detector.OnStreamToneDetected += (_, key) => fired.Add(key);
+        FireToneSet? unkeyed = null;
+        detector.OnToneDetected += t => unkeyed = t;
+
+        detector.ProcessAudio(GenerateSineWave(600, 0.5, 48000), 460.0);
+        // Another channel's audio in between must not disturb channel 460's state.
+        detector.ProcessAudio(GenerateSineWave(1000, 0.5, 48000), 461.0);
+        detector.ProcessAudio(GenerateSineWave(800, 0.5, 48000), 460.0);
+
+        Assert.Equal(new[] { 460.0 }, fired);
+        Assert.Null(unkeyed); // keyed streams don't use the single-channel event
+    }
+
     private byte[] GenerateSineWave(double freq, double durationSec, int sampleRate)
     {
         int samples = (int)(sampleRate * durationSec);
