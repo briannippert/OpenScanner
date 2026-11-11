@@ -50,7 +50,6 @@ export function useAudioPipeline(volume: number) {
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | undefined>(undefined);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
   const [isPaused, setIsPaused] = useState(false);
-  const [positionSec, setPositionSec] = useState(0);
   const [playbackRate, setPlaybackRateState] = useState(1);
 
   const wsAudio = useRef<WebSocket | null>(null);
@@ -83,7 +82,6 @@ export function useAudioPipeline(volume: number) {
   const startedAtRef = useRef(0);   // ctx.currentTime when the current source started
   const offsetRef = useRef(0);      // buffer offset (sec) the current source started from
   const rateRef = useRef(1);
-  const rafRef = useRef<number | null>(null);
   const nowPlayingRef = useRef<NowPlaying | null>(null);
   const durationRef = useRef(0);
 
@@ -240,13 +238,6 @@ export function useAudioPipeline(volume: number) {
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   }, []);
 
-  const stopRaf = useCallback(() => {
-    if (rafRef.current != null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-  }, []);
-
   const currentPosition = useCallback((ctx: AudioContext) =>
     offsetRef.current + (ctx.currentTime - startedAtRef.current) * rateRef.current, []);
 
@@ -263,14 +254,24 @@ export function useAudioPipeline(volume: number) {
 
   const stop = useCallback(() => {
     stopSource();
-    stopRaf();
     bufferRef.current = null;
+    offsetRef.current = 0;
     setNowPlaying(null);
     setIsPaused(false);
-    setPositionSec(0);
-  }, [stopSource, stopRaf]);
+  }, [stopSource]);
 
-  // Start a source playing from `offsetSec`, wiring the position ticker.
+  /**
+   * Current playback position in seconds. Deliberately not React state: it changes every
+   * frame, and holding it here would re-render the whole app at 60 fps while a clip plays.
+   * The Now Playing bar polls this from its own animation frame loop instead.
+   */
+  const getPosition = useCallback(() => {
+    const ctx = window.audioCtx;
+    if (!ctx || !sourceRef.current) return offsetRef.current;
+    return Math.max(0, Math.min(durationRef.current, currentPosition(ctx)));
+  }, [currentPosition]);
+
+  // Start a source playing from `offsetSec`.
   const startFrom = useCallback((offsetSec: number) => {
     const ctx = window.audioCtx;
     const buffer = bufferRef.current;
@@ -284,11 +285,10 @@ export function useAudioPipeline(volume: number) {
       // Only the source that is still current represents a natural end-of-clip;
       // a source we replaced (seek/pause/stop) is no longer current → ignore.
       if (sourceRef.current !== source) return;
-      stopRaf();
       sourceRef.current = null;
       bufferRef.current = null;
+      offsetRef.current = 0;
       setIsPaused(false);
-      setPositionSec(durationRef.current);
       setNowPlaying(null);
     };
     source.start(0, Math.max(0, offsetSec));
@@ -296,17 +296,7 @@ export function useAudioPipeline(volume: number) {
     startedAtRef.current = ctx.currentTime;
     offsetRef.current = offsetSec;
     setIsPaused(false);
-
-    stopRaf();
-    const tick = () => {
-      const c = window.audioCtx;
-      if (!c) return;
-      const pos = Math.min(durationRef.current, currentPosition(c));
-      setPositionSec(pos);
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-  }, [stopSource, stopRaf, currentPosition]);
+  }, [stopSource]);
 
   /** Play (or toggle off) a recorded clip. */
   const playRawAudio = useCallback(async (id: string, filename: string, duration?: number, label?: string) => {
@@ -348,7 +338,6 @@ export function useAudioPipeline(volume: number) {
       durationRef.current = buffer.duration;
       rateRef.current = playbackRate;
       setNowPlaying({ id, filename, label, duration: buffer.duration, peaks: computePeaks(buffer) });
-      setPositionSec(0);
       startFrom(0);
     } catch (e) {
       console.error('Playback failed:', e);
@@ -364,17 +353,14 @@ export function useAudioPipeline(volume: number) {
     } else {
       const pos = Math.min(durationRef.current, currentPosition(ctx));
       stopSource();
-      stopRaf();
       offsetRef.current = pos;
-      setPositionSec(pos);
       setIsPaused(true);
     }
-  }, [isPaused, startFrom, stopSource, stopRaf, currentPosition]);
+  }, [isPaused, startFrom, stopSource, currentPosition]);
 
   const seek = useCallback((sec: number) => {
     if (!bufferRef.current) return;
     const target = Math.max(0, Math.min(durationRef.current, sec));
-    setPositionSec(target);
     if (isPaused) {
       offsetRef.current = target;
     } else {
@@ -554,7 +540,7 @@ export function useAudioPipeline(volume: number) {
     playingId: nowPlaying?.id ?? null,
     nowPlaying,
     isPaused,
-    positionSec,
+    getPosition,
     playbackRate,
     initAudio,
     playRawAudio,

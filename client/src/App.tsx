@@ -289,7 +289,7 @@ function App() {
           <NowPlayingBar
             nowPlaying={audio.nowPlaying}
             isPaused={audio.isPaused}
-            positionSec={audio.positionSec}
+            getPosition={audio.getPosition}
             playbackRate={audio.playbackRate}
             onTogglePause={audio.togglePause}
             onSeek={audio.seek}
