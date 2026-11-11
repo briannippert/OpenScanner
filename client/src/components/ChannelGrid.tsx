@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Box, Card, Grid, Typography, Button, IconButton, Tooltip } from '@mui/material';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import EditIcon from '@mui/icons-material/Edit';
 import RadioIcon from '@mui/icons-material/Radio';
 import { alpha } from '@mui/material/styles';
 import type { Channel } from '../types';
+import { sameFrequency } from '../lib/frequency';
 import SectionCard from './common/SectionCard';
 import EmptyState from './common/EmptyState';
 import PanelSkeleton from './common/PanelSkeleton';
@@ -22,7 +23,7 @@ const EXPERIMENTAL_MODES = ['FM', 'AM', 'WFM'];
 const MONO = '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
 const ChannelGrid: React.FC<Props> = ({ channels, manualHold, loaded, onEdit, onToggleAvoid, onHold }) => {
-  const isHeld = (ch: Channel) => manualHold === ch.frequency;
+  const isHeld = (ch: Channel) => sameFrequency(manualHold, ch.frequency);
 
   return (
     <SectionCard
@@ -119,4 +120,5 @@ const ChannelGrid: React.FC<Props> = ({ channels, manualHold, loaded, onEdit, on
   );
 };
 
-export default ChannelGrid;
+// Memoized: the app re-renders on every scanner state update, which rarely changes these props.
+export default memo(ChannelGrid);

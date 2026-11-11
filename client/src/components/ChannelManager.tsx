@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { memo, useState } from 'react';
 import {
     Button, List, ListItem, ListItemText, IconButton,
     TextField, Box, Typography, MenuItem, Select, FormControl, InputLabel,
@@ -11,6 +11,7 @@ import RadioIcon from '@mui/icons-material/Radio';
 import SettingsInputAntennaIcon from '@mui/icons-material/SettingsInputAntenna';
 import type { Channel } from '../types';
 import FormDialog from './common/FormDialog';
+import ConfirmDialog from './common/ConfirmDialog';
 import EmptyState from './common/EmptyState';
 
 interface Props {
@@ -27,6 +28,9 @@ const MONO = '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDelete }) => {
     const [editing, setEditing] = useState<Channel | null>(null);
     const [isFormOpen, setIsFormOpen] = useState(false);
+    // Kept after the confirm closes so its text does not blank out during the fade.
+    const [deleteTarget, setDeleteTarget] = useState<Channel | null>(null);
+    const [confirmOpen, setConfirmOpen] = useState(false);
 
     const handleEdit = (channel: Channel) => {
         setEditing(channel);
@@ -193,7 +197,7 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                                 <IconButton onClick={() => handleEdit(ch)} color="info" aria-label={`Edit ${ch.alphaTag}`}>
                                     <EditIcon />
                                 </IconButton>
-                                <IconButton onClick={() => ch.id && onDelete(ch.id)} color="error" aria-label={`Delete ${ch.alphaTag}`}>
+                                <IconButton onClick={() => { setDeleteTarget(ch); setConfirmOpen(true); }} color="error" aria-label={`Delete ${ch.alphaTag}`}>
                                     <DeleteIcon />
                                 </IconButton>
                             </Box>
@@ -201,8 +205,18 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                     ))}
                 </List>
             )}
+            <ConfirmDialog
+                open={confirmOpen}
+                title="Delete channel?"
+                onConfirm={() => { setConfirmOpen(false); if (deleteTarget?.id) onDelete(deleteTarget.id); }}
+                onCancel={() => setConfirmOpen(false)}
+            >
+                This removes <strong>{deleteTarget?.alphaTag || `${deleteTarget?.frequency} MHz`}</strong> from
+                the scan list. Recordings already made on it are kept.
+            </ConfirmDialog>
         </FormDialog>
     );
 };
 
-export default ChannelManager;
+// Memoized: the app re-renders on every scanner state update, which rarely changes these props.
+export default memo(ChannelManager);

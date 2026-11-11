@@ -5,7 +5,9 @@ test.describe('Channel Management', () => {
     await page.goto('/');
     // Open Channel Manager
     await page.locator('button:has(svg[data-testid="EditIcon"])').click({ force: true });
-    await expect(page.getByText('Manage Channels')).toBeVisible();
+    // Wait for the dialog itself: the button's "Manage channels" tooltip also matches
+    // this text, and the dialog's code is loaded on demand.
+    await expect(page.getByRole('dialog').getByText('Manage Channels')).toBeVisible();
   });
 
   test('lists existing channels', async ({ page }) => {
@@ -77,15 +79,14 @@ test.describe('Channel Management', () => {
         }
     });
 
-    // Open context menu or find delete button. 
-    const listItem = page.getByRole('listitem').filter({ hasText: channelToDelete.alphaTag });
+    const listItem = page.getByRole('dialog').getByRole('listitem').filter({ hasText: channelToDelete.alphaTag });
     
-    // Look for delete button in the form
+    // Delete asks first; nothing is sent until it is confirmed.
     await listItem.locator('button:has(svg[data-testid="DeleteIcon"])').click();
-    
-    // Confirm deletion if there is a confirmation dialog
-    // await page.getByRole('button', { name: 'Confirm' }).click(); 
-    // (Commenting out until I know for sure, but usually there is one)
+    const confirm = page.getByRole('dialog', { name: /Delete channel/ });
+    await expect(confirm).toBeVisible();
+    expect(deleteRequested).toBe(false);
+    await confirm.getByRole('button', { name: 'Delete' }).click();
 
     await expect.poll(() => deleteRequested).toBeTruthy();
   });

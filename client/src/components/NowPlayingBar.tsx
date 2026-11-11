@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Typography, IconButton, Tooltip, Button } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -11,7 +11,8 @@ import type { NowPlaying } from '../hooks/useAudioPipeline';
 interface Props {
   nowPlaying: NowPlaying;
   isPaused: boolean;
-  positionSec: number;
+  /** Polled every animation frame; position lives outside React state (see useAudioPipeline). */
+  getPosition: () => number;
   playbackRate: number;
   onTogglePause: () => void;
   onSeek: (sec: number) => void;
@@ -28,7 +29,10 @@ const fmt = (s: number) => {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 };
 
-const Waveform: React.FC<{ peaks: number[]; progress: number; color: string; onSeek: (fraction: number) => void }> = ({ peaks, progress, color, onSeek }) => {
+/** Seconds moved per arrow-key press on the scrubber. */
+const KEY_SEEK_SEC = 5;
+
+const Waveform: React.FC<{ peaks: number[]; progress: number; duration: number; color: string; onSeek: (fraction: number) => void }> = ({ peaks, progress, duration, color, onSeek }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const theme = useTheme();
   const draggingRef = useRef(false);
@@ -71,14 +75,32 @@ const Waveform: React.FC<{ peaks: number[]; progress: number; color: string; onS
     onSeek(Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)));
   };
 
+  // Keyboard control, matching what role="slider" promises to assistive tech.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const step = duration > 0 ? KEY_SEEK_SEC / duration : 0.05;
+    let next: number;
+    switch (e.key) {
+      case 'ArrowLeft': case 'ArrowDown': next = progress - step; break;
+      case 'ArrowRight': case 'ArrowUp': next = progress + step; break;
+      case 'Home': next = 0; break;
+      case 'End': next = 1; break;
+      default: return;
+    }
+    e.preventDefault();
+    onSeek(Math.max(0, Math.min(1, next)));
+  };
+
   return (
     <canvas
       ref={canvasRef}
       role="slider"
+      tabIndex={0}
       aria-label="Seek"
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(progress * 100)}
+      aria-valuetext={`${fmt(progress * duration)} of ${fmt(duration)}`}
+      onKeyDown={onKeyDown}
       style={{ width: '100%', height: 36, display: 'block', cursor: 'pointer', touchAction: 'none' }}
       onPointerDown={(e) => { draggingRef.current = true; e.currentTarget.setPointerCapture(e.pointerId); seekFromEvent(e.clientX); }}
       onPointerMove={(e) => { if (draggingRef.current) seekFromEvent(e.clientX); }}
@@ -87,9 +109,23 @@ const Waveform: React.FC<{ peaks: number[]; progress: number; color: string; onS
   );
 };
 
-const NowPlayingBar: React.FC<Props> = ({ nowPlaying, isPaused, positionSec, playbackRate, onTogglePause, onSeek, onSetRate, onStop }) => {
+const NowPlayingBar: React.FC<Props> = ({ nowPlaying, isPaused, getPosition, playbackRate, onTogglePause, onSeek, onSetRate, onStop }) => {
   const theme = useTheme();
   const accent = theme.palette.primary.main;
+
+  // The bar owns the per-frame position updates so only it re-renders while a clip plays.
+  // Setting an unchanged value is a no-op, so a paused bar costs one cheap read per frame.
+  const [positionSec, setPositionSec] = useState(0);
+  useEffect(() => {
+    let raf = requestAnimationFrame(function tick() {
+      setPositionSec(getPosition());
+      raf = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [getPosition]);
+
+  const duration = nowPlaying.duration;
+  const seekFraction = useCallback((f: number) => onSeek(f * duration), [onSeek, duration]);
   const progress = nowPlaying.duration > 0 ? positionSec / nowPlaying.duration : 0;
 
   const cycleRate = () => {
@@ -127,7 +163,7 @@ const NowPlayingBar: React.FC<Props> = ({ nowPlaying, isPaused, positionSec, pla
       </Tooltip>
 
       <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-        <Waveform peaks={nowPlaying.peaks} progress={progress} color={accent} onSeek={(f) => onSeek(f * nowPlaying.duration)} />
+        <Waveform peaks={nowPlaying.peaks} progress={progress} duration={duration} color={accent} onSeek={seekFraction} />
       </Box>
 
       <Tooltip title="Playback speed">
@@ -161,4 +197,4 @@ const NowPlayingBar: React.FC<Props> = ({ nowPlaying, isPaused, positionSec, pla
   );
 };
 
-export default NowPlayingBar;
+export default memo(NowPlayingBar);

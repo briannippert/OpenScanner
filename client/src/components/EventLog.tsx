@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Box, Typography, IconButton, Collapse, List, ListItemButton, Tooltip, ButtonBase } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
@@ -9,6 +9,7 @@ import LaunchIcon from '@mui/icons-material/Launch';
 import type { CallLog, RadioEvent } from '../types';
 import { status } from '../theme/tokens';
 import EmptyState from './common/EmptyState';
+import ConfirmDialog from './common/ConfirmDialog';
 
 interface EventLogProps {
     events: RadioEvent[];
@@ -29,8 +30,9 @@ const formatDetail = (e: RadioEvent): string => {
     return '';
 };
 
-export default function EventLog({ events, onClear, onEventClick, transcriptions }: EventLogProps) {
+function EventLog({ events, onClear, onEventClick, transcriptions }: EventLogProps) {
     const [open, setOpen] = useState(true);
+    const [confirmClear, setConfirmClear] = useState(false);
 
     // Transcriptions for older tone-outs whose recording has scrolled out of the
     // live window: fetched on demand by recording id (null = fetched, no text).
@@ -84,7 +86,7 @@ export default function EventLog({ events, onClear, onEventClick, transcriptions
                 </ButtonBase>
                 {events.length > 0 && (
                     <Tooltip title="Clear events">
-                        <IconButton size="small" onClick={onClear} sx={{ color: 'text.secondary' }} aria-label="Clear events">
+                        <IconButton size="small" onClick={() => setConfirmClear(true)} sx={{ color: 'text.secondary' }} aria-label="Clear events">
                             <DeleteSweepIcon fontSize="small" />
                         </IconButton>
                     </Tooltip>
@@ -161,6 +163,20 @@ export default function EventLog({ events, onClear, onEventClick, transcriptions
                     </List>
                 )}
             </Collapse>
+
+            <ConfirmDialog
+                open={confirmClear}
+                title="Clear fire tone-outs?"
+                confirmLabel="Clear"
+                onConfirm={() => { setConfirmClear(false); onClear(); }}
+                onCancel={() => setConfirmClear(false)}
+            >
+                This removes all {events.length} tone-out event{events.length === 1 ? '' : 's'} from the list.
+                The recordings themselves are kept.
+            </ConfirmDialog>
         </Box>
     );
 }
+
+// Memoized: the app re-renders on every scanner state update, which rarely changes these props.
+export default memo(EventLog);

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { memo, useEffect, useState } from 'react';
 import {
   AppBar, Toolbar, Typography, Box, IconButton, Slider, Tooltip, Menu, MenuItem, ListItemIcon, ListItemText,
 } from '@mui/material';
@@ -16,6 +16,8 @@ import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import SettingsIcon from '@mui/icons-material/Settings';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
+import VolumeOffIcon from '@mui/icons-material/VolumeOff';
+import SearchIcon from '@mui/icons-material/Search';
 import MonitorIcon from '@mui/icons-material/Monitor';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
@@ -23,9 +25,15 @@ import BadgeIcon from '@mui/icons-material/Badge';
 import type { ScannerState } from '../types';
 import StatusChip from './common/StatusChip';
 
+type Gps = ScannerState['gps'];
+
 interface Props {
-  scannerState: ScannerState;
-  currentTime: Date;
+  // Only the slices of scanner state the header shows, so it can skip the (up to ten a
+  // second) state updates that change none of them.
+  isHardwareConnected?: boolean;
+  deviceName?: string;
+  devicePort?: string;
+  gps?: Gps;
   volume: number;
   onVolumeChange: (v: number) => void;
   manualHold?: number;
@@ -39,26 +47,52 @@ interface Props {
   onOpenAliases: () => void;
   updateAvailable?: boolean;
   onOpenUpdate: () => void;
+  onOpenPalette: () => void;
 }
 
 const MONO = '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
+const PRE_MUTE_KEY = 'scannerVolumeBeforeMute';
 const gpsMono = { fontFamily: MONO, color: 'text.primary' } as const;
 
+/** Wall clock. Owns its one-second timer so the tick re-renders only this text. */
+const Clock = () => {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return <>{now.toLocaleTimeString([], { hour12: false })}</>;
+};
+
 const AppHeader: React.FC<Props> = ({
-  scannerState, currentTime, volume, onVolumeChange, manualHold, onResume,
+  isHardwareConnected, deviceName, devicePort, gps, volume, onVolumeChange, manualHold, onResume,
   isFullscreen, onToggleFullscreen, onOpenFireTones, onOpenSettings, onOpenDebug, onOpenSystemDebug,
-  onOpenAliases, updateAvailable, onOpenUpdate,
+  onOpenAliases, updateAvailable, onOpenUpdate, onOpenPalette,
 }) => {
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
-  const gps = scannerState.gps;
   const hasFix = gps?.time && gps.fix >= 2;
+
+  // Mute remembers the level to come back to, across reloads too (volume itself is persisted).
+  const muted = volume === 0;
+  const toggleMute = () => {
+    if (!muted) {
+      try { localStorage.setItem(PRE_MUTE_KEY, String(volume)); } catch { /* storage unavailable */ }
+      onVolumeChange(0);
+      return;
+    }
+    let previous = NaN;
+    try { previous = parseFloat(localStorage.getItem(PRE_MUTE_KEY) ?? ''); } catch { /* storage unavailable */ }
+    onVolumeChange(previous > 0 && previous <= 1 ? previous : 1);
+  };
 
   // The toolbar actions, shared between the desktop icon row and the mobile menu.
   // Software Update is always listed: it's the only way into the update dialog,
   // and gating it on updateAvailable meant you couldn't check on demand until the
   // server's 30-minute poll had already found something. The UPDATE chip below
   // stays gated — that's the "there's something waiting" nudge.
+  const paletteShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl+K';
   const actions = [
+    { label: `Search commands (${paletteShortcut})`, icon: <SearchIcon />, onClick: onOpenPalette },
     { label: 'Software Update', icon: <SystemUpdateIcon />, onClick: onOpenUpdate },
     { label: 'Fire Tone Outs', icon: <NotificationsActiveIcon />, onClick: onOpenFireTones },
     { label: 'Radio Aliases', icon: <BadgeIcon />, onClick: onOpenAliases },
@@ -84,12 +118,12 @@ const AppHeader: React.FC<Props> = ({
         </Typography>
 
         <Box sx={{ mr: 2, display: { xs: 'none', sm: 'block' } }}>
-          <Tooltip title={scannerState.isHardwareConnected ? `${scannerState.deviceName || 'RTL-SDR Device'} (${scannerState.devicePort || 'USB'})` : 'No Device Detected'}>
+          <Tooltip title={isHardwareConnected ? `${deviceName || 'RTL-SDR Device'} (${devicePort || 'USB'})` : 'No Device Detected'}>
             <span>
               <StatusChip
-                icon={scannerState.isHardwareConnected ? <UsbIcon /> : <UsbOffIcon />}
-                label={scannerState.isHardwareConnected ? 'SDR READY' : 'SDR DISCONNECTED'}
-                tone={scannerState.isHardwareConnected ? 'success' : 'error'}
+                icon={isHardwareConnected ? <UsbIcon /> : <UsbOffIcon />}
+                label={isHardwareConnected ? 'SDR READY' : 'SDR DISCONNECTED'}
+                tone={isHardwareConnected ? 'success' : 'error'}
                 sx={{ fontSize: 10 }}
               />
             </span>
@@ -107,7 +141,7 @@ const AppHeader: React.FC<Props> = ({
           <Typography variant="caption" sx={{ ...gpsMono, color: 'primary.main', fontWeight: 700, fontSize: { xs: 12, sm: 14 } }}>
             {hasFix
               ? new Date(gps!.time).toLocaleTimeString([], { hour12: false })
-              : currentTime.toLocaleTimeString([], { hour12: false })}
+              : <Clock />}
           </Typography>
         </Box>
 
@@ -158,8 +192,18 @@ const AppHeader: React.FC<Props> = ({
           </Tooltip>
         )}
 
-        <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 2, width: { xs: 80, sm: 120, md: 150 } }}>
-          <VolumeUpIcon sx={{ color: 'text.secondary', fontSize: 20 }} />
+        <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 1, width: { xs: 96, sm: 132, md: 162 } }}>
+          <Tooltip title={muted ? 'Unmute' : 'Mute'}>
+            <IconButton
+              size="small"
+              onClick={toggleMute}
+              aria-label={muted ? 'Unmute' : 'Mute'}
+              aria-pressed={muted}
+              sx={{ color: muted ? 'warning.main' : 'text.secondary', flexShrink: 0 }}
+            >
+              {muted ? <VolumeOffIcon sx={{ fontSize: 20 }} /> : <VolumeUpIcon sx={{ fontSize: 20 }} />}
+            </IconButton>
+          </Tooltip>
           <Slider
             size="small"
             value={volume}
@@ -221,4 +265,14 @@ const AppHeader: React.FC<Props> = ({
   );
 };
 
-export default AppHeader;
+// The server sends a fresh gps object with every state update, so compare it by value.
+const GPS_KEYS = ['lat', 'lon', 'alt', 'speed', 'time', 'fix', 'sats', 'satsVisible'] as const;
+const sameGps = (a: Gps, b: Gps) =>
+  a === b || (!!a && !!b && GPS_KEYS.every(k => a[k] === b[k]));
+
+export default memo(AppHeader, (prev, next) => {
+  for (const key of Object.keys(next) as (keyof Props)[]) {
+    if (key !== 'gps' && prev[key] !== next[key]) return false;
+  }
+  return sameGps(prev.gps, next.gps);
+});

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, Box, TextField, List, ListItemButton, Typography, InputAdornment } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import SearchIcon from '@mui/icons-material/Search';
@@ -12,6 +12,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import MonitorIcon from '@mui/icons-material/Monitor';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import type { Channel } from '../types';
+import { sameFrequency } from '../lib/frequency';
 
 interface Command {
   id: string;
@@ -59,7 +60,7 @@ const CommandPalette: React.FC<Props> = ({
   const commands = useMemo<Command[]>(() => {
     const run = (fn: () => void) => () => { fn(); onClose(); };
     const channelCmds: Command[] = channels.map(ch => {
-      const held = manualHold !== undefined && Math.abs(manualHold - ch.frequency) < 0.0001;
+      const held = sameFrequency(manualHold, ch.frequency);
       return {
         id: `ch-${ch.frequency}`,
         label: held ? `Resume from ${ch.alphaTag}` : `Hold ${ch.alphaTag}`,
@@ -161,4 +162,5 @@ const CommandPalette: React.FC<Props> = ({
   );
 };
 
-export default CommandPalette;
+// Memoized: the app re-renders on every scanner state update, which rarely changes these props.
+export default memo(CommandPalette);

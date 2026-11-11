@@ -7,7 +7,7 @@ test.describe('Fire Tone Management', () => {
     // Note: It's hidden on xs screens according to styles, so ensure viewport is large enough
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.getByRole('button', { name: 'Fire Tone Outs' }).click();
-    await expect(page.getByText('Manage Fire Tone-Outs')).toBeVisible();
+    await expect(page.getByRole('dialog').getByText('Manage Fire Tone-Outs')).toBeVisible();
   });
 
   test('lists existing tones', async ({ page }) => {
@@ -79,11 +79,15 @@ test.describe('Fire Tone Management', () => {
     });
 
     // Click item to edit
-    const listItem = page.getByRole('listitem').filter({ hasText: toneToDelete.name });
-    
-    // Delete
+    const listItem = page.getByRole('dialog').getByRole('listitem').filter({ hasText: toneToDelete.name });
+
+    // Delete asks first; nothing is sent until it is confirmed.
     await listItem.locator('button:has(svg[data-testid="DeleteIcon"])').click();
-    
+    const confirm = page.getByRole('dialog', { name: /Delete fire tone-out/ });
+    await expect(confirm).toBeVisible();
+    expect(deleteRequested).toBe(false);
+    await confirm.getByRole('button', { name: 'Delete' }).click();
+
     await expect.poll(() => deleteRequested).toBeTruthy();
   });
 });

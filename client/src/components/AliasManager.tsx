@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Box, Typography, TextField, Select, MenuItem, List, ListItem, Divider, Chip,
     Button, FormControl, InputLabel, Alert,
@@ -219,4 +219,5 @@ const AliasManager: React.FC<Props> = ({ open, onClose, candidates, aliases, onS
     );
 };
 
-export default AliasManager;
+// Memoized: the app re-renders on every scanner state update, which rarely changes these props.
+export default memo(AliasManager);
