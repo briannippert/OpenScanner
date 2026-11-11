@@ -119,6 +119,84 @@ public class ActivityBucket
 }
 
 /// <summary>
+/// Aggregate statistics over a window of transmissions, for the statistics page.
+/// </summary>
+public class TransmissionStats
+{
+    /// <summary>Length of the window in days.</summary>
+    public int Days { get; set; }
+
+    /// <summary>Headline totals for the window.</summary>
+    public StatsSummary Summary { get; set; } = new();
+
+    /// <summary>Busiest channels, most transmissions first.</summary>
+    public List<ChannelStat> Channels { get; set; } = new();
+
+    /// <summary>Busiest talkgroups (per channel), most transmissions first.</summary>
+    public List<RadioIdStat> Talkgroups { get; set; } = new();
+
+    /// <summary>Most active source radios (per channel), most transmissions first.</summary>
+    public List<RadioIdStat> Sources { get; set; } = new();
+
+    /// <summary>Fire tone-outs by tone set, most frequent first.</summary>
+    public List<ToneStat> Tones { get; set; } = new();
+}
+
+/// <summary>Headline totals for a window of transmissions.</summary>
+public class StatsSummary
+{
+    /// <summary>Number of transmissions recorded.</summary>
+    public int Transmissions { get; set; }
+    /// <summary>Total recorded audio, in seconds.</summary>
+    public double AirtimeSeconds { get; set; }
+    /// <summary>Longest single transmission, in seconds.</summary>
+    public double LongestSeconds { get; set; }
+    /// <summary>Transmissions that have a transcript.</summary>
+    public int Transcribed { get; set; }
+    /// <summary>Transmissions that followed a detected fire tone-out.</summary>
+    public int ToneOuts { get; set; }
+    /// <summary>Distinct channels that had at least one transmission.</summary>
+    public int ActiveChannels { get; set; }
+}
+
+/// <summary>Activity on one channel.</summary>
+public class ChannelStat
+{
+    /// <summary>Channel name at the time of recording (may be empty).</summary>
+    public string AlphaTag { get; set; } = string.Empty;
+    /// <summary>Frequency in MHz.</summary>
+    public double Frequency { get; set; }
+    /// <summary>Number of transmissions.</summary>
+    public int Count { get; set; }
+    /// <summary>Total recorded audio, in seconds.</summary>
+    public double AirtimeSeconds { get; set; }
+}
+
+/// <summary>Activity for one talkgroup or source radio on one channel.</summary>
+public class RadioIdStat
+{
+    /// <summary>Channel name the ID was heard on (aliases are per channel).</summary>
+    public string AlphaTag { get; set; } = string.Empty;
+    /// <summary>Frequency in MHz.</summary>
+    public double Frequency { get; set; }
+    /// <summary>The talkgroup or source radio ID.</summary>
+    public long Id { get; set; }
+    /// <summary>Number of transmissions.</summary>
+    public int Count { get; set; }
+    /// <summary>Total recorded audio, in seconds.</summary>
+    public double AirtimeSeconds { get; set; }
+}
+
+/// <summary>How often one fire tone set was detected.</summary>
+public class ToneStat
+{
+    /// <summary>Tone set name.</summary>
+    public string Name { get; set; } = string.Empty;
+    /// <summary>Number of tone-outs.</summary>
+    public int Count { get; set; }
+}
+
+/// <summary>
 /// Represents a recorded transmission log.
 /// </summary>
 public class CallLog

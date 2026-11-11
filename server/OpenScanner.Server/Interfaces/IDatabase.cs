@@ -172,6 +172,13 @@ public interface IDatabase
     /// </summary>
     Task<IEnumerable<ActivityBucket>> GetTransmissionHourlyCountsAsync(DateTime sinceUtc);
 
+    /// <summary>
+    /// Aggregates transmissions since <paramref name="sinceUtc"/>: headline totals
+    /// plus the <paramref name="top"/> busiest channels, talkgroups, source radios
+    /// and fire tone sets. <see cref="TransmissionStats.Days"/> is left for the caller.
+    /// </summary>
+    Task<TransmissionStats> GetTransmissionStatsAsync(DateTime sinceUtc, int top);
+
     // Fire Tones
     
     /// <summary>

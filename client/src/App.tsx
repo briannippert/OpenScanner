@@ -9,7 +9,7 @@ import NowPlayingBar from './components/NowPlayingBar';
 import ConnectionOverlay from './components/ConnectionOverlay';
 import {
   ChannelManager, FireToneManager, SettingsManager, AliasManager, RfDebugDialog,
-  SystemDebugDialog, UpdateManager, CommandPalette, preloadDialogs,
+  SystemDebugDialog, StatsDialog, UpdateManager, CommandPalette, preloadDialogs,
 } from './lazyDialogs';
 import { useAudioPipeline } from './hooks/useAudioPipeline';
 import { useScannerSocket } from './hooks/useScannerSocket';
@@ -234,6 +234,7 @@ function App() {
           onOpenSettings={dialog.settings.open}
           onOpenDebug={openDebug}
           onOpenSystemDebug={dialog.systemDebug.open}
+          onOpenStats={dialog.stats.open}
           onOpenAliases={dialog.aliases.open}
           updateAvailable={updateAvailable}
           onOpenUpdate={dialog.update.open}
@@ -366,6 +367,7 @@ function App() {
               onOpenFireTones={dialog.fireTones.open}
               onOpenChannels={dialog.channels.open}
               onOpenAliases={dialog.aliases.open}
+              onOpenStats={dialog.stats.open}
               onOpenDebug={openDebug}
               onToggleFullscreen={toggleFullscreen}
             />
@@ -380,6 +382,13 @@ function App() {
               debugGain={debugGain}
               onDebugGainChange={setDebugGain}
               onTune={tuneDebug}
+            />
+          )}
+          {dialogs.wasOpened('stats') && (
+            <StatsDialog
+              open={dialogs.isOpen('stats')}
+              onClose={dialog.stats.close}
+              nameFor={scanner.nameFor}
             />
           )}
           {dialogs.wasOpened('systemDebug') && (

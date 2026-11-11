@@ -86,6 +86,8 @@ public class Database : IDatabase
         try { conn.Execute("ALTER TABLE channels ADD COLUMN dmrColorCode INTEGER;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: dmrColorCode column already exists or failed"); }
         try { conn.Execute("ALTER TABLE channels ADD COLUMN dmrTalkgroup INTEGER;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: dmrTalkgroup column already exists or failed"); }
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN isFavorite INTEGER DEFAULT 0;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: isFavorite column already exists or failed"); }
+        // Every history, activity and statistics query filters or sorts on timestamp.
+        try { conn.Execute("CREATE INDEX IF NOT EXISTS idx_transmissions_timestamp ON transmissions(timestamp);"); } catch (Exception ex) { _logger.LogWarning(ex, "Could not create the transmissions timestamp index"); }
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN speakerChain TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: speakerChain column already exists or failed"); }
 
         conn.Execute(@"
@@ -320,6 +322,21 @@ public class Database : IDatabase
         return await conn.QueryAsync<ActivityBucket>(
             SqlLoader.GetSql("Transmissions/GetHourlyCounts.sql"),
             new { Since = sinceUtc.ToUniversalTime().ToString("o") });
+    }
+
+    /// <inheritdoc />
+    public async Task<TransmissionStats> GetTransmissionStatsAsync(DateTime sinceUtc, int top)
+    {
+        using var conn = GetConnection();
+        var args = new { Since = sinceUtc.ToUniversalTime().ToString("o"), Limit = top };
+        return new TransmissionStats
+        {
+            Summary = await conn.QuerySingleAsync<StatsSummary>(SqlLoader.GetSql("Stats/Summary.sql"), args),
+            Channels = (await conn.QueryAsync<ChannelStat>(SqlLoader.GetSql("Stats/Channels.sql"), args)).ToList(),
+            Talkgroups = (await conn.QueryAsync<RadioIdStat>(SqlLoader.GetSql("Stats/Talkgroups.sql"), args)).ToList(),
+            Sources = (await conn.QueryAsync<RadioIdStat>(SqlLoader.GetSql("Stats/Sources.sql"), args)).ToList(),
+            Tones = (await conn.QueryAsync<ToneStat>(SqlLoader.GetSql("Stats/Tones.sql"), args)).ToList(),
+        };
     }
 
     /// <inheritdoc />

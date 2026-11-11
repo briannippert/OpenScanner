@@ -66,6 +66,7 @@ nav:
       - The dashboard: guide/dashboard.md
       - Channels: guide/channels.md
       - History and playback: guide/history.md
+      - Statistics: guide/statistics.md
       - Transcription: guide/transcription.md
       - Fire tone-outs: guide/fire-tones.md
       - Radio aliases: guide/aliases.md
