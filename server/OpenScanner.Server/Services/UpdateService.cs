@@ -411,6 +411,12 @@ public class UpdateService : IUpdateService, IHostedService
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             };
+            // --no-block: return as soon as the unit is queued. Without it systemd-run
+            // waits for the oneshot script to finish, and the script's first step is
+            // stopping this service — which kills the waiting systemd-run (it is in
+            // our cgroup), so it exited non-zero and a working update was reported
+            // as "Failed to launch the update finalizer".
+            psi.ArgumentList.Add("--no-block");
             psi.ArgumentList.Add("--collect");
             psi.ArgumentList.Add("--unit=openscanner-selfupdate");
             psi.ArgumentList.Add("--property=Type=oneshot");
@@ -420,8 +426,7 @@ public class UpdateService : IUpdateService, IHostedService
             psi.ArgumentList.Add(home);
             psi.ArgumentList.Add(ServiceUnit);
             using var proc = Process.Start(psi);
-            // systemd-run registers the transient unit and returns immediately; the
-            // script (in its own cgroup) then stops us, swaps, and restarts.
+            // The script runs in its own cgroup, then stops us, swaps, and restarts.
             if (proc == null || !proc.WaitForExit(10_000) || proc.ExitCode != 0)
             {
                 var err = proc is { HasExited: true } ? proc.StandardError.ReadToEnd().Trim() : "timed out";
