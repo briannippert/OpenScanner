@@ -169,6 +169,10 @@ app.MapFallback(async context =>
     var indexPath = Path.Combine(clientDistPath, "index.html");
     if (File.Exists(indexPath))
     {
+        // SendFileAsync sets no Content-Type, and never cache the shell: it names
+        // the hashed assets of the installed build, which change on every update.
+        context.Response.ContentType = "text/html; charset=utf-8";
+        context.Response.Headers.CacheControl = "no-cache";
         await context.Response.SendFileAsync(indexPath);
     }
     else

@@ -8,12 +8,17 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        navigateFallbackDenylist: [/^\/api/, /^\/swagger/, /^\/audio/, /^\/ws/]
-      },
+      // No offline cache. OpenScanner is a live view of a device on the LAN: it is
+      // useless without the server, so precaching buys nothing, while a service
+      // worker sitting between the browser and a self-signed, self-updating server
+      // causes real trouble (stale UI after an update, intercepted requests failing
+      // when the cache or the certificate exception is unavailable).
+      //
+      // selfDestroying ships a tiny sw.js whose only job is to unregister the
+      // caching worker that earlier builds installed and delete its caches, so
+      // browsers that already have one are cleaned up on their next visit. The web
+      // app manifest is still generated, so the app stays installable.
+      selfDestroying: true,
       manifest: {
         name: 'OpenScanner',
         short_name: 'OpenScanner',
