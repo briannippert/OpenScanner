@@ -121,6 +121,12 @@ public class ToneDetector
     /// <summary>Drops all keyed stream state (call when parallel scanning stops).</summary>
     public void ResetStreams() => _streams.Clear();
 
+    /// <summary>
+    /// Drops one keyed stream's state. With several SDRs each resets only its own channels;
+    /// <see cref="ResetStreams"/> would wipe tone detection in progress on the others.
+    /// </summary>
+    public void ResetStream(double streamKey) => _streams.TryRemove(streamKey, out _);
+
     private void Fire(FireToneSet toneSet, double? streamKey)
     {
         if (streamKey.HasValue) OnStreamToneDetected?.Invoke(toneSet, streamKey.Value);

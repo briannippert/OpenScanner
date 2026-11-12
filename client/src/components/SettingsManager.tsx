@@ -11,6 +11,8 @@ import MonitorIcon from '@mui/icons-material/Monitor';
 import FormDialog from './common/FormDialog';
 import { apiFetch } from './common/apiBase';
 import type { ScannerState } from '../types';
+import RadiosSection from './RadiosSection';
+import { useRadios } from '../hooks/useRadios';
 
 interface StorageInfo {
     recordingsBytes: number;
@@ -124,6 +126,8 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted, 
     const [remoteModels, setRemoteModels] = useState<RemoteModel[]>([]);
     const [remoteHealth, setRemoteHealth] = useState<RemoteHealth>({ status: 'idle', message: '' });
     const [ntfyTest, setNtfyTest] = useState<RemoteHealth>({ status: 'idle', message: '' });
+
+    const sdrs = useRadios(open);
 
     const backend = settings['TranscriptionBackend'] || 'local';
     const remoteUrl = settings['RemoteTranscriptionUrl'] || '';
@@ -463,6 +467,20 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted, 
                             )}
                         </Section>
 
+                        {sdrs.radios && sdrs.radios.devices.length > 0 ? (
+                            <Section title="Radios">
+                                <RadiosSection
+                                    radios={sdrs.radios}
+                                    error={sdrs.error}
+                                    scannerState={scannerState}
+                                    onSetMode={sdrs.setMode}
+                                    onUpdate={sdrs.updateRadio}
+                                    onRescan={sdrs.rescan}
+                                />
+                            </Section>
+                        ) : (
+                        // No dongle has been listed (none plugged in, or rtl_test is missing):
+                        // the scanner runs on the default device with these global settings.
                         <Section title="SDR Tuning">
                             <Row
                                 label="Tuner Gain"
@@ -512,6 +530,7 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted, 
                                 }
                             />
                         </Section>
+                        )}
 
                         <Section title="Notifications">
                             <Row

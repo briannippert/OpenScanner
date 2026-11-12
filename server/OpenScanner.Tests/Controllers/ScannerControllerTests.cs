@@ -214,7 +214,7 @@ public class ScannerControllerTests
         var result = _controller.StartDebugSpectrum(new DebugSpectrumRequest(162.400, 30)) as OkResult;
 
         Assert.NotNull(result);
-        _radioMock.Verify(r => r.StartDebugSpectrum(162.400, 30), Times.Once);
+        _radioMock.Verify(r => r.StartDebugSpectrum(162.400, 30, null), Times.Once);
     }
 
     // --- Legacy /api/control shim (deprecated) ---
@@ -287,7 +287,7 @@ public class ScannerControllerTests
         var result = await _controller.ControlScanner(body) as OkResult;
 
         Assert.NotNull(result);
-        _radioMock.Verify(r => r.StartDebugSpectrum(162.400), Times.Once);
+        _radioMock.Verify(r => r.StartDebugSpectrum(162.400, It.IsAny<double?>(), It.IsAny<string?>()), Times.Once);
     }
 
     [Fact]

@@ -11,6 +11,9 @@ public class ChannelService : IChannelService
 
     public List<Channel> Channels { get; private set; } = new();
 
+    /// <inheritdoc />
+    public event Action? ChannelsChanged;
+
     public ChannelService(IDatabase db, ILogger<ChannelService> logger)
     {
         _db = db;
@@ -23,6 +26,7 @@ public class ChannelService : IChannelService
         Task.Run(async () => {
             Channels = (await _db.GetAllChannelsAsync()).ToList();
             _logger.LogInformation($"Loaded {Channels.Count} channels.");
+            ChannelsChanged?.Invoke();
         });
     }
 
@@ -51,7 +55,8 @@ public class ChannelService : IChannelService
             if (localChannels.Count > 0)
             {
                 _logger.LogInformation($"Geo-Sync: Found {localChannels.Count} local channels.");
-                Channels = localChannels; 
+                Channels = localChannels;
+                ChannelsChanged?.Invoke();
             }
         });
     }

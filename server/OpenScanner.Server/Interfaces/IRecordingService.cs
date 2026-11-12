@@ -36,6 +36,15 @@ public interface IRecordingService
     void AppendSpeaker(int src);
     void AppendSpeaker(double frequency, int src);
     void StopRecording(Channel channel, string? lastDetectedTone);
+
+    /// <summary>
+    /// Starts a recording keyed by the channel's frequency. Any number can run at once, which
+    /// several SDRs need: each can be receiving a different channel at the same moment.
+    /// </summary>
+    void StartParallelRecording(Channel channel, int? src, int? tgt, LinkedList<byte[]>? preRollBuffer);
+
+    /// <summary>Stops and finalizes the recording keyed by <paramref name="frequency"/>.</summary>
+    void StopParallelRecording(double frequency, string? lastDetectedTone);
     void ProcessAudio(byte[] audio);
     void ProcessAudio(double frequency, byte[] audio);
 }

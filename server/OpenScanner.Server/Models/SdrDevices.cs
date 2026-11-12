@@ -104,6 +104,9 @@ public class SdrDeviceConfig
     /// <summary>Display and tie-break order.</summary>
     public int SortOrder { get; set; }
 
+    /// <summary>A copy, for editing without disturbing a plan that holds this one.</summary>
+    public SdrDeviceConfig Clone() => (SdrDeviceConfig)MemberwiseClone();
+
     /// <summary>The gain to run at for a given mix of channels.</summary>
     public double GainFor(GainClass gainClass) => gainClass switch
     {
@@ -112,3 +115,34 @@ public class SdrDeviceConfig
         _ => GainAnalog,
     };
 }
+
+/// <summary>Live state of one SDR, for the UI.</summary>
+/// <param name="Id">Stable identity (<see cref="SdrDeviceConfig.Id"/>).</param>
+/// <param name="Label">User-facing name.</param>
+/// <param name="Product">USB product string.</param>
+/// <param name="Serial">USB serial string.</param>
+/// <param name="Attached">Whether the dongle is plugged in.</param>
+/// <param name="Enabled">Whether OpenScanner may use it.</param>
+/// <param name="Role">"FastScan", "Hop" or "Idle".</param>
+/// <param name="Status">The SDR's own scanner status ("SCANNING", "RECEIVING", …).</param>
+/// <param name="IsHardwareConnected">Whether its capture is currently delivering samples.</param>
+/// <param name="GainClass">"Analog", "Digital" or "Mixed".</param>
+/// <param name="Gain">Tuner gain in use, dB (0 = AGC).</param>
+/// <param name="CenterFrequency">Tuner centre for a FastScan SDR, MHz.</param>
+/// <param name="CurrentFrequency">The channel a hopping SDR is on or locked to, MHz.</param>
+/// <param name="Frequencies">The channels this SDR carries, MHz.</param>
+public record SdrDeviceState(
+    string Id,
+    string Label,
+    string Product,
+    string Serial,
+    bool Attached,
+    bool Enabled,
+    string Role,
+    string Status,
+    bool IsHardwareConnected,
+    string GainClass,
+    double? Gain,
+    double? CenterFrequency,
+    double? CurrentFrequency,
+    double[] Frequencies);

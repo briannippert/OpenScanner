@@ -52,8 +52,10 @@ builder.Services.AddSingleton<RemoteTranscriptionClient>();
 builder.Services.AddSingleton<ITranscriptionService, WhisperTranscriptionService>();
 builder.Services.AddSingleton<IRecordingService, RecordingService>();
 builder.Services.AddSingleton<IChannelService, ChannelService>();
-builder.Services.AddSingleton<IDeviceEnumerator, RtlDeviceEnumerator>();
 builder.Services.AddSingleton<SdrDeviceService>();
+builder.Services.AddSingleton<SdrManager>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SdrManager>());
+builder.Services.AddSingleton<OpenScanner.Server.Audio.AudioMixer>();
 builder.Services.AddSingleton<RecordingCleanupService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RecordingCleanupService>());
 builder.Services.AddSingleton<NtfyNotificationService>();
@@ -62,14 +64,18 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<NtfyNotificationSe
 var radioProvider = builder.Configuration["Radio:Provider"] ?? "RTL-SDR";
 if (radioProvider == "Mock")
 {
+    builder.Services.AddSingleton<IDeviceEnumerator, MockDeviceEnumerator>();
     builder.Services.AddSingleton<IMockAudioProvider, FileAudioProvider>();
     builder.Services.AddSingleton<IRadioSource, MockRadioSource>();
     builder.Services.AddHostedService(sp => (MockRadioSource)sp.GetRequiredService<IRadioSource>());
 }
 else
 {
-    builder.Services.AddSingleton<IRadioSource, RtlDevice>();
-    builder.Services.AddHostedService(sp => (RtlDevice)sp.GetRequiredService<IRadioSource>());
+    // One RtlDevice worker per dongle, combined into the single radio the app sees.
+    builder.Services.AddSingleton<IDeviceEnumerator, RtlDeviceEnumerator>();
+    builder.Services.AddSingleton<ISdrWorkerFactory, RtlWorkerFactory>();
+    builder.Services.AddSingleton<IRadioSource, RadioCoordinator>();
+    builder.Services.AddHostedService(sp => (RadioCoordinator)sp.GetRequiredService<IRadioSource>());
 }
 
 builder.Services.AddSingleton<IBackfillService, BackfillTranscriptionService>();

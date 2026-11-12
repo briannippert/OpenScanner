@@ -11,30 +11,25 @@ using OpenScanner.Server.Services;
 namespace OpenScanner.Server.Devices;
 
 /// <summary>
-/// Service that interfaces with RTL-SDR hardware to scan, receive, and process radio signals.
+/// Drives one RTL-SDR dongle: scans the channels assigned to it, either all at once
+/// (FastScan) or by hopping between them, and receives and records what it hears.
+/// <see cref="RadioCoordinator"/> runs one per dongle and combines them into the radio
+/// the rest of the app sees.
 /// </summary>
-public class RtlDevice : BackgroundService, IRadioSource
+public class RtlDevice : ISdrWorker
 {
     private readonly IDatabase _db;
     private readonly ILogger<RtlDevice> _logger;
     private readonly ILoggerFactory _loggerFactory;
-    private readonly GpsService _gps;
     private readonly ToneDetector _toneDetector;
     private readonly Mdc1200Decoder _mdc;
     private readonly IDecoderFactory _decoderFactory;
-    private readonly ITranscriptionService _transcriptionService;
     private readonly IRecordingService _recordingService;
     private readonly IChannelService _channelService;
 
     /// <inheritdoc />
     public event Action<ScannerState>? OnStateChanged;
     
-    /// <inheritdoc />
-    public event Action<CallLog>? OnNewLog;
-    
-    /// <inheritdoc />
-    public event Action<AudioChunk>? OnAudio;
-
     /// <inheritdoc />
     public event Action<RadioEvent>? OnNewEvent;
 
@@ -74,6 +69,9 @@ public class RtlDevice : BackgroundService, IRadioSource
     private DateTime _lastActivityReset = DateTime.MinValue;
 
     private FileStream? _iqDumpStream;
+
+    // The channel whose decoder audio is open in the mixer while locked on.
+    private double? _lockedAudioFrequency;
     private string? _iqDumpPath;
     
     // Audio buffering
@@ -89,92 +87,64 @@ public class RtlDevice : BackgroundService, IRadioSource
     // the single-channel _lastActivityReset throttle) to avoid task churn.
     private readonly ConcurrentDictionary<double, DateTime> _parallelLastAudioReset = new();
     private readonly ConcurrentDictionary<double, string?> _parallelLastTones = new();
-    // Stereo pan positions for parallel channels: maps frequency -> (leftGain, rightGain)
-    private Dictionary<double, (double Left, double Right)> _parallelPanMap = new();
+    // Live audio goes to the mixer shared by every SDR, which sums all open channels into
+    // one panned stereo stream. Without it, simultaneous channels would broadcast independent
+    // chunks that the browser scheduler serializes end-to-end (garbled overlapping audio).
+    private readonly AudioMixer _mixer;
 
-    // Real-time stereo mixer for parallel mode. Each channel's mono audio is enqueued here,
-    // and a periodic timer sums all active channels sample-aligned into one panned stereo
-    // stream. Without this, simultaneous channels would broadcast independent stereo chunks
-    // that the browser scheduler serializes end-to-end (garbled overlapping audio).
-    private readonly Dictionary<double, Queue<short>> _mixQueues = new();
-    private readonly object _mixLock = new();
-    private System.Threading.Timer? _mixTimer;
-    private const int MixIntervalMs = 20;
-    private const int MixBlockSamples = 48000 * MixIntervalMs / 1000; // 960 samples @ 48kHz
-    private const int MixQueueMaxSamples = 48000 / 2; // ~500ms backlog cap to bound latency
+    // What this SDR carries. Null until the coordinator assigns it, in which case the
+    // worker scans every non-avoided channel (single-SDR behaviour, and what tests use).
+    private DeviceAssignment? _assignment;
+    private bool _running;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RtlDevice"/> class.
     /// </summary>
+    /// <param name="db">Database, for persisting signaling events.</param>
+    /// <param name="logger">Logger.</param>
+    /// <param name="loggerFactory">Logger factory, for per-channel pipelines.</param>
+    /// <param name="toneDetector">The shared fire-tone detector; this worker uses its own keyed streams.</param>
+    /// <param name="mdc">This worker's own MDC1200 decoder, for the channel it is locked on to.</param>
+    /// <param name="decoderFactory">Creates voice decoders.</param>
+    /// <param name="recordingService">Records transmissions.</param>
+    /// <param name="channelService">The channel list, for manual holds and unassigned operation.</param>
+    /// <param name="mixer">The audio mixer shared by every SDR.</param>
+    /// <param name="deviceId">The dongle this worker drives (<see cref="SdrDeviceConfig.Id"/>).</param>
     public RtlDevice(
         IDatabase db,
         ILogger<RtlDevice> logger,
         ILoggerFactory loggerFactory,
-        GpsService gps,
         ToneDetector toneDetector,
         Mdc1200Decoder mdc,
         IDecoderFactory decoderFactory,
-        ITranscriptionService transcriptionService,
         IRecordingService recordingService,
-        IChannelService channelService)
+        IChannelService channelService,
+        AudioMixer mixer,
+        string deviceId = SdrManager.DefaultDeviceId)
     {
         _db = db;
         _logger = logger;
         _loggerFactory = loggerFactory;
-        _gps = gps;
         _toneDetector = toneDetector;
         _mdc = mdc;
         _decoderFactory = decoderFactory;
-        _transcriptionService = transcriptionService;
         _recordingService = recordingService;
         _channelService = channelService;
+        _mixer = mixer;
+        DeviceId = deviceId;
         _state = new ScannerState("IDLE", 0);
 
-        // Restore the persisted SDR tuning. Gain: dB, or 0/absent = AUTO (tuner AGC).
-        // Ppm: crystal error correction; 0/absent = uncorrected.
+        // Without an assignment (one SDR, nothing planned yet) the persisted legacy tuning
+        // applies. Gain: dB, or 0/absent = AUTO (tuner AGC). Ppm: 0/absent = uncorrected.
         _state = _state with
         {
             Gain = ReadNumericSetting("SdrGain"),
             Ppm = ReadNumericSetting("SdrPpm"),
         };
 
-        _gps.OnGpsUpdate += (data) =>
-        {
-            UpdateState(_state with { Gps = data });
-            _channelService.CheckGeoRefresh(data.Lat, data.Lon);
-        };
-
-        _toneDetector.OnToneDetected += (tone) => {
-            _lastDetectedTone = tone.Name;
-            // Extend the current recording's stop timer now so that if the tone is
-            // the last audio before the carrier drops, we still wait the full hold
-            // (measured from the tone ending) for the dispatch voice to follow.
-            if (_recordingService.IsRecording) ScheduleStopTimeout();
-            UpdateState(_state with { LastDetectedTone = tone.Name });
-            RaiseRadioEvent(new RadioEvent
-            {
-                Type = "TONE_OUT",
-                Label = tone.Name,
-                ToneA = tone.FrequencyA,
-                ToneB = tone.FrequencyB
-            });
-        };
-
-        _toneDetector.OnStreamToneDetected += (tone, freq) =>
-        {
-            var channel = _parallelPipelines?.FirstOrDefault(p => p.Channel.Frequency == freq)?.Channel;
-            if (channel == null) return;
-            // Same as a tone heard on a parallel channel's decoder: record it with the tone label
-            // and keep the clip open for the dispatch voice that follows.
-            HandleParallelActivity(channel, null, null, tone.Name);
-            RaiseRadioEvent(new RadioEvent
-            {
-                Type = "TONE_OUT",
-                Label = tone.Name,
-                ToneA = tone.FrequencyA,
-                ToneB = tone.FrequencyB
-            }, channel);
-        };
+        // The tone detector is shared by every SDR. Each worker feeds it keyed streams (one
+        // per channel) and reacts only to detections on channels it is carrying.
+        _toneDetector.OnStreamToneDetected += HandleStreamTone;
 
         _mdc.OnPacket += (pkt) => {
             // Treat the MDC1200 unit ID like a P25 radio ID: attribute it to the current
@@ -183,12 +153,98 @@ public class RtlDevice : BackgroundService, IRadioSource
             if (_state.CurrentChannel != null)
                 HandleActivity(_state.CurrentChannel, src: pkt.UnitId, tone: pkt.IsEmergency ? "EMRG" : null);
         };
+    }
 
-        _recordingService.OnNewLog += (log) => {
-            OnNewLog?.Invoke(log);
-        };
-        
-        _channelService.ReloadChannels();
+    /// <inheritdoc />
+    public string DeviceId { get; }
+
+    /// <inheritdoc />
+    public DeviceAssignment? Assignment => _assignment;
+
+    /// <summary>
+    /// The channels this SDR scans: its assignment, or every non-avoided channel when it has none.
+    /// </summary>
+    private List<Channel> ScanChannels =>
+        _assignment != null
+            ? _assignment.Channels.ToList()
+            : _channelService.Channels.Where(c => !c.Avoid).ToList();
+
+    /// <inheritdoc />
+    public void Assign(DeviceAssignment assignment, int? deviceIndex)
+    {
+        _assignment = assignment;
+        _deviceIndex = deviceIndex;
+        UpdateState(_state with
+        {
+            Gain = assignment.GainFor(),
+            Ppm = assignment.Device.Ppm,
+        });
+
+        // Gain, ppm, device and channels are all baked into the capture at launch, so a
+        // running scan restarts to pick the new assignment up. A manual hold or debug sweep
+        // is left alone; the assignment applies when it ends.
+        if (_running && !_manualOverride && _state.Status != "DEBUG")
+        {
+            StopScanning();
+            StopDecoding();
+            UpdateState(_state with
+            {
+                Status = "IDLE", CurrentFrequency = null, CurrentChannel = null,
+                SignalStrength = 0, ManualHoldFrequency = null, ParallelChannels = null,
+            });
+            Task.Delay(250).ContinueWith(_ => StartScanning());
+        }
+    }
+
+    /// <summary>
+    /// A fire tone was detected on one of the shared detector's keyed streams. Act on it only
+    /// if the channel is this SDR's: one of its parallel channels, or the one it is locked to.
+    /// </summary>
+    private void HandleStreamTone(FireToneSet tone, double freq)
+    {
+        var parallel = _parallelPipelines?.FirstOrDefault(p => p.Channel.Frequency == freq)?.Channel;
+        if (parallel != null)
+        {
+            // Same as a tone heard on a parallel channel's decoder: record it with the tone
+            // label and keep the clip open for the dispatch voice that follows.
+            HandleParallelActivity(parallel, null, null, tone.Name);
+            RaiseRadioEvent(new RadioEvent
+            {
+                Type = "TONE_OUT",
+                Label = tone.Name,
+                ToneA = tone.FrequencyA,
+                ToneB = tone.FrequencyB
+            }, parallel);
+            return;
+        }
+
+        var locked = _state.CurrentChannel;
+        if (_currentDecoder == null || locked == null || Math.Abs(locked.Frequency - freq) > 0.0001) return;
+
+        _lastDetectedTone = tone.Name;
+        // Extend the current recording's stop timer now so that if the tone is the last
+        // audio before the carrier drops, we still wait the full hold (measured from the tone
+        // ending) for the dispatch voice to follow.
+        if (IsRecordingLockedChannel) ScheduleStopTimeout();
+        UpdateState(_state with { LastDetectedTone = tone.Name });
+        RaiseRadioEvent(new RadioEvent
+        {
+            Type = "TONE_OUT",
+            Label = tone.Name,
+            ToneA = tone.FrequencyA,
+            ToneB = tone.FrequencyB
+        }, locked);
+    }
+
+    /// <summary>Whether the channel this SDR is locked on to is being recorded.</summary>
+    private bool IsRecordingLockedChannel =>
+        _state.CurrentChannel is { } ch && _recordingService.IsChannelRecording(ch.Frequency);
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _toneDetector.OnStreamToneDetected -= HandleStreamTone;
+        Stop();
     }
 
     /// <inheritdoc />
@@ -211,52 +267,10 @@ public class RtlDevice : BackgroundService, IRadioSource
     }
 
     /// <inheritdoc />
-    public void ReloadChannels()
-    {
-        _channelService.ReloadChannels();
-
-        // If actively scanning, restart so banks are recalculated with the updated channel list
-        if (_state.Status == "SCANNING")
-        {
-            StopScanning();
-            Task.Delay(250).ContinueWith(_ => StartScanning());
-        }
-    }
-
-    /// <inheritdoc />
     public void SetSquelch(double db)
     {
         UpdateState(_state with { Squelch = db });
         _logger.LogInformation($"Squelch set to {db}dB SNR");
-    }
-
-    /// <inheritdoc />
-    public void SetGain(double db)
-    {
-        UpdateState(_state with { Gain = db });
-        _ = _db.SetSettingAsync("SdrGain", Num(db));
-        _logger.LogInformation($"SDR gain set to {(db == 0 ? "AUTO (tuner AGC)" : $"{db}dB")}");
-        RestartScanToApplyTuning();
-    }
-
-    /// <inheritdoc />
-    public void SetPpm(double ppm)
-    {
-        UpdateState(_state with { Ppm = ppm });
-        _ = _db.SetSettingAsync("SdrPpm", Num(ppm));
-        _logger.LogInformation($"SDR frequency correction set to {ppm} ppm");
-        RestartScanToApplyTuning();
-    }
-
-    /// <summary>
-    /// Gain and ppm are baked into the rtl_sdr/rtl_fm arguments at launch, so a running
-    /// capture has to be restarted to pick up a change (mirrors <see cref="ReloadChannels"/>).
-    /// </summary>
-    private void RestartScanToApplyTuning()
-    {
-        if (_state.Status != "SCANNING") return;
-        StopScanning();
-        Task.Delay(250).ContinueWith(_ => StartScanning());
     }
 
     private double? ReadNumericSetting(string key)
@@ -274,10 +288,17 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// The rtl_sdr/rtl_fm tuning arguments shared by every capture: tuner gain and crystal
     /// error correction. Both tools spell these the same way and both treat "-g 0" as AUTO.
     /// </summary>
-    private string TuningArgs() => CurrentTuning().CaptureArgs();
+    private string TuningArgs(Channel? channel = null) => CurrentTuning(channel).CaptureArgs();
 
-    /// <summary>The configured front-end settings, for handing to a decoder's own rtl_fm.</summary>
-    private SdrTuning CurrentTuning() => new(_state.Gain ?? 0, _state.Ppm ?? 0, _deviceIndex);
+    /// <summary>
+    /// The front-end settings for a capture, also handed to a decoder's own rtl_fm. A hopping
+    /// SDR captures one channel at a time, so it can use that channel's own gain class;
+    /// a FastScan SDR uses the gain for its whole mix.
+    /// </summary>
+    private SdrTuning CurrentTuning(Channel? channel = null) =>
+        _assignment != null
+            ? new(_assignment.GainFor(channel), _assignment.Device.Ppm, _deviceIndex)
+            : new(_state.Gain ?? 0, _state.Ppm ?? 0, _deviceIndex);
 
     /// <summary>
     /// The librtlsdr index of the dongle this device drives, or null for the default (index 0).
@@ -290,15 +311,17 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// <inheritdoc />
     public void Start()
     {
+        _running = true;
         if (_state.Status != "IDLE") return;
         _manualOverride = false;
-        _logger.LogInformation("Starting Scanner...");
+        _logger.LogInformation($"Starting scanner on SDR {DeviceId}...");
         StartScanning();
     }
 
     /// <inheritdoc />
     public void Stop()
     {
+        _running = false;
         StopScanning();
         StopDecoding();
         UpdateState(_state with { 
@@ -527,15 +550,6 @@ public class RtlDevice : BackgroundService, IRadioSource
         }
     }
 
-    /// <summary>
-    /// Executes the background service.
-    /// </summary>
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        await Task.Delay(1000, stoppingToken);
-        Start();
-    }
-
     private void UpdateState(ScannerState newState)
     {
         _state = newState;
@@ -575,18 +589,14 @@ public class RtlDevice : BackgroundService, IRadioSource
 
     private void StopParallelPipelines()
     {
-        // Stop the mixer first so no tick fires after the pipelines are gone.
-        _mixTimer?.Dispose();
-        _mixTimer = null;
-        lock (_mixLock)
-        {
-            _mixQueues.Clear();
-        }
-
         if (_parallelPipelines != null)
         {
             foreach (var pipeline in _parallelPipelines)
             {
+                // Close the channel in the shared mixer first so no tick mixes a dead channel,
+                // and drop only this channel's tone state: other SDRs are still detecting.
+                _mixer.Close(pipeline.Channel.Frequency);
+                _toneDetector.ResetStream(pipeline.Channel.Frequency);
                 try { pipeline.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing channel pipeline"); }
             }
             _parallelPipelines = null;
@@ -600,19 +610,16 @@ public class RtlDevice : BackgroundService, IRadioSource
         _parallelActivityTimeouts.Clear();
         _parallelLastAudioReset.Clear();
         _parallelLastTones.Clear();
-        _toneDetector.ResetStreams();
     }
 
     private void StartScanning()
     {
-        if (_channelService.Channels.Count == 0 || _manualOverride || _state.Status == "RECEIVING") return;
+        var activeChannels = ScanChannels;
+        if (activeChannels.Count == 0 || _manualOverride || _state.Status == "RECEIVING") return;
 
         _channelHits.Clear();
         _scanStartTime = DateTime.UtcNow;
         UpdateState(_state with { Status = "SCANNING", CurrentFrequency = null, CurrentChannel = null, SignalStrength = 0, ManualHoldFrequency = null, ParallelChannels = null });
-
-        var activeChannels = _channelService.Channels.Where(c => !c.Avoid).ToList();
-        if (activeChannels.Count == 0) return;
 
         var banks = CalculateScanBanks(activeChannels);
 
@@ -652,7 +659,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             // not in the user's channel list. Show null so the frontend can indicate "watching N channels".
             var bankDisplayFreq = bank.Frequencies.Count == 1 ? bank.Frequencies[0] : (double?)null;
             var bankDisplayChannel = bank.Frequencies.Count == 1
-                ? _channelService.Channels.FirstOrDefault(c => Math.Abs(c.Frequency - bank.Frequencies[0]) < 0.001)
+                ? ScanChannels.FirstOrDefault(c => Math.Abs(c.Frequency - bank.Frequencies[0]) < 0.001)
                 : null;
             UpdateState(_state with { CurrentFrequency = bankDisplayFreq, CurrentChannel = bankDisplayChannel });
 
@@ -665,7 +672,7 @@ public class RtlDevice : BackgroundService, IRadioSource
 
                 try
                 {
-                    bytes = await RunSingleScanSegment(bank.CenterFrequency, sampleRate, dwellCts.Token);
+                    bytes = await RunSingleScanSegment(bank.CenterFrequency, sampleRate, dwellCts.Token, bankDisplayChannel);
                 }
                 catch (OperationCanceledException)
                 {
@@ -677,7 +684,7 @@ public class RtlDevice : BackgroundService, IRadioSource
                 // Single bank: run continuously until signal lock or manual stop
                 try
                 {
-                    bytes = await RunSingleScanSegment(bank.CenterFrequency, sampleRate, token);
+                    bytes = await RunSingleScanSegment(bank.CenterFrequency, sampleRate, token, bankDisplayChannel);
                 }
                 catch (OperationCanceledException) { }
             }
@@ -747,35 +754,15 @@ public class RtlDevice : BackgroundService, IRadioSource
         }
         _parallelPipelines = pipelines;
 
-        // Compute stereo pan positions: channels sorted by frequency get distributed L to R
-        _parallelPanMap.Clear();
-        var sortedFreqs = pipelines.Select(p => p.Channel.Frequency).OrderBy(f => f).ToList();
-        for (int i = 0; i < sortedFreqs.Count; i++)
+        // Open each channel in the shared stereo mixer. Pan positions come from the plan-wide
+        // layout the coordinator sets, so channels on different SDRs share one stereo field.
+        foreach (var pipeline in pipelines)
         {
-            double pan; // 0.0 = full left, 1.0 = full right
-            if (sortedFreqs.Count == 1)
-                pan = 0.5; // center
-            else
-                pan = (double)i / (sortedFreqs.Count - 1);
-
-            // Equal-power panning: left = cos(pan * pi/2), right = sin(pan * pi/2)
-            double leftGain = Math.Cos(pan * Math.PI / 2.0);
-            double rightGain = Math.Sin(pan * Math.PI / 2.0);
-            _parallelPanMap[sortedFreqs[i]] = (leftGain, rightGain);
-
+            _mixer.Open(pipeline.Channel.Frequency);
+            var (left, right) = _mixer.PanFor(pipeline.Channel.Frequency);
             _logger.LogInformation(
-                $"Parallel pan: {pipelines.First(p => p.Channel.Frequency == sortedFreqs[i]).Channel.AlphaTag} " +
-                $"({sortedFreqs[i]} MHz) -> L={leftGain:F2} R={rightGain:F2}");
+                $"Parallel pan: {pipeline.Channel.AlphaTag} ({pipeline.Channel.Frequency} MHz) -> L={left:F2} R={right:F2}");
         }
-
-        // Initialize the stereo mixer: one jitter queue per channel + periodic mix timer.
-        lock (_mixLock)
-        {
-            _mixQueues.Clear();
-            foreach (var freq in _parallelPanMap.Keys)
-                _mixQueues[freq] = new Queue<short>();
-        }
-        _mixTimer = new System.Threading.Timer(MixTick, null, MixIntervalMs, MixIntervalMs);
 
         // Build initial parallel channel states for the UI
         UpdateParallelState();
@@ -1010,23 +997,10 @@ public class RtlDevice : BackgroundService, IRadioSource
         // could neither decode interleaved multi-channel audio nor attribute it.
 
         // Enqueue mono samples for the mixer instead of broadcasting per-channel stereo.
-        int monoSamples = audio.Length / 2;
-        lock (_mixLock)
-        {
-            if (_mixQueues.TryGetValue(channel.Frequency, out var queue))
-            {
-                for (int i = 0; i < monoSamples; i++)
-                    queue.Enqueue((short)(audio[i * 2] | (audio[i * 2 + 1] << 8)));
-
-                // Bound latency: if this channel ran ahead, drop the oldest samples.
-                while (queue.Count > MixQueueMaxSamples)
-                    queue.Dequeue();
-            }
-        }
+        _mixer.Enqueue(channel.Frequency, audio);
 
         // Route mono to multi-channel recording (recordings stay mono per channel)
-        var rs = _recordingService as RecordingService;
-        if (rs != null && rs.IsChannelRecording(channel.Frequency))
+        if (_recordingService.IsChannelRecording(channel.Frequency))
         {
             _recordingService.ProcessAudio(channel.Frequency, audio);
 
@@ -1048,59 +1022,6 @@ public class RtlDevice : BackgroundService, IRadioSource
     }
 
     /// <summary>
-    /// Periodic mixer tick. Pulls an equal-length block from every parallel channel's queue,
-    /// applies each channel's pan gains, sums them sample-aligned into a single interleaved
-    /// stereo buffer, and broadcasts it. Channels with no buffered audio contribute silence.
-    /// Produces one continuous stereo stream so overlapping transmissions play concurrently.
-    /// </summary>
-    private void MixTick(object? _)
-    {
-        // No-op if the parallel scan has stopped (guards a late-firing timer tick).
-        if (_parallelPipelines == null) return;
-
-        var mixLeft = new int[MixBlockSamples];
-        var mixRight = new int[MixBlockSamples];
-        bool anyAudio = false;
-
-        lock (_mixLock)
-        {
-            foreach (var (freq, gains) in _parallelPanMap)
-            {
-                if (!_mixQueues.TryGetValue(freq, out var queue) || queue.Count == 0)
-                    continue;
-
-                int count = Math.Min(queue.Count, MixBlockSamples);
-                for (int i = 0; i < count; i++)
-                {
-                    short sample = queue.Dequeue();
-                    mixLeft[i] += (int)(sample * gains.Left);
-                    mixRight[i] += (int)(sample * gains.Right);
-                }
-                anyAudio = true;
-            }
-        }
-
-        // If every channel was silent this tick, skip the broadcast (preserves the
-        // "only stream when active" behavior; the client resumes cleanly on underrun).
-        if (!anyAudio) return;
-
-        var stereo = new byte[MixBlockSamples * 4];
-        for (int i = 0; i < MixBlockSamples; i++)
-        {
-            short left = (short)Math.Clamp(mixLeft[i], short.MinValue, short.MaxValue);
-            short right = (short)Math.Clamp(mixRight[i], short.MinValue, short.MaxValue);
-
-            int outIdx = i * 4;
-            stereo[outIdx] = (byte)(left & 0xFF);
-            stereo[outIdx + 1] = (byte)((left >> 8) & 0xFF);
-            stereo[outIdx + 2] = (byte)(right & 0xFF);
-            stereo[outIdx + 3] = (byte)((right >> 8) & 0xFF);
-        }
-
-        OnAudio?.Invoke(AudioChunk.Stereo48k(stereo));
-    }
-
-    /// <summary>
     /// Handle activity detection from a parallel channel pipeline.
     /// </summary>
     private void HandleParallelActivity(Channel channel, int? src, int? tgt, string? tone)
@@ -1116,12 +1037,12 @@ public class RtlDevice : BackgroundService, IRadioSource
         }
 
         // Start recording if not already
-        var rs = _recordingService as RecordingService;
-        if (rs != null && !rs.IsChannelRecording(channel.Frequency))
+        var rs = _recordingService;
+        if (!rs.IsChannelRecording(channel.Frequency))
         {
             rs.StartParallelRecording(channel, src, tgt, null);
         }
-        else if (rs != null)
+        else
         {
             // Already recording this channel: update the current SRC/TGT and, on a
             // talker change, append to the speaker chain (AppendSpeaker de-dupes
@@ -1143,9 +1064,8 @@ public class RtlDevice : BackgroundService, IRadioSource
     {
         _logger.LogInformation($"[Parallel] Activity ended on {channel.AlphaTag}");
 
-        var rs = _recordingService as RecordingService;
         _parallelLastTones.TryRemove(channel.Frequency, out var lastTone);
-        rs?.StopParallelRecording(channel.Frequency, lastTone);
+        _recordingService.StopParallelRecording(channel.Frequency, lastTone);
 
         UpdateParallelState();
     }
@@ -1168,9 +1088,8 @@ public class RtlDevice : BackgroundService, IRadioSource
             if (!t.IsCanceled)
             {
                 _logger.LogInformation($"[Parallel] Activity timeout on {channel.AlphaTag}");
-                var rs = _recordingService as RecordingService;
                 _parallelLastTones.TryRemove(channel.Frequency, out var lastTone);
-                rs?.StopParallelRecording(channel.Frequency, lastTone);
+                _recordingService.StopParallelRecording(channel.Frequency, lastTone);
                 _parallelActivityTimeouts.TryRemove(channel.Frequency, out _);
 
                 UpdateParallelState();
@@ -1201,23 +1120,23 @@ public class RtlDevice : BackgroundService, IRadioSource
     {
         if (_parallelPipelines == null) return;
 
-        var rs = _recordingService as RecordingService;
         var states = _parallelPipelines.Select(p => new ParallelChannelState(
             Channel: p.Channel,
             IsActive: p.IsActive,
             SignalStrength: p.SignalLevelDb,
-            IsRecording: rs?.IsChannelRecording(p.Channel.Frequency) ?? false,
+            IsRecording: _recordingService.IsChannelRecording(p.Channel.Frequency),
             SourceID: null,
             TargetID: null,
             SpeakerChain: null,
             CurrentTone: _parallelLastTones.GetValueOrDefault(p.Channel.Frequency),
-            MeasuredOffsetHz: p.MeasuredOffsetHz
+            MeasuredOffsetHz: p.MeasuredOffsetHz,
+            DeviceId: DeviceId
         )).ToArray();
 
         UpdateState(_state with { ParallelChannels = states });
     }
 
-    private async Task<long> RunSingleScanSegment(double centerFreqMhz, int sampleRate, CancellationToken token)
+    private async Task<long> RunSingleScanSegment(double centerFreqMhz, int sampleRate, CancellationToken token, Channel? hopChannel = null)
     {
         // Brief delay to allow the previous rtl_sdr process to fully release the USB device
         await Task.Delay(250, token);
@@ -1226,7 +1145,8 @@ public class RtlDevice : BackgroundService, IRadioSource
         int scanRate = 1024000; 
         var binPath = PlatformTools.RtlSdr;
         // -b 1: Use 1 buffer to reduce latency and improve startup reliability
-        var args = $"-f {centerFreqMhz:F3}M -s {scanRate} {TuningArgs()} -b 1 -";
+        // A hop to a single channel captures at that channel's own gain class.
+        var args = $"-f {centerFreqMhz:F3}M -s {scanRate} {TuningArgs(hopChannel)} -b 1 -";
 
         _logger.LogInformation($"Starting Scanner: {centerFreqMhz:F3} MHz (Cmd: {binPath} {args})");
 
@@ -1461,7 +1381,9 @@ public class RtlDevice : BackgroundService, IRadioSource
             }
         }
 
-        foreach (var channel in _channelService.Channels)
+        // Only this SDR's channels: another SDR's channel can fall inside this capture's
+        // bandwidth, and locking on to it here would steal it from the SDR that carries it.
+        foreach (var channel in ScanChannels)
         {
             if (channel.Avoid) continue;
 
@@ -1580,7 +1502,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             if (!token.IsCancellationRequested)
             {
                 // If we are currently recording, don't timeout
-                if (_recordingService.IsRecording) return;
+                if (IsRecordingLockedChannel) return;
 
                 _logger.LogInformation("Session timeout (no data), resuming scan...");
                 StopDecoding();
@@ -1595,9 +1517,15 @@ public class RtlDevice : BackgroundService, IRadioSource
         _decodeCts?.Cancel();
         if (_state.CurrentChannel != null)
         {
-            _recordingService.StopRecording(_state.CurrentChannel, _lastDetectedTone);
+            _recordingService.StopParallelRecording(_state.CurrentChannel.Frequency, _lastDetectedTone);
             // Clear the detected tone so it doesn't bleed onto the next transmission.
             _lastDetectedTone = null;
+        }
+        if (_lockedAudioFrequency is double locked)
+        {
+            _mixer.Close(locked);
+            _toneDetector.ResetStream(locked);
+            _lockedAudioFrequency = null;
         }
 
         if (_currentDecoder != null)
@@ -1630,8 +1558,11 @@ public class RtlDevice : BackgroundService, IRadioSource
             // The decoder runs its own rtl_fm, so it needs the same front-end settings as the
             // wideband scan that found the signal — otherwise the scanner detects at one gain
             // and listens at another.
-            _currentDecoder.Tuning = CurrentTuning();
-            
+            _currentDecoder.Tuning = CurrentTuning(channel);
+
+            _lockedAudioFrequency = channel.Frequency;
+            _mixer.Open(channel.Frequency);
+
             _currentDecoder.OnAudio += (chunk) => 
             {
                 // Maintain pre-roll buffer
@@ -1647,14 +1578,15 @@ public class RtlDevice : BackgroundService, IRadioSource
                     }
                 }
 
-                // Analyze for Fire Tone Outs and MDC1200 signaling
-                _toneDetector.ProcessAudio(chunk);
+                // Analyze for Fire Tone Outs and MDC1200 signaling. The tone detector is shared
+                // with other SDRs, so this channel gets its own keyed stream.
+                _toneDetector.ProcessAudio(chunk, channel.Frequency);
                 _mdc.ProcessAudio(chunk);
-                OnAudio?.Invoke(AudioChunk.Mono48k(chunk));
+                _mixer.Enqueue(channel.Frequency, chunk);
 
-                _recordingService.ProcessAudio(chunk);
-                
-                if (_recordingService.IsRecording)
+                _recordingService.ProcessAudio(channel.Frequency, chunk);
+
+                if (IsRecordingLockedChannel)
                 {
                     ResetActivityTimeout(); 
                 }
@@ -1719,7 +1651,7 @@ public class RtlDevice : BackgroundService, IRadioSource
             {
                 if (_state.CurrentChannel != null)
                 {
-                    _recordingService.StopRecording(_state.CurrentChannel, _lastDetectedTone);
+                    _recordingService.StopParallelRecording(_state.CurrentChannel.Frequency, _lastDetectedTone);
                     // Clear the detected tone so it doesn't bleed onto the next transmission.
                     _lastDetectedTone = null;
                 }
@@ -1766,10 +1698,12 @@ public class RtlDevice : BackgroundService, IRadioSource
         if (tone == "EMRG")
             _lastDetectedTone = "EMRG";
         
-        // Start recording if not already started
-        if (!_recordingService.IsRecording)
+        // Start recording if not already started. Recordings are keyed by channel so that
+        // several SDRs can each record what they are locked on to at the same time.
+        var freq = originChannel.Frequency;
+        if (!_recordingService.IsChannelRecording(freq))
         {
-            _recordingService.StartRecording(originChannel, src, tgt, _preRollBuffer);
+            _recordingService.StartParallelRecording(originChannel, src, tgt, _preRollBuffer);
             // Clear the pre-roll buffer after flushing it into the recording so that
             // subsequent transmissions do not inherit audio from this one.
             lock (_preRollBuffer)
@@ -1782,17 +1716,17 @@ public class RtlDevice : BackgroundService, IRadioSource
             if (!prevSourceID.HasValue)
             {
                 // Late-arriving IDs — first activity event fired before dsd-fme emitted TGT/SRC.
-                _recordingService.UpdateSourceTarget(src, tgt);
+                _recordingService.UpdateSourceTarget(freq, src, tgt);
             }
             else if (src != prevSourceID)
             {
                 // Talker changed — append to the speaker chain within the same recording.
-                _recordingService.AppendSpeaker(src.Value);
+                _recordingService.AppendSpeaker(freq, src.Value);
             }
         }
         else if (tgt.HasValue && !prevSourceID.HasValue)
         {
-            _recordingService.UpdateSourceTarget(null, tgt);
+            _recordingService.UpdateSourceTarget(freq, null, tgt);
         }
 
         ResetActivityTimeout();
