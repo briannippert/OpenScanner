@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import {
     Button, List, ListItem, ListItemText, IconButton,
     TextField, Box, Typography, MenuItem, Select, FormControl, InputLabel,
@@ -9,7 +9,9 @@ import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';
 import RadioIcon from '@mui/icons-material/Radio';
 import SettingsInputAntennaIcon from '@mui/icons-material/SettingsInputAntenna';
-import type { Channel } from '../types';
+import type { Channel, RadiosResponse } from '../types';
+import { useRadios } from '../hooks/useRadios';
+import StatusChip from './common/StatusChip';
 import FormDialog from './common/FormDialog';
 import ConfirmDialog from './common/ConfirmDialog';
 import EmptyState from './common/EmptyState';
@@ -24,6 +26,68 @@ interface Props {
 
 const FORM_ID = 'channel-form';
 const MONO = '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
+const AUTO = '__auto__';
+
+/** Where the plan puts each channel: SDR label and role, and whether it was auto-placed or left out. */
+const placementByChannel = (radios: RadiosResponse | null) => {
+    const map = new Map<number, { label: string; role: string; autoPlaced: boolean; unscanned: boolean }>();
+    if (!radios) return map;
+    const auto = new Set(radios.plan.autoPlacedChannelIds);
+    for (const d of radios.plan.devices)
+        for (const id of d.channelIds)
+            map.set(id, { label: d.label, role: d.role, autoPlaced: auto.has(id), unscanned: false });
+    for (const id of radios.plan.unscannedChannelIds)
+        map.set(id, { label: '', role: 'Idle', autoPlaced: false, unscanned: true });
+    return map;
+};
+
+/**
+ * Which SDR carries a channel. In Manual mode it is a picker that pins the channel (Auto
+ * leaves it to the planner); in Auto mode it just shows where the planner put it.
+ */
+const SdrPlacement: React.FC<{
+    channel: Channel;
+    radios: RadiosResponse;
+    pin: string | null;
+    placement?: { label: string; role: string; autoPlaced: boolean; unscanned: boolean };
+    onPin: (deviceId: string | null) => void;
+}> = ({ channel, radios, pin, placement, onPin }) => {
+    const role = placement?.role === 'FastScan' ? 'fast' : placement?.role === 'Hop' ? 'hop' : null;
+    const marker = placement?.unscanned
+        ? <StatusChip label="NOT SCANNED" tone="error" sx={{ fontSize: 10 }} />
+        : placement?.autoPlaced && radios.mode === 'manual'
+            ? <StatusChip label={`AUTO → ${placement.label}`} tone="info" sx={{ fontSize: 10 }} />
+            : null;
+
+    if (radios.mode === 'auto') {
+        if (channel.avoid || !placement) return null;
+        return placement.unscanned
+            ? marker
+            : <StatusChip label={`${placement.label}${role ? ` · ${role}` : ''}`} tone="muted" sx={{ fontSize: 10 }} />;
+    }
+
+    return (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {marker}
+            <Select
+                size="small"
+                value={pin ?? AUTO}
+                onChange={e => onPin(e.target.value === AUTO ? null : String(e.target.value))}
+                inputProps={{ 'aria-label': `SDR for ${channel.alphaTag}` }}
+                sx={{ minWidth: 120 }}
+            >
+                <MenuItem value={AUTO}>Auto</MenuItem>
+                {radios.devices.map(d => (
+                    <MenuItem key={d.id} value={d.id} disabled={!d.attached || !d.enabled}>
+                        {d.label}{!d.attached ? ' (unplugged)' : !d.enabled ? ' (disabled)' : ''}
+                    </MenuItem>
+                ))}
+                {/* A pin to a dongle that has been forgotten still shows, rather than reading as Auto. */}
+                {pin && !radios.devices.some(d => d.id === pin) && <MenuItem value={pin} disabled>{pin}</MenuItem>}
+            </Select>
+        </Box>
+    );
+};
 
 const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDelete }) => {
     const [editing, setEditing] = useState<Channel | null>(null);
@@ -31,6 +95,24 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
     // Kept after the confirm closes so its text does not blank out during the fade.
     const [deleteTarget, setDeleteTarget] = useState<Channel | null>(null);
     const [confirmOpen, setConfirmOpen] = useState(false);
+
+    // SDR placement is only worth showing once there is more than one dongle to choose from.
+    const { radios, assign, refresh: refreshRadios, error: sdrError } = useRadios(open);
+    // An edit, delete or Avoid toggle re-plans on the server; re-read once the list updates.
+    useEffect(() => {
+        if (!open) return;
+        const id = setTimeout(() => void refreshRadios(), 400);
+        return () => clearTimeout(id);
+    }, [open, channels, refreshRadios]);
+    const showSdrs = !!radios && radios.devices.length > 1;
+    const placement = useMemo(() => placementByChannel(radios), [radios]);
+    // Pins set here, until the channel list passed in catches up with the server.
+    const [pins, setPins] = useState<Record<number, string | null>>({});
+    const pinOf = (ch: Channel) => (ch.id != null && ch.id in pins ? pins[ch.id] : ch.sdrDeviceId ?? null);
+    const handlePin = async (ch: Channel, deviceId: string | null) => {
+        if (ch.id == null) return;
+        if (await assign([ch.id], deviceId)) setPins(p => ({ ...p, [ch.id!]: deviceId }));
+    };
 
     const handleEdit = (channel: Channel) => {
         setEditing(channel);
@@ -174,6 +256,7 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                 </>
             }
         >
+            {showSdrs && sdrError && <Typography color="error" variant="body2" sx={{ mb: 1 }}>{sdrError}</Typography>}
             {channels.length === 0 ? (
                 <EmptyState icon={<RadioIcon />} title="No channels yet" hint="Add a frequency to start scanning." />
             ) : (
@@ -190,6 +273,15 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                                 secondary={ch.description}
                             />
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                {showSdrs && radios && (
+                                    <SdrPlacement
+                                        channel={ch}
+                                        radios={radios}
+                                        pin={pinOf(ch)}
+                                        placement={ch.id != null ? placement.get(ch.id) : undefined}
+                                        onPin={deviceId => void handlePin(ch, deviceId)}
+                                    />
+                                )}
                                 <FormControlLabel
                                     control={<Switch checked={ch.avoid} onChange={() => onSave({ ...ch, avoid: !ch.avoid })} name="avoid" color="warning" />}
                                     label="Avoid"

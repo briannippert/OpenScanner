@@ -65,6 +65,7 @@ nav:
   - User guide:
       - The dashboard: guide/dashboard.md
       - Channels: guide/channels.md
+      - Multiple SDRs: guide/multiple-sdrs.md
       - History and playback: guide/history.md
       - Statistics: guide/statistics.md
       - Transcription: guide/transcription.md

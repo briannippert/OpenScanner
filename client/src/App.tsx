@@ -28,6 +28,8 @@ function App() {
   const [polledAvailable, setPolledAvailable] = useState(false);
   const [debugFreq, setDebugFreq] = useState<string>('155.500');
   const [debugGain, setDebugGain] = useState<number>(40);
+  // Which SDR the debug sweep uses; empty for the first. The others keep scanning.
+  const [debugDevice, setDebugDevice] = useState<string>('');
 
   const dialogs = useDialogs();
   const dialog = dialogs.handlers;
@@ -143,8 +145,8 @@ function App() {
   const resumeScan = useCallback(() => { sendCommand('scan'); }, [sendCommand]);
 
   const tuneDebug = useCallback(() => {
-    sendCommand('debug_spectrum', Number(debugFreq), debugGain);
-  }, [sendCommand, debugFreq, debugGain]);
+    sendCommand('debug_spectrum', Number(debugFreq), debugGain, debugDevice || undefined);
+  }, [sendCommand, debugFreq, debugGain, debugDevice]);
 
   const openRfDebug = dialog.rfDebug.open;
   const closeRfDebug = dialog.rfDebug.close;
@@ -382,6 +384,8 @@ function App() {
               onDebugFreqChange={setDebugFreq}
               debugGain={debugGain}
               onDebugGainChange={setDebugGain}
+              debugDevice={debugDevice}
+              onDebugDeviceChange={setDebugDevice}
               onTune={tuneDebug}
             />
           )}

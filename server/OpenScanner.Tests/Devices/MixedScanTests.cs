@@ -27,17 +27,9 @@ public class MixedScanTests
         channelService.Setup(x => x.Channels).Returns(new List<Channel>());
 
         return new RtlDevice(
-            db.Object,
-            logger.Object,
-            Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance,
-            gps.Object,
-            toneDetector.Object,
+            db.Object, logger.Object, Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance, toneDetector.Object,
             new Mdc1200Decoder(new Mock<ILogger<Mdc1200Decoder>>().Object),
-            decoderFactory.Object,
-            transcription.Object,
-            recording.Object,
-            channelService.Object
-        );
+            decoderFactory.Object, recording.Object, channelService.Object, new OpenScanner.Server.Audio.AudioMixer());
     }
 
     [Fact]
@@ -184,16 +176,16 @@ public class MixedScanTests
         var channel = new Channel { Frequency = 155.0, AlphaTag = "Test", Mode = "NFM" };
         channelService.Setup(x => x.Channels).Returns(new List<Channel> { channel });
         decoderFactory.Setup(f => f.GetDecoder(It.IsAny<string>())).Returns(mockDecoder.Object);
-        recording.Setup(r => r.IsRecording).Returns(false);
+        recording.Setup(r => r.IsChannelRecording(It.IsAny<double>())).Returns(false);
 
         // Keep the mock decoder alive so event hooks remain active
         mockDecoder.Setup(d => d.StartAsync(It.IsAny<Channel>(), It.IsAny<CancellationToken>()))
                    .Returns(async (Channel _, CancellationToken t) => await Task.Delay(Timeout.Infinite, t).ContinueWith(_ => { }));
 
         var device = new RtlDevice(
-            db.Object, logger.Object, Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance, gps.Object, toneDetector.Object,
+            db.Object, logger.Object, Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance, toneDetector.Object,
             new Mdc1200Decoder(new Mock<ILogger<Mdc1200Decoder>>().Object),
-            decoderFactory.Object, transcription.Object, recording.Object, channelService.Object);
+            decoderFactory.Object, recording.Object, channelService.Object, new OpenScanner.Server.Audio.AudioMixer());
 
         // Lock onto the channel — this triggers StartDecoding after a 150ms delay
         device.HoldFrequency(155.0);
@@ -217,11 +209,11 @@ public class MixedScanTests
         Assert.Empty(device.GetPreRollBuffer());
 
         // Verify StartRecording was called exactly once
-        recording.Verify(r => r.StartRecording(
+        recording.Verify(r => r.StartParallelRecording(
             It.IsAny<Channel>(),
             It.IsAny<int?>(),
             It.IsAny<int?>(),
-            It.IsAny<LinkedList<byte[]>>()), Times.Once);
+            It.IsAny<LinkedList<byte[]>?>()), Times.Once);
 
         device.Stop();
     }
@@ -261,15 +253,15 @@ public class MixedScanTests
         var channel = new Channel { Frequency = 155.0, AlphaTag = "Test", Mode = "NFM" };
         channelService.Setup(x => x.Channels).Returns(new List<Channel> { channel });
         decoderFactory.Setup(f => f.GetDecoder(It.IsAny<string>())).Returns(mockDecoder.Object);
-        recording.Setup(r => r.IsRecording).Returns(false);
+        recording.Setup(r => r.IsChannelRecording(It.IsAny<double>())).Returns(false);
 
         mockDecoder.Setup(d => d.StartAsync(It.IsAny<Channel>(), It.IsAny<CancellationToken>()))
                    .Returns(async (Channel _, CancellationToken t) => await Task.Delay(Timeout.Infinite, t).ContinueWith(_ => { }));
 
         var device = new RtlDevice(
-            db.Object, logger.Object, Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance, gps.Object, toneDetector.Object,
+            db.Object, logger.Object, Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance, toneDetector.Object,
             new Mdc1200Decoder(new Mock<ILogger<Mdc1200Decoder>>().Object),
-            decoderFactory.Object, transcription.Object, recording.Object, channelService.Object);
+            decoderFactory.Object, recording.Object, channelService.Object, new OpenScanner.Server.Audio.AudioMixer());
 
         device.HoldFrequency(155.0);
         await WaitForDecoderStart(mockDecoder);

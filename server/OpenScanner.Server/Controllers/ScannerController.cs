@@ -210,7 +210,7 @@ public class ScannerController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     public IActionResult StartDebugSpectrum([FromBody] DebugSpectrumRequest request)
     {
-        _radio.StartDebugSpectrum(request.Frequency, request.Gain);
+        _radio.StartDebugSpectrum(request.Frequency, request.Gain, request.DeviceId);
         return Ok();
     }
 
@@ -373,4 +373,4 @@ public record AvoidRequest(double Frequency, double Duration = 10);
 public record IqDumpRequest(string? Label = null);
 
 /// <summary>Request to start RF spectrum debug mode at a center frequency (MHz) with optional gain (dB).</summary>
-public record DebugSpectrumRequest(double Frequency, double? Gain = null);
+public record DebugSpectrumRequest(double Frequency, double? Gain = null, string? DeviceId = null);

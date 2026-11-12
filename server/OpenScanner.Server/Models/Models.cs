@@ -528,7 +528,9 @@ public record ParallelChannelState(
     /// idle. Over a transmitter known to be on-frequency this is the dongle's crystal error,
     /// which is what makes the ppm setting calibratable instead of guesswork.
     /// </summary>
-    double? MeasuredOffsetHz = null
+    double? MeasuredOffsetHz = null,
+    /// <summary>The SDR (<see cref="SdrDeviceConfig.Id"/>) carrying this channel.</summary>
+    string? DeviceId = null
 );
 
 /// <summary>
@@ -662,6 +664,7 @@ public record ScannerState(
     string? SpeakerChain = null,
     string? CurrentTone = null,
     string? LastDetectedTone = null,
-    ParallelChannelState[]? ParallelChannels = null
+    ParallelChannelState[]? ParallelChannels = null,
+    SdrDeviceState[]? Devices = null
 );
         

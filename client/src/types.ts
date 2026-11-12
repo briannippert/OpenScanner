@@ -12,6 +12,8 @@ export interface Channel {
     dmrSlot?: number;
     dmrColorCode?: number;
     dmrTalkgroup?: number;
+    /** The SDR this channel is pinned to in Manual assignment mode; null/absent lets the planner place it. */
+    sdrDeviceId?: string | null;
 }
 
 export interface ParallelChannelState {
@@ -28,6 +30,8 @@ export interface ParallelChannelState {
      * transmitter known to be on-frequency this is the dongle's crystal error.
      */
     measuredOffsetHz?: number;
+    /** The SDR carrying this channel. */
+    deviceId?: string;
 }
 
 export interface ScannerState {
@@ -62,6 +66,78 @@ export interface ScannerState {
     currentTone?: string;
     lastDetectedTone?: string;
     parallelChannels?: ParallelChannelState[];
+    /** Live state of each SDR. */
+    devices?: SdrDeviceState[];
+}
+
+export type SdrRole = 'FastScan' | 'Hop' | 'Idle';
+export type GainClass = 'Analog' | 'Digital' | 'Mixed';
+
+/** Live state of one SDR, broadcast with the scanner state. */
+export interface SdrDeviceState {
+    id: string;
+    label: string;
+    product: string;
+    serial: string;
+    attached: boolean;
+    enabled: boolean;
+    role: SdrRole;
+    status: ScannerState['status'];
+    isHardwareConnected: boolean;
+    gainClass: GainClass;
+    gain?: number;
+    centerFrequency?: number;
+    currentFrequency?: number;
+    frequencies: number[];
+}
+
+/** One dongle and its stored settings (GET /api/radios). */
+export interface Radio {
+    id: string;
+    label: string;
+    serial: string;
+    product: string;
+    attached: boolean;
+    index?: number | null;
+    serialIsUnique: boolean;
+    enabled: boolean;
+    ppm: number;
+    gainAnalog: number;
+    gainDigital: number;
+    gainMixed: number;
+    role: SdrRole;
+}
+
+/** What one SDR carries under a plan. */
+export interface PlanDevice {
+    deviceId: string;
+    label: string;
+    role: SdrRole;
+    gainClass: GainClass;
+    gain: number;
+    centerFrequency?: number | null;
+    spanMHz: number;
+    frequencies: number[];
+    channelIds: number[];
+}
+
+/** Which SDR carries each channel. */
+export interface SdrPlan {
+    totalChannels: number;
+    fastScanned: number;
+    scanned: number;
+    devices: PlanDevice[];
+    autoPlacedChannelIds: number[];
+    unscannedChannelIds: number[];
+}
+
+export type AssignmentMode = 'auto' | 'manual';
+
+export interface RadiosResponse {
+    mode: AssignmentMode;
+    devices: Radio[];
+    plan: SdrPlan;
+    warnings: string[];
 }
 
 export interface CallLog {

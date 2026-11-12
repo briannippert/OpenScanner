@@ -179,7 +179,7 @@ public class MockRadioSource : BackgroundService, IRadioSource
         UpdateState(_state with { Status = "SCANNING", ManualHoldFrequency = null });
     }
 
-    public void StartDebugSpectrum(double freq, double? gain = null)
+    public void StartDebugSpectrum(double freq, double? gain = null, string? deviceId = null)
     {
         UpdateState(_state with { Status = "DEBUG", CurrentFrequency = freq, RfSpectrum = null, Gain = gain });
     }

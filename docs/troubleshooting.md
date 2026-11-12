@@ -34,6 +34,12 @@ The header shows <span class="chip chip--error">SDR DISCONNECTED</span> when no 
 
 OpenScanner retries by itself if the dongle drops off USB and comes back.
 
+With several dongles, the chip stays green while any of them is delivering, and its tooltip lists them. Check each dongle's card in [Settings → Radios](guide/settings.md#radios): an unplugged one shows **UNPLUGGED**, and one that is attached but not delivering samples shows **NO DATA**. Several dongles on one unpowered hub can brown out; use a powered hub.
+
+## Two dongles keep swapping settings
+
+They share a serial number, so OpenScanner can only tell them apart by USB port order. Give each its own serial with `rtl_eeprom`; see [Multiple SDRs](guide/multiple-sdrs.md#give-each-dongle-its-own-serial-number).
+
 ## No audio in the browser
 
 - Click anywhere on the page once. Browsers block audio until you interact with the page.
@@ -45,10 +51,10 @@ OpenScanner retries by itself if the dongle drops off USB and comes back.
 
 Most often the dongle is off frequency.
 
-- Set **Frequency Correction** in [Settings → SDR Tuning](guide/settings.md#frequency-correction). This is the single most common fix.
+- Set **Frequency Correction** in [Settings](guide/settings.md#frequency-correction): the dongle's **PPM** under **Radios**. This is the single most common fix.
 - Check the channel's **Mode** matches the system (P25, DMR or NFM).
 - For DMR, check the **Color Code** and **Slot**.
-- Try adjusting **Tuner Gain**: too low misses weak signals, too high overloads on strong ones.
+- Try adjusting the gain: too low misses weak signals, too high overloads on strong ones. Digital channels often decode better with less gain; with **Radios** you can set the **Digital** gain on its own.
 
 ## No transcripts
 
@@ -97,7 +103,7 @@ A live view of the device and the service:
 A live waterfall of the raw RF around a center frequency, for checking that a signal is really there and where it sits.
 
 !!! warning "Scanning pauses while this is open"
-    RF Spectrum Debug needs exclusive use of the dongle. Scanning and decoding stop until you close it.
+    RF Spectrum Debug needs exclusive use of the dongle it sweeps with. That dongle stops scanning and decoding until you close it. With several dongles, pick which one to use from the **SDR** list; the others keep scanning.
 
 The spike in the middle of the display is a DC offset common to RTL-SDR hardware, not a real signal.
 

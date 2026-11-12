@@ -6,7 +6,28 @@ Open **Settings** from the header. Changes apply immediately.
 
 Backend, model and thread count for speech-to-text. See [Transcription](transcription.md).
 
+## Radios
+
+Shown once OpenScanner has found a dongle. It lists every RTL-SDR it has seen, attached or not.
+
+- **Channel assignment** — **Auto** divides channels between the dongles for you; **Manual** uses the SDR you pick for each channel. See [Multiple SDRs](multiple-sdrs.md#auto-and-manual-assignment).
+- The summary line shows how the channels are covered, e.g. *5 of 7 channels fast-scanned across 2 SDRs · 2 hopping on SDR 2*.
+- **Rescan** looks for dongles again straight away, after plugging one in.
+
+Each dongle has a card:
+
+| Setting | Description |
+|---|---|
+| **Name** | Your name for the dongle, e.g. `Roof`. |
+| **On/off switch** | Stop using the dongle without unplugging it. |
+| **Analog dB / Digital dB / Mixed dB** | Tuner gain when the dongle carries only analog, only digital, or both kinds of channel. `0` is automatic. See [Gain](multiple-sdrs.md#gain). |
+| **PPM** | The dongle's crystal error. See [Frequency correction](#frequency-correction). |
+
+The card also says what the dongle is doing: fast-scanning a range, hopping through some channels, or idle.
+
 ## SDR Tuning
+
+Shown instead of **Radios** when no dongle can be listed (none is plugged in yet, or `rtl_test` is missing). These single settings then apply to the default dongle.
 
 ### Tuner Gain
 
@@ -22,8 +43,10 @@ The dongle's crystal error, in parts per million (ppm). Dongles without a temper
 OpenScanner can measure it for you:
 
 1. Open Settings while a strong, known-accurate signal is being received.
-2. The measured error appears under **Frequency Correction**.
+2. The measured error appears under **Frequency Correction**, or as an **Apply** button on the dongle's card under **Radios**.
 3. Click **Apply**.
+
+Each dongle has its own crystal, so with several dongles each has its own PPM.
 
 ## Notifications
 

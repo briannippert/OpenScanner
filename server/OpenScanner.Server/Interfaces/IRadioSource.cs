@@ -86,7 +86,8 @@ public interface IRadioSource
     /// </summary>
     /// <param name="freq">The center frequency in MHz.</param>
     /// <param name="gain">The hardware gain (dB).</param>
-    void StartDebugSpectrum(double freq, double? gain = null);
+    /// <param name="deviceId">Which SDR to sweep with; null for the first. The others keep scanning.</param>
+    void StartDebugSpectrum(double freq, double? gain = null, string? deviceId = null);
 
     /// <summary>
     /// Temporarily avoids a frequency for a specified duration.

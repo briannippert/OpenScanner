@@ -49,7 +49,7 @@ export function useScannerSocket() {
     }).catch(err => console.error('Command failed:', err)), []);
 
   // Map legacy action names onto REST endpoints.
-  const sendCommand = useCallback((action: string, frequency?: number, value?: number) => {
+  const sendCommand = useCallback((action: string, frequency?: number, value?: number, deviceId?: string) => {
     switch (action) {
       case 'scan': return scannerApi('hold', 'DELETE');
       case 'hold': return scannerApi('hold', 'PUT', { frequency });
@@ -58,7 +58,7 @@ export function useScannerSocket() {
       case 'set_squelch': return scannerApi('squelch', 'PUT', { value });
       case 'set_gain': return scannerApi('gain', 'PUT', { value });
       case 'set_ppm': return scannerApi('ppm', 'PUT', { value });
-      case 'debug_spectrum': return scannerApi('debug-spectrum', 'POST', { frequency, gain: value });
+      case 'debug_spectrum': return scannerApi('debug-spectrum', 'POST', { frequency, gain: value, deviceId });
       default: console.error('Unknown command:', action);
     }
   }, [scannerApi]);
