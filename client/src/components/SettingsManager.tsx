@@ -9,8 +9,8 @@ import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import MonitorIcon from '@mui/icons-material/Monitor';
 import FormDialog from './common/FormDialog';
-import { apiFetch } from './common/apiBase';
-import type { ScannerState } from '../types';
+import { apiFetch, apiJson } from './common/apiBase';
+import type { AiCapabilities, ScannerState } from '../types';
 import RadiosSection from './RadiosSection';
 import { useRadios } from '../hooks/useRadios';
 
@@ -28,6 +28,16 @@ interface RemoteModel {
 }
 
 type RemoteHealth = { status: 'idle' | 'testing' | 'ok' | 'error'; message: string };
+
+/** Status of the history analysis job (GET /api/ai/backfill). */
+interface AiBackfillStatus {
+    running: boolean;
+    total: number;
+    processed: number;
+    succeeded: number;
+    failed: number;
+    message?: string | null;
+}
 
 interface Props {
     open: boolean;
@@ -126,6 +136,10 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted, 
     const [remoteModels, setRemoteModels] = useState<RemoteModel[]>([]);
     const [remoteHealth, setRemoteHealth] = useState<RemoteHealth>({ status: 'idle', message: '' });
     const [ntfyTest, setNtfyTest] = useState<RemoteHealth>({ status: 'idle', message: '' });
+    // Whether the remote server offers AI call analysis (its OpenAPI document lists
+    // /transmission). The AI setting is hidden unless it does.
+    const [aiSupported, setAiSupported] = useState(false);
+    const [aiBackfill, setAiBackfill] = useState<AiBackfillStatus | null>(null);
 
     const sdrs = useRadios(open);
 
@@ -165,6 +179,42 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted, 
         const id = setTimeout(run, 500);
         return () => { cancelled = true; clearTimeout(id); };
     }, [open, backend, remoteUrl]);
+
+    // Probe the remote server for AI call analysis whenever its URL changes. Debounced
+    // like the models fetch; the server checks /swagger/v1/swagger.json for /transmission.
+    useEffect(() => {
+        if (!open || backend !== 'remote' || !remoteUrl) {
+            setAiSupported(false);
+            return;
+        }
+        let cancelled = false;
+        const id = setTimeout(async () => {
+            const caps = await apiJson<AiCapabilities>(`/api/ai/capabilities?url=${encodeURIComponent(remoteUrl)}`);
+            if (!cancelled) setAiSupported(caps?.supported ?? false);
+        }, 500);
+        return () => { cancelled = true; clearTimeout(id); };
+    }, [open, backend, remoteUrl]);
+
+    // History analysis progress: fetched once when the row appears, then polled while it runs.
+    const aiEnabled = settings['AiFeaturesEnabled'] === 'true';
+    const aiBackfillRunning = aiBackfill?.running ?? false;
+    useEffect(() => {
+        if (!open || !aiSupported || !aiEnabled) return;
+        let cancelled = false;
+        const load = async () => {
+            const b = await apiJson<AiBackfillStatus>('/api/ai/backfill');
+            if (!cancelled && b) setAiBackfill(b);
+        };
+        void load();
+        if (!aiBackfillRunning) return () => { cancelled = true; };
+        const id = setInterval(load, 2000);
+        return () => { cancelled = true; clearInterval(id); };
+    }, [open, aiSupported, aiEnabled, aiBackfillRunning]);
+
+    const controlAiBackfill = async (action: 'start' | 'stop') => {
+        const b = await apiJson<AiBackfillStatus>(`/api/ai/backfill/${action}`, { method: 'POST' });
+        if (b) setAiBackfill(b);
+    };
 
     const testRemoteServer = async () => {
         if (!remoteUrl) return;
@@ -461,6 +511,72 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted, 
                                                     </Select>
                                                 }
                                             />
+                                            {aiSupported && (
+                                                <>
+                                                    <Row
+                                                        label="AI call analysis"
+                                                        description="Send each transcript to the remote server to pick out the call type, a summary and the incident location. Powers the live call map."
+                                                        control={
+                                                            <Switch
+                                                                checked={aiEnabled}
+                                                                inputProps={{ 'aria-label': 'AI call analysis' }}
+                                                                onChange={() => handleToggle('AiFeaturesEnabled', settings['AiFeaturesEnabled'] || 'false')}
+                                                            />
+                                                        }
+                                                    />
+                                                    {aiEnabled && (
+                                                        <Row
+                                                            label="Default location"
+                                                            description="City and state that ground address lookups when a call doesn't say where. Leave blank to use the server's default area."
+                                                            control={
+                                                                <Box sx={{ display: 'flex', gap: 1 }}>
+                                                                    <TextField
+                                                                        size="small"
+                                                                        variant="outlined"
+                                                                        placeholder="City"
+                                                                        style={{ width: '150px' }}
+                                                                        inputProps={{ 'aria-label': 'Default city' }}
+                                                                        value={settings['AiDefaultCity'] || ''}
+                                                                        onChange={(e) => handleValueChange('AiDefaultCity', e.target.value)}
+                                                                    />
+                                                                    <TextField
+                                                                        size="small"
+                                                                        variant="outlined"
+                                                                        placeholder="State"
+                                                                        style={{ width: '80px' }}
+                                                                        inputProps={{ 'aria-label': 'Default state', maxLength: 32 }}
+                                                                        value={settings['AiDefaultState'] || ''}
+                                                                        onChange={(e) => handleValueChange('AiDefaultState', e.target.value)}
+                                                                    />
+                                                                </Box>
+                                                            }
+                                                        />
+                                                    )}
+                                                    {aiEnabled && (
+                                                        <Row
+                                                            label="Analyze history"
+                                                            description={
+                                                                aiBackfill?.running
+                                                                    ? `Analyzing ${aiBackfill.processed} / ${aiBackfill.total}…`
+                                                                    : aiBackfill?.message || 'Analyze calls transcribed before AI analysis was on, so they appear on the map.'
+                                                            }
+                                                            control={
+                                                                <Button
+                                                                    size="small"
+                                                                    variant="outlined"
+                                                                    color={aiBackfill?.running ? 'inherit' : 'primary'}
+                                                                    onClick={() => controlAiBackfill(aiBackfill?.running ? 'stop' : 'start')}
+                                                                >
+                                                                    {aiBackfill?.running ? 'Stop' : 'Start'}
+                                                                </Button>
+                                                            }
+                                                        />
+                                                    )}
+                                                    {aiBackfill?.running && aiBackfill.total > 0 && (
+                                                        <LinearProgress variant="determinate" value={(aiBackfill.processed / aiBackfill.total) * 100} sx={{ mb: 1 }} />
+                                                    )}
+                                                </>
+                                            )}
                                         </>
                                     )}
                                 </>

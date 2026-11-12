@@ -11,6 +11,7 @@ import BadgeIcon from '@mui/icons-material/Badge';
 import EditIcon from '@mui/icons-material/Edit';
 import MonitorIcon from '@mui/icons-material/Monitor';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
+import MapIcon from '@mui/icons-material/Map';
 import InsightsIcon from '@mui/icons-material/Insights';
 import BugReportIcon from '@mui/icons-material/BugReport';
 import type { Channel } from '../types';
@@ -42,11 +43,13 @@ interface Props {
   onOpenDebug: () => void;
   onOpenSystemDebug: () => void;
   onToggleFullscreen: () => void;
+  /** Opens the call map in a new tab; the command is hidden when undefined (AI off). */
+  onOpenMap?: () => void;
 }
 
 const CommandPalette: React.FC<Props> = ({
   open, onClose, channels, manualHold, onHold, onResume, onSkip,
-  onOpenSettings, onOpenFireTones, onOpenChannels, onOpenAliases, onOpenStats, onOpenDebug, onOpenSystemDebug, onToggleFullscreen,
+  onOpenSettings, onOpenFireTones, onOpenChannels, onOpenAliases, onOpenStats, onOpenDebug, onOpenSystemDebug, onToggleFullscreen, onOpenMap,
 }) => {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
@@ -82,13 +85,14 @@ const CommandPalette: React.FC<Props> = ({
       { id: 'firetones', label: 'Fire tone-outs', section: 'Actions', icon: <NotificationsActiveIcon fontSize="small" />, keywords: 'fire tone out alerts', run: run(onOpenFireTones) },
       { id: 'aliases', label: 'Manage radio aliases', section: 'Actions', icon: <BadgeIcon fontSize="small" />, keywords: 'alias name src tg talkgroup unit id', run: run(onOpenAliases) },
       { id: 'stats', label: 'Statistics', section: 'Actions', icon: <InsightsIcon fontSize="small" />, keywords: 'stats statistics heatmap activity busiest airtime charts', run: run(onOpenStats) },
+      ...(onOpenMap ? [{ id: 'map', label: 'Open call map', hint: 'new tab', section: 'Actions', icon: <MapIcon fontSize="small" />, keywords: 'map incidents heat calls location ai', run: run(onOpenMap) }] : []),
       { id: 'settings', label: 'Open settings', section: 'Actions', icon: <SettingsIcon fontSize="small" />, keywords: 'settings preferences storage', run: run(onOpenSettings) },
       { id: 'debug', label: 'RF spectrum debug', section: 'Actions', icon: <MonitorIcon fontSize="small" />, keywords: 'rf spectrum debug waterfall', run: run(onOpenDebug) },
       { id: 'systemDebug', label: 'System debug', section: 'Actions', icon: <BugReportIcon fontSize="small" />, keywords: 'system debug diagnostics cpu memory temperature services support package logs', run: run(onOpenSystemDebug) },
       { id: 'fullscreen', label: 'Toggle fullscreen', section: 'Actions', icon: <FullscreenIcon fontSize="small" />, keywords: 'fullscreen full screen', run: run(onToggleFullscreen) },
     ];
     return [...actionCmds, ...channelCmds];
-  }, [channels, manualHold, onHold, onResume, onSkip, onOpenChannels, onOpenFireTones, onOpenAliases, onOpenStats, onOpenSettings, onOpenDebug, onOpenSystemDebug, onToggleFullscreen, onClose]);
+  }, [channels, manualHold, onHold, onResume, onSkip, onOpenChannels, onOpenFireTones, onOpenAliases, onOpenStats, onOpenSettings, onOpenDebug, onOpenSystemDebug, onToggleFullscreen, onOpenMap, onClose]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

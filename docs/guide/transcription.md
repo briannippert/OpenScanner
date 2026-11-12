@@ -11,6 +11,9 @@ Configure it under **Settings → Transcription**.
 | **Local (this device)** | Transcribe on the same machine. The default. |
 | **Remote server** | Send audio to a separate OpenScanner Whisper server at a **Server URL** you provide. Use this to take the load off a slower device. |
 
+!!! tip "AI call analysis"
+    A remote server that supports it can also analyze each transcript for the call type, a summary and the incident location, and put calls on the [call map](map.md). The **AI call analysis** switch appears under the Server URL only when the server supports it.
+
 ## Model
 
 Bigger models are more accurate and slower.

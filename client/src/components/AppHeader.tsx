@@ -20,6 +20,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
 import BadgeIcon from '@mui/icons-material/Badge';
+import MapIcon from '@mui/icons-material/Map';
 import InsightsIcon from '@mui/icons-material/Insights';
 import type { ScannerState } from '../types';
 import StatusChip from './common/StatusChip';
@@ -46,6 +47,8 @@ interface Props {
   updateAvailable?: boolean;
   onOpenUpdate: () => void;
   onOpenPalette: () => void;
+  /** Opens the call map in a new tab; the action is hidden when undefined (AI off). */
+  onOpenMap?: () => void;
 }
 
 const MONO = '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
@@ -65,7 +68,7 @@ const Clock = () => {
 const AppHeader: React.FC<Props> = ({
   isHardwareConnected, deviceName, devicePort, gps, volume, onVolumeChange, manualHold, onResume,
   isFullscreen, onToggleFullscreen, onOpenFireTones, onOpenSettings, onOpenStats,
-  onOpenAliases, updateAvailable, onOpenUpdate, onOpenPalette,
+  onOpenAliases, updateAvailable, onOpenUpdate, onOpenPalette, onOpenMap,
 }) => {
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const hasFix = gps?.time && gps.fix >= 2;
@@ -94,6 +97,7 @@ const AppHeader: React.FC<Props> = ({
   const actions = [
     { label: `Search commands (${paletteShortcut})`, icon: <SearchIcon />, onClick: onOpenPalette },
     { label: 'Software Update', icon: <SystemUpdateIcon />, onClick: onOpenUpdate },
+    ...(onOpenMap ? [{ label: 'Call Map (new tab)', icon: <MapIcon />, onClick: onOpenMap }] : []),
     { label: 'Statistics', icon: <InsightsIcon />, onClick: onOpenStats },
     { label: 'Fire Tone Outs', icon: <NotificationsActiveIcon />, onClick: onOpenFireTones },
     { label: 'Radio Aliases', icon: <BadgeIcon />, onClick: onOpenAliases },
