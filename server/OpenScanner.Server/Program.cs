@@ -52,6 +52,8 @@ builder.Services.AddSingleton<RemoteTranscriptionClient>();
 builder.Services.AddSingleton<ITranscriptionService, WhisperTranscriptionService>();
 builder.Services.AddSingleton<IRecordingService, RecordingService>();
 builder.Services.AddSingleton<IChannelService, ChannelService>();
+builder.Services.AddSingleton<IDeviceEnumerator, RtlDeviceEnumerator>();
+builder.Services.AddSingleton<SdrDeviceService>();
 builder.Services.AddSingleton<RecordingCleanupService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RecordingCleanupService>());
 builder.Services.AddSingleton<NtfyNotificationService>();

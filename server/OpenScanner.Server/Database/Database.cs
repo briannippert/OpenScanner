@@ -89,6 +89,7 @@ public class Database : IDatabase
         // Every history, activity and statistics query filters or sorts on timestamp.
         try { conn.Execute("CREATE INDEX IF NOT EXISTS idx_transmissions_timestamp ON transmissions(timestamp);"); } catch (Exception ex) { _logger.LogWarning(ex, "Could not create the transmissions timestamp index"); }
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN speakerChain TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: speakerChain column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE channels ADD COLUMN sdrDeviceId TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: sdrDeviceId column already exists or failed"); }
 
         conn.Execute(@"
             CREATE TABLE IF NOT EXISTS fire_tones (
@@ -497,6 +498,38 @@ public class Database : IDatabase
     {
         using var conn = GetConnection();
         await conn.ExecuteAsync("DELETE FROM radio_events");
+    }
+
+    /// <inheritdoc />
+    public async Task SetChannelSdrDeviceAsync(IEnumerable<int> channelIds, string? deviceId)
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync(
+            "UPDATE channels SET sdrDeviceId = @DeviceId WHERE id IN @Ids",
+            new { DeviceId = deviceId, Ids = channelIds.ToArray() });
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<SdrDeviceConfig>> GetSdrDevicesAsync()
+    {
+        using var conn = GetConnection();
+        return await conn.QueryAsync<SdrDeviceConfig>(
+            "SELECT id, label, serial, product, enabled, ppm, gainAnalog, gainDigital, gainMixed, sortOrder " +
+            "FROM sdr_devices ORDER BY sortOrder, id");
+    }
+
+    /// <inheritdoc />
+    public async Task UpsertSdrDeviceAsync(SdrDeviceConfig device)
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync(@"
+            INSERT INTO sdr_devices (id, label, serial, product, enabled, ppm, gainAnalog, gainDigital, gainMixed, sortOrder)
+            VALUES (@Id, @Label, @Serial, @Product, @Enabled, @Ppm, @GainAnalog, @GainDigital, @GainMixed, @SortOrder)
+            ON CONFLICT(id) DO UPDATE SET
+                label = excluded.label, serial = excluded.serial, product = excluded.product,
+                enabled = excluded.enabled, ppm = excluded.ppm, gainAnalog = excluded.gainAnalog,
+                gainDigital = excluded.gainDigital, gainMixed = excluded.gainMixed,
+                sortOrder = excluded.sortOrder", device);
     }
 
     /// <inheritdoc />

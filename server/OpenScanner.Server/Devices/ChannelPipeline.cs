@@ -307,15 +307,7 @@ public class ChannelPipeline : IDisposable
     /// Whether this mode requires a decoder process (dsd-fme).
     /// P25 and DMR need digital voice decoding; NFM/AM/WFM are decoded by the channelizer.
     /// </summary>
-    private static bool NeedsDecoderProcess(string? mode)
-    {
-        return mode?.ToUpper() switch
-        {
-            "P25" => true,
-            "DMR" => true,
-            _ => false
-        };
-    }
+    private static bool NeedsDecoderProcess(string? mode) => GainClasses.ForMode(mode) == GainClass.Digital;
 
     private void StartDecoderProcess(CancellationToken token)
     {

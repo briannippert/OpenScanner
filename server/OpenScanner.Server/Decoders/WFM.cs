@@ -18,8 +18,9 @@ public class WFM : DSDBase
         int captureRate = 170000;
         int outputRate = 48000;
         string rtlMode = "wbfm";
-        // WFM with moderate squelch and increased gain for better signal handling
-        return $"{PlatformTools.Stdbuf("-o0")}{PlatformTools.RtlFm} -f {channel.Frequency}M -s {captureRate} -r {outputRate} -g 42 -p 0 -l 50 -t 30 -M {rtlMode} -";
+        // WFM with moderate squelch. Gain, ppm and device come from the shared SDR tuning like
+        // every other decoder; the low-leakage narrowband filter flags are left off for broadcast FM.
+        return $"{PlatformTools.Stdbuf("-o0")}{PlatformTools.RtlFm} -f {channel.Frequency}M -s {captureRate} -r {outputRate} {Tuning.RtlFmArgs(includeFilters: false)} -l 50 -t 30 -M {rtlMode} -";
     }
 
     protected override Task OnStarted(CancellationToken token)

@@ -274,10 +274,18 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// The rtl_sdr/rtl_fm tuning arguments shared by every capture: tuner gain and crystal
     /// error correction. Both tools spell these the same way and both treat "-g 0" as AUTO.
     /// </summary>
-    private string TuningArgs() => $"-g {Num(_state.Gain ?? 0)} -p {Num(_state.Ppm ?? 0)}";
+    private string TuningArgs() => CurrentTuning().CaptureArgs();
 
     /// <summary>The configured front-end settings, for handing to a decoder's own rtl_fm.</summary>
-    private SdrTuning CurrentTuning() => new(_state.Gain ?? 0, _state.Ppm ?? 0);
+    private SdrTuning CurrentTuning() => new(_state.Gain ?? 0, _state.Ppm ?? 0, _deviceIndex);
+
+    /// <summary>
+    /// The librtlsdr index of the dongle this device drives, or null for the default (index 0).
+    /// Single-device installs leave it null, which keeps the command lines unchanged.
+    /// Takes effect on the next capture launch.
+    /// </summary>
+    internal int? DeviceIndex { get => _deviceIndex; set => _deviceIndex = value; }
+    private int? _deviceIndex;
 
     /// <inheritdoc />
     public void Start()
@@ -359,7 +367,7 @@ public class RtlDevice : BackgroundService, IRadioSource
         var binPath = PlatformTools.RtlSdr;
         // Debug spectrum takes an explicit gain (it sweeps to find one), but still needs the
         // configured ppm or the displayed spectrum sits offset from the real frequencies.
-        var args = $"-f {freq}M -s {sampleRate} -g {Num(gain)} -p {Num(_state.Ppm ?? 0)} -b 1 -";
+        var args = $"-f {freq}M -s {sampleRate} {(CurrentTuning() with { GainDb = gain }).CaptureArgs()} -b 1 -";
 
         _logger.LogInformation($"Debug Spectrum HW: {binPath} {args}");
 

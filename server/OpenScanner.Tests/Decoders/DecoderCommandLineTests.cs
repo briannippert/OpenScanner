@@ -152,4 +152,39 @@ public class DecoderCommandLineTests
             Thread.CurrentThread.CurrentCulture = previous;
         }
     }
+
+    /// <summary>
+    /// With several dongles attached each capture has to name its own. Without -d every
+    /// decoder would open index 0, stealing the dongle another SDR is scanning on.
+    /// </summary>
+    [Fact]
+    public void EveryDecoder_PassesTheDeviceIndex()
+    {
+        foreach (var decoder in AllDecoders().Append(new WFM(NullLogger<WFM>.Instance)))
+            Assert.Contains("-d 2 ", CommandFor(decoder, new SdrTuning(30, 5, DeviceIndex: 2)));
+    }
+
+    /// <summary>No device index keeps the command lines exactly as they were for one dongle.</summary>
+    [Fact]
+    public void NoDeviceIndex_OmitsTheDeviceFlag()
+    {
+        foreach (var decoder in AllDecoders())
+            Assert.DoesNotContain("-d ", CommandFor(decoder));
+    }
+
+    /// <summary>WFM used to hardcode "-g 42 -p 0", ignoring the configured gain and ppm.</summary>
+    [Fact]
+    public void Wfm_UsesTheConfiguredTuning()
+    {
+        var cmd = CommandFor(new WFM(NullLogger<WFM>.Instance));
+        Assert.Contains("-g 38.5 -p -27", cmd);
+        Assert.DoesNotContain("-g 42", cmd);
+    }
+
+    [Fact]
+    public void CaptureArgs_PutTheDeviceFirst()
+    {
+        Assert.Equal("-d 1 -g 0 -p 0", new SdrTuning(DeviceIndex: 1).CaptureArgs());
+        Assert.Equal("-g 0 -p 0", new SdrTuning().CaptureArgs());
+    }
 }

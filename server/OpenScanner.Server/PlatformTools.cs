@@ -57,6 +57,7 @@ public static class PlatformTools
 
     public static string RtlSdr => Resolve("rtl_sdr");
     public static string RtlFm => Resolve("rtl_fm");
+    public static string RtlTest => Resolve("rtl_test");
     public static string Ffmpeg => Resolve("ffmpeg");
     public static string DsdFme => Resolve("dsd-fme");
 
