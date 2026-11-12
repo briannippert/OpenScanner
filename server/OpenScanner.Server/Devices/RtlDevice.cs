@@ -1352,37 +1352,9 @@ public class RtlDevice : BackgroundService, IRadioSource
         return totalBytesRead;
     }
 
-    /// <summary>
-    /// Shifts a proposed tuner centre until no channel sits within <see cref="DcGuardMHz"/> of
-    /// it, while keeping every channel inside the capture window. Returns the original centre
-    /// if no clear offset exists — the window is the harder constraint, and losing one channel
-    /// to the DC spike beats losing several off the edge.
-    /// </summary>
-    internal static double NudgeOffChannels(double center, List<Channel> sorted, double spreadMHz)
-    {
-        // How much the centre may move before a channel falls outside the 2.4 MHz window.
-        double slack = (2.4 - spreadMHz) / 2.0;
-        if (slack <= 0) return center;
-
-        bool IsClear(double candidate) =>
-            sorted.All(c => Math.Abs(c.Frequency - candidate) > DcGuardMHz);
-
-        if (IsClear(center)) return center;
-
-        // Try progressively larger nudges either side, staying inside the window.
-        for (double step = DcGuardMHz; step <= slack; step += DcGuardMHz)
-        {
-            if (IsClear(center + step)) return center + step;
-            if (IsClear(center - step)) return center - step;
-        }
-        return center;
-    }
-
-    /// <summary>
-    /// Keep-out radius around the tuner centre, in MHz. One detection FFT bin at the 1.024 MHz
-    /// scan rate is 1 kHz, so 10 kHz is comfortably clear of the residual DC bin.
-    /// </summary>
-    private const double DcGuardMHz = 0.01;
+    /// <inheritdoc cref="ScanBanks.NudgeOffChannels"/>
+    internal static double NudgeOffChannels(double center, List<Channel> sorted, double spreadMHz) =>
+        ScanBanks.NudgeOffChannels(center, sorted, spreadMHz);
 
     private List<double> CalculateScanCenters(List<Channel> channels)
     {
@@ -1431,59 +1403,7 @@ public class RtlDevice : BackgroundService, IRadioSource
     /// - FastScan: all channels span ≤ 2.4 MHz → single bank, SDR covers all simultaneously, runs continuously
     /// - FrequencyHop: channels span > 2.4 MHz → one bank per channel at its exact frequency, dwell-hop through each
     /// </summary>
-    private List<ScanBank> CalculateScanBanks(List<Channel> channels)
-    {
-        if (!channels.Any()) return new List<ScanBank>();
-        
-        var sorted = channels.OrderBy(c => c.Frequency).ToList();
-        var banks = new List<ScanBank>();
-
-        var minFreq = sorted.Min(c => c.Frequency);
-        var maxFreq = sorted.Max(c => c.Frequency);
-        var spread = maxFreq - minFreq;
-
-        if (spread <= 2.4 + 1e-9)
-        {
-            // FastScan: all channels fit in a single 2.4 MHz SDR window — no hopping needed.
-            // The centre must not land on a channel, or that channel sits on the DC spike and
-            // is the one channel the scanner can never hear. A single channel is offset by a
-            // fixed 0.25 MHz; the multi-channel midpoint was previously assumed to be clear of
-            // any channel, which is false whenever the set is symmetric about one of its own
-            // members (three channels evenly spaced, say).
-            double center = sorted.Count == 1
-                ? sorted[0].Frequency + 0.25
-                : NudgeOffChannels((minFreq + maxFreq) / 2.0, sorted, spread);
-
-            _logger.LogInformation($"ScanBank FastScan: {minFreq:F3}-{maxFreq:F3} MHz (spread: {spread:F2} MHz)");
-            banks.Add(new ScanBank
-            {
-                CenterFrequency = center,
-                Frequencies = sorted.Select(c => c.Frequency).ToList(),
-                SpreadMHz = spread,
-                Mode = ScanMode.FastScan,
-                DwellTimeMs = 0
-            });
-        }
-        else
-        {
-            // FrequencyHop: channels too spread for a single window — one bank per channel, cycle through each.
-            // Offset center by +0.25 MHz so the channel signal doesn't land on the DC spike bin.
-            foreach (var ch in sorted)
-            {
-                _logger.LogInformation($"ScanBank FrequencyHop: {ch.Frequency:F3} MHz");
-                banks.Add(new ScanBank
-                {
-                    CenterFrequency = ch.Frequency + 0.25,
-                    Frequencies = new List<double> { ch.Frequency },
-                    SpreadMHz = 0,
-                    Mode = ScanMode.FrequencyHop,
-                    DwellTimeMs = 1500
-                });
-            }
-        }
-        
-        return banks;
-    }
+    private List<ScanBank> CalculateScanBanks(List<Channel> channels) => ScanBanks.Build(channels, _logger);
 
     /// <summary>
     /// Bins per detection FFT. At the 1.024 MHz scan rate this is 1 kHz per bin, fine enough
