@@ -87,6 +87,21 @@ public class Channel
     /// </summary>
     public int? DmrTalkgroup { get; set; }
 
+    /// <summary>
+    /// The SDR this channel is pinned to in Manual assignment mode (an
+    /// <see cref="SdrDeviceConfig.Id"/>), or null to let the planner place it.
+    /// Ignored in Auto mode.
+    /// </summary>
+    public string? SdrDeviceId { get; set; }
+
+    /// <summary>
+    /// Whether this channel is digital voice (decoded by dsd-fme) or analog. Digital
+    /// decoding and analog listening want different tuner gain, so this drives which
+    /// gain an SDR runs at.
+    /// </summary>
+    [JsonIgnore]
+    public GainClass GainClass => GainClasses.ForMode(Mode);
+
     public Channel() { }
 
     public Channel(double frequency, string alphaTag, string description, string mode = "P25", string type = "RM", string tone = "", string tag = "", string license = "", bool avoid = false, int? dmrSlot = null, int? dmrColorCode = null, int? dmrTalkgroup = null)

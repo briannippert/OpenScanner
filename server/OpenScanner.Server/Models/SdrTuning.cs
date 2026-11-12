@@ -10,9 +10,23 @@ namespace OpenScanner.Server.Models;
 /// </summary>
 /// <param name="GainDb">Tuner gain in dB; 0 selects the tuner's own AGC.</param>
 /// <param name="Ppm">Crystal frequency error correction, in parts per million.</param>
-public readonly record struct SdrTuning(double GainDb = 0, double Ppm = 0)
+/// <param name="DeviceIndex">
+/// The librtlsdr device index to open, or null for the tool's default (index 0). This is
+/// deliberately an index and not a serial: <c>-d</c> tries an all-digit argument as an index
+/// before it tries it as a serial, so the stock serials (<c>00000001</c>, <c>00000002</c>, …)
+/// would silently open the wrong dongle. Callers resolve a device's serial to its current
+/// index with <see cref="Devices.RtlDeviceEnumerator"/> just before launching a capture.
+/// </param>
+public readonly record struct SdrTuning(double GainDb = 0, double Ppm = 0, int? DeviceIndex = null)
 {
     private static string Num(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// The flags rtl_sdr and rtl_fm share: device, tuner gain and crystal correction. Both
+    /// tools spell them the same way and both treat <c>-g 0</c> as AUTO.
+    /// </summary>
+    public string CaptureArgs() =>
+        (DeviceIndex is int d ? $"-d {d} " : "") + $"-g {Num(GainDb)} -p {Num(Ppm)}";
 
     /// <summary>
     /// The rtl_fm front-end flags. Beyond gain and ppm these carry two corrections that were
@@ -25,5 +39,9 @@ public readonly record struct SdrTuning(double GainDb = 0, double Ppm = 0)
     /// <c>-E dc</c> removes the DC offset that would otherwise sit in the middle of the
     /// demodulated audio as a constant bias.
     /// </summary>
-    public string RtlFmArgs() => $"-g {Num(GainDb)} -p {Num(Ppm)} -F 9 -E dc";
+    /// <param name="includeFilters">
+    /// False drops <c>-F 9 -E dc</c>, for wideband FM where the narrowband filter isn't wanted.
+    /// </param>
+    public string RtlFmArgs(bool includeFilters = true) =>
+        includeFilters ? $"{CaptureArgs()} -F 9 -E dc" : CaptureArgs();
 }

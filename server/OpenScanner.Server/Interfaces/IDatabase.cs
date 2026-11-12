@@ -254,6 +254,19 @@ public interface IDatabase
     // Settings
 
     /// <summary>
+    /// Pins channels to an SDR for Manual assignment mode, or unpins them with null.
+    /// Kept separate from <see cref="UpdateChannelAsync"/> so that editing a channel from a
+    /// client that doesn't know about SDR assignment can't silently clear it.
+    /// </summary>
+    Task SetChannelSdrDeviceAsync(IEnumerable<int> channelIds, string? deviceId);
+
+    /// <summary>Retrieves every SDR dongle OpenScanner has seen, in display order.</summary>
+    Task<IEnumerable<SdrDeviceConfig>> GetSdrDevicesAsync();
+
+    /// <summary>Inserts or updates the stored settings for one SDR dongle.</summary>
+    Task UpsertSdrDeviceAsync(SdrDeviceConfig device);
+
+    /// <summary>
     /// Retrieves a system setting by key.
     /// </summary>
     /// <param name="key">The setting key.</param>
