@@ -28,14 +28,38 @@ const DEFAULT_ZOOM = 4;
 // Density ramp for the heat layer: cool and dim where calls are sparse, through magenta and
 // orange to bright yellow where they pile up. Lightness rises along with the hue change, so
 // the order still reads for colour-blind viewers (unlike a blue-green-red rainbow).
-// The plugin maps the accumulated alpha of overlapping points onto this ramp: one call sits
-// at HEAT_MIN_OPACITY, and each overlapping call pushes the spot further up.
-const HEAT_MIN_OPACITY = 0.35;
+//
+// The plugin bins points into screen cells, sums each cell, and draws it with opacity
+// sum / max (never below HEAT_MIN_OPACITY); the accumulated opacity is then mapped onto
+// this ramp. With the default max of 1 a single call is already fully "hot", so max is
+// recomputed for each zoom level from the data (see heatMax) and a lone call sits at the
+// cool end.
+const HEAT_RADIUS = 18;
+const HEAT_BLUR = 18;
+const HEAT_MIN_OPACITY = 0.38;
 const HEAT_STOPS: [number, string][] = [
-  [0.2, '#4a5fe8'], [0.45, '#9a4be0'], [0.65, '#e5488f'], [0.82, '#ff8f3a'], [1, '#ffe94a'],
+  [0.2, '#5468f0'], [0.5, '#9a4be0'], [0.7, '#e5488f'], [0.86, '#ff8f3a'], [1, '#ffe94a'],
 ];
 const HEAT_GRADIENT: Record<number, string> = Object.fromEntries(HEAT_STOPS);
 const HEAT_LEGEND = `linear-gradient(90deg, ${HEAT_STOPS.map(([, c]) => c).join(', ')})`;
+
+/**
+ * The cell total that should read as fully hot at this zoom: the 90th percentile of the
+ * busiest cells, so one address with dozens of calls does not flatten everywhere else to
+ * the cool end. Mirrors the plugin's own binning (cells of half the drawn radius).
+ */
+function heatMax(points: { x: number; y: number }[]): number {
+  const cell = (HEAT_RADIUS + HEAT_BLUR) / 2;
+  const sums = new Map<string, number>();
+  for (const p of points) {
+    const key = `${Math.floor(p.x / cell)}:${Math.floor(p.y / cell)}`;
+    sums.set(key, (sums.get(key) ?? 0) + 1);
+  }
+  const sorted = [...sums.values()].sort((a, b) => a - b);
+  const p90 = sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.9))] : 1;
+  // Never below 4: with only a handful of calls, one call must not count as "many".
+  return Math.max(4, p90);
+}
 
 /** How long an arrival callout stays up (the fade is inside this window). */
 export const CALLOUT_MS = 6000;
@@ -165,7 +189,8 @@ const CallMap: React.FC<Props> = ({ calls, layers, selectedId, fresh, fitKey, on
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
     markerLayerRef.current = L.layerGroup().addTo(map);
-    heatRef.current = heatLayer([], { radius: 26, blur: 16, minOpacity: HEAT_MIN_OPACITY, maxZoom: 11, gradient: HEAT_GRADIENT });
+    heatRef.current = // maxZoom 0 turns off the plugin's own per-zoom scaling; heatMax does that job from the data.
+    heatRef.current = heatLayer([], { radius: HEAT_RADIUS, blur: HEAT_BLUR, minOpacity: HEAT_MIN_OPACITY, maxZoom: 0, max: 4, gradient: HEAT_GRADIENT });
     mapRef.current = map;
     const markers = markersRef.current;
 
@@ -255,6 +280,14 @@ const CallMap: React.FC<Props> = ({ calls, layers, selectedId, fresh, fitKey, on
     }
     heat.setLatLngs(calls.map(c => [c.lat, c.lon, 1]));
     if (!map.hasLayer(heat)) heat.addTo(map);
+    // Rescale for the zoom level: zooming out merges calls into fewer, fuller cells.
+    const rescale = () => {
+      const zoom = map.getZoom();
+      heat.setOptions({ max: heatMax(calls.map(c => map.project([c.lat, c.lon], zoom))) });
+    };
+    rescale();
+    map.on('zoomend', rescale);
+    return () => { map.off('zoomend', rescale); };
   }, [calls, layers]);
 
   // Fit to the data when asked (new time range, first load).
