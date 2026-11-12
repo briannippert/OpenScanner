@@ -122,6 +122,15 @@ export function useAudioPipeline(volume: number, options: { live?: boolean } = {
 
     // Fallback (no AudioWorklet, e.g. http://): schedule a buffer source
     // into the analyser with a jitter buffer.
+    const currentTime = ctx.currentTime;
+    const JITTER_BUFFER = 0.2;
+    const MAX_DRIFT = 0.6;
+    // Already scheduled further ahead than we are willing to lag (a burst, e.g. the pre-roll
+    // replayed when a listener joins mid-stream). Drop the chunk: moving the cursor back
+    // instead would schedule it on top of audio that is still queued, and the two play at once.
+    if (nextStartTime.current > currentTime + MAX_DRIFT) return;
+    if (nextStartTime.current < currentTime) nextStartTime.current = currentTime + JITTER_BUFFER;
+
     const frames = left.length;
     const stereo = left !== right;
     // Buffer rate is the source PCM rate (48000), not ctx.sampleRate:
@@ -135,12 +144,6 @@ export function useAudioPipeline(volume: number, options: { live?: boolean } = {
     source.buffer = audioBuffer;
     source.connect(analyser);
 
-    const currentTime = ctx.currentTime;
-    const JITTER_BUFFER = 0.2;
-    const MAX_DRIFT = 0.6;
-    if (nextStartTime.current < currentTime || nextStartTime.current > currentTime + MAX_DRIFT) {
-      nextStartTime.current = currentTime + JITTER_BUFFER;
-    }
     source.start(nextStartTime.current);
     nextStartTime.current += audioBuffer.duration;
   }, []);

@@ -25,7 +25,7 @@ Calls transcribed before you turned the feature on are not on the map yet. Under
 |---|---|
 | **1h · 6h · 24h · 7d · 30d** | How far back to show calls. |
 | **All · Police · Fire/EMS** | Limit to one service. |
-| **Markers · Heat · Both** | Show each call as a marker, as a heat map of where calls cluster, or both. |
+| **Markers · Heat · Both** | Show each call as a marker, as a heat map of where calls cluster, or both. Heat runs from purple-blue (a single call) through pink and orange to yellow (many calls in one spot). |
 | **Category chips** | Show or hide a group of call types. **Call types** lets you pick individual types. |
 | **Follow new calls** | Jump to each new call as it arrives. |
 | **Live audio** | Listen to the live scanner in this tab. Off by default, so the map doesn't double up with the dashboard. |

@@ -432,6 +432,26 @@ public class DatabaseTests : IDisposable
     }
 
     [Fact]
+    public async Task History_CarriesIncidentInsights_ButNotRoutineOnes()
+    {
+        var now = DateTime.UtcNow;
+        await _db.SaveTransmissionAsync(Tx("inc", now.AddMinutes(-2)));
+        await _db.SaveTransmissionAsync(Tx("chatter", now.AddMinutes(-1)));
+        await _db.SaveTransmissionAsync(Tx("plain", now));
+        await _db.SaveInsightAsync(Incident("inc", "fire", "fire"));
+        await _db.SaveInsightAsync(new TransmissionInsight { TransmissionId = "chatter", AnalyzedAt = now.ToString("o") });
+
+        var history = (await _db.GetHistoryAsync()).ToDictionary(l => l.Id);
+
+        Assert.Equal("fire", history["inc"].Insight?.CallType);
+        Assert.True(history["inc"].Insight!.IsIncident);
+        Assert.Null(history["chatter"].Insight);
+        Assert.Null(history["plain"].Insight);
+        Assert.Equal("fire", (await _db.GetTransmissionByIdAsync("inc"))!.Insight?.CallType);
+        Assert.Equal("fire", (await _db.SearchTransmissionsAsync("Engine")).FirstOrDefault(l => l.Id == "inc")?.Insight?.CallType);
+    }
+
+    [Fact]
     public async Task DeleteTransmission_RemovesItsInsight()
     {
         await _db.SaveTransmissionAsync(Tx("gone", DateTime.UtcNow));

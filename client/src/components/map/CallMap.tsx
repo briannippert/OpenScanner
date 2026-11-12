@@ -4,7 +4,6 @@ import NavigationIcon from '@mui/icons-material/Navigation';
 import L, { heatLayer, type HeatLayer } from './leaflet';
 import type { MapCall } from '../../types';
 import { CALL_GROUPS, callTypeLabel, groupOf } from '../../lib/callTypes';
-import { green } from '../../viz/ramp';
 
 export type LayerMode = 'markers' | 'heat' | 'both';
 
@@ -26,13 +25,17 @@ interface Props {
 const DEFAULT_CENTER: L.LatLngExpression = [39.8, -98.6]; // continental US
 const DEFAULT_ZOOM = 4;
 
-// Single-hue (scanner green) magnitude ramp for the heat layer: density is a magnitude,
-// so it gets a sequential ramp rather than categorical colors. The low end starts mid-ramp
-// so a lone incident still reads against the dark tiles. maxZoom is kept low because the
-// plugin scales intensity down at zooms below it.
-const HEAT_GRADIENT: Record<number, string> = {
-  0.15: green(0.45), 0.4: green(0.65), 0.7: green(0.85), 1: green(1),
-};
+// Density ramp for the heat layer: cool and dim where calls are sparse, through magenta and
+// orange to bright yellow where they pile up. Lightness rises along with the hue change, so
+// the order still reads for colour-blind viewers (unlike a blue-green-red rainbow).
+// The plugin maps the accumulated alpha of overlapping points onto this ramp: one call sits
+// at HEAT_MIN_OPACITY, and each overlapping call pushes the spot further up.
+const HEAT_MIN_OPACITY = 0.35;
+const HEAT_STOPS: [number, string][] = [
+  [0.2, '#4a5fe8'], [0.45, '#9a4be0'], [0.65, '#e5488f'], [0.82, '#ff8f3a'], [1, '#ffe94a'],
+];
+const HEAT_GRADIENT: Record<number, string> = Object.fromEntries(HEAT_STOPS);
+const HEAT_LEGEND = `linear-gradient(90deg, ${HEAT_STOPS.map(([, c]) => c).join(', ')})`;
 
 /** How long an arrival callout stays up (the fade is inside this window). */
 export const CALLOUT_MS = 6000;
@@ -162,7 +165,7 @@ const CallMap: React.FC<Props> = ({ calls, layers, selectedId, fresh, fitKey, on
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
     markerLayerRef.current = L.layerGroup().addTo(map);
-    heatRef.current = heatLayer([], { radius: 26, blur: 16, minOpacity: 0.5, maxZoom: 11, gradient: HEAT_GRADIENT });
+    heatRef.current = heatLayer([], { radius: 26, blur: 16, minOpacity: HEAT_MIN_OPACITY, maxZoom: 11, gradient: HEAT_GRADIENT });
     mapRef.current = map;
     const markers = markersRef.current;
 
@@ -387,6 +390,20 @@ const CallMap: React.FC<Props> = ({ calls, layers, selectedId, fresh, fitKey, on
         },
       }}
     />
+    {layers !== 'markers' && calls.length > 0 && (
+      <Box
+        aria-label="Heat map colours: purple-blue is fewer calls, yellow is more"
+        sx={{
+          position: 'absolute', zIndex: 600, top: 10, right: 10, px: 1, py: 0.5, borderRadius: 1.5,
+          bgcolor: 'surface.raised', border: '1px solid', borderColor: 'surface.borderStrong',
+          display: 'flex', alignItems: 'center', gap: 0.75, pointerEvents: 'none',
+        }}
+      >
+        <Typography variant="caption" color="text.secondary">Fewer</Typography>
+        <Box sx={{ width: 72, height: 8, borderRadius: 999, background: HEAT_LEGEND }} />
+        <Typography variant="caption" color="text.secondary">More calls</Typography>
+      </Box>
+    )}
     {edgeToasts.length > 0 && (
       <Box
         aria-live="polite"
