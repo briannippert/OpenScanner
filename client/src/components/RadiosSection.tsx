@@ -1,35 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
     Alert, Box, Button, Switch, TextField, ToggleButton, ToggleButtonGroup, Tooltip, Typography,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import StatusChip from './common/StatusChip';
-import type { AssignmentMode, PlanDevice, Radio, RadiosResponse, ScannerState, SdrPlan } from '../types';
+import type { AssignmentMode, PlanDevice, Radio, RadiosResponse, ScannerState } from '../types';
+import { planSummary, roleSummary } from '../lib/radios';
 import type { RadioPatch } from '../hooks/useRadios';
 
 const MONO = '"Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
-
-/** One line describing a plan's coverage, e.g. "5 of 7 channels fast-scanned across 2 SDRs · 2 hopping on SDR 2". */
-export const planSummary = (plan: SdrPlan): string => {
-    const busy = plan.devices.filter(d => d.role !== 'Idle');
-    const parts = [
-        `${plan.fastScanned} of ${plan.totalChannels} channel${plan.totalChannels === 1 ? '' : 's'} fast-scanned` +
-        ` across ${busy.length} SDR${busy.length === 1 ? '' : 's'}`,
-        ...busy.filter(d => d.role === 'Hop').map(d => `${d.frequencies.length} hopping on ${d.label}`),
-    ];
-    if (plan.unscannedChannelIds.length > 0) parts.push(`${plan.unscannedChannelIds.length} not scanned`);
-    return parts.join(' · ');
-};
-
-/** What an SDR is doing, e.g. "Fast scan 155.000–156.200 MHz · 6 channels". */
-export const roleSummary = (p?: PlanDevice): string => {
-    if (!p || p.role === 'Idle') return 'Idle: no channels assigned';
-    const n = `${p.frequencies.length} channel${p.frequencies.length === 1 ? '' : 's'}`;
-    if (p.role === 'Hop') return `Hopping · ${n} (one at a time)`;
-    const lo = Math.min(...p.frequencies).toFixed(3);
-    const hi = Math.max(...p.frequencies).toFixed(3);
-    return lo === hi ? `Fast scan ${lo} MHz` : `Fast scan ${lo}–${hi} MHz · ${n}`;
-};
 
 /** Measured crystal error on this SDR's strongest active channel, as a ppm figure. */
 const measuredPpm = (state: ScannerState | undefined, deviceId: string, single: boolean) => {
@@ -50,8 +29,9 @@ const measuredPpm = (state: ScannerState | undefined, deviceId: string, single: 
 const NumberField: React.FC<{
     label: string; value: number; min: number; max: number; step?: number; onCommit: (v: number) => void; width?: number;
 }> = ({ label, value, min, max, step = 0.1, onCommit, width = 96 }) => {
+    // Seeded from the saved value; the caller keys this by that value, so a save (or a
+    // change from elsewhere) remounts it with the new one.
     const [draft, setDraft] = useState(String(value));
-    useEffect(() => setDraft(String(value)), [value]);
     const commit = () => {
         const v = parseFloat(draft);
         if (!Number.isFinite(v) || v < min || v > max) { setDraft(String(value)); return; }
@@ -72,6 +52,22 @@ const NumberField: React.FC<{
     );
 };
 
+/** The SDR's name, saved on blur or Enter. Keyed by the saved name, like NumberField. */
+const LabelField: React.FC<{ value: string; onCommit: (v: string) => void }> = ({ value, onCommit }) => {
+    const [label, setLabel] = useState(value);
+    return (
+        <TextField
+            size="small"
+            value={label}
+            inputProps={{ 'aria-label': 'SDR name', maxLength: 64 }}
+            onChange={e => setLabel(e.target.value)}
+            onBlur={() => { if (label.trim() && label !== value) onCommit(label.trim()); else setLabel(value); }}
+            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            sx={{ width: 180 }}
+        />
+    );
+};
+
 const RadioCard: React.FC<{
     radio: Radio;
     planned?: PlanDevice;
@@ -79,8 +75,6 @@ const RadioCard: React.FC<{
     single: boolean;
     onUpdate: (patch: RadioPatch) => void;
 }> = ({ radio, planned, scannerState, single, onUpdate }) => {
-    const [label, setLabel] = useState(radio.label);
-    useEffect(() => setLabel(radio.label), [radio.label]);
     const live = scannerState?.devices?.find(d => d.id === radio.id);
     const measured = measuredPpm(scannerState, radio.id, single);
 
@@ -98,15 +92,7 @@ const RadioCard: React.FC<{
             sx={{ border: '1px solid', borderColor: 'surface.border', borderRadius: 1.5, p: 1.5, mb: 1.5 }}
         >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-                <TextField
-                    size="small"
-                    value={label}
-                    inputProps={{ 'aria-label': 'SDR name', maxLength: 64 }}
-                    onChange={e => setLabel(e.target.value)}
-                    onBlur={() => { if (label.trim() && label !== radio.label) onUpdate({ label: label.trim() }); }}
-                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                    sx={{ width: 180 }}
-                />
+                <LabelField key={radio.label} value={radio.label} onCommit={v => onUpdate({ label: v })} />
                 <StatusChip label={chip.label} tone={chip.tone} sx={{ fontSize: 10 }} />
                 <Box flexGrow={1} />
                 <Tooltip title={radio.enabled ? 'Stop using this SDR' : 'Use this SDR'}>
@@ -131,10 +117,10 @@ const RadioCard: React.FC<{
             )}
 
             <Box sx={{ display: 'flex', gap: 1.5, mt: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
-                <NumberField label="Analog dB" value={radio.gainAnalog} min={0} max={60} onCommit={v => onUpdate({ gainAnalog: v })} />
-                <NumberField label="Digital dB" value={radio.gainDigital} min={0} max={60} onCommit={v => onUpdate({ gainDigital: v })} />
-                <NumberField label="Mixed dB" value={radio.gainMixed} min={0} max={60} onCommit={v => onUpdate({ gainMixed: v })} />
-                <NumberField label="PPM" value={radio.ppm} min={-500} max={500} onCommit={v => onUpdate({ ppm: v })} />
+                <NumberField label="Analog dB" key={`gainAnalog-${radio.gainAnalog}`} value={radio.gainAnalog} min={0} max={60} onCommit={v => onUpdate({ gainAnalog: v })} />
+                <NumberField label="Digital dB" key={`gainDigital-${radio.gainDigital}`} value={radio.gainDigital} min={0} max={60} onCommit={v => onUpdate({ gainDigital: v })} />
+                <NumberField label="Mixed dB" key={`gainMixed-${radio.gainMixed}`} value={radio.gainMixed} min={0} max={60} onCommit={v => onUpdate({ gainMixed: v })} />
+                <NumberField label="PPM" key={`ppm-${radio.ppm}`} value={radio.ppm} min={-500} max={500} onCommit={v => onUpdate({ ppm: v })} />
                 {measured && (
                     <Tooltip title={`Measured on ${measured.label}: ${(measured.offsetHz / 1000).toFixed(2)} kHz off`}>
                         <Button size="small" variant="outlined" onClick={() => onUpdate({ ppm: Number((radio.ppm + measured.ppm).toFixed(1)) })}>

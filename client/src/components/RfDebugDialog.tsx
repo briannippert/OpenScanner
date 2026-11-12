@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Typography, TextField, Slider, Button, Paper } from '@mui/material';
+import { Box, Typography, TextField, Slider, Button, Paper, MenuItem } from '@mui/material';
 import MonitorIcon from '@mui/icons-material/Monitor';
 import type { ScannerState } from '../types';
 import FormDialog from './common/FormDialog';
@@ -14,14 +14,22 @@ interface Props {
   onDebugFreqChange: (v: string) => void;
   debugGain: number;
   onDebugGainChange: (v: number) => void;
+  /** The SDR to sweep with, by id; empty for the first. */
+  debugDevice?: string;
+  onDebugDeviceChange?: (id: string) => void;
   onTune: () => void;
 }
 
 const RfDebugDialog: React.FC<Props> = ({
-  open, onClose, scannerState, debugFreq, onDebugFreqChange, debugGain, onDebugGainChange, onTune,
+  open, onClose, scannerState, debugFreq, onDebugFreqChange, debugGain, onDebugGainChange,
+  debugDevice = '', onDebugDeviceChange, onTune,
 }) => {
+  // Only dongles that are plugged in and enabled can sweep.
+  const sdrs = (scannerState.devices ?? []).filter(d => d.attached && d.enabled);
+  const sweeping = sdrs.find(d => d.status === 'DEBUG');
   const tuneDisabled =
     scannerState.status === 'DEBUG' &&
+    (!debugDevice || sweeping?.id === debugDevice) &&
     scannerState.currentFrequency === Number(debugFreq) &&
     scannerState.gain === debugGain;
 
@@ -35,6 +43,18 @@ const RfDebugDialog: React.FC<Props> = ({
       actions={<Button onClick={onClose} color="inherit">Close</Button>}
     >
       <Box sx={{ mb: 3, display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}>
+        {sdrs.length > 1 && onDebugDeviceChange && (
+          <TextField
+            select
+            label="SDR"
+            size="small"
+            value={debugDevice || sdrs[0].id}
+            onChange={(e) => onDebugDeviceChange(e.target.value)}
+            sx={{ width: 160 }}
+          >
+            {sdrs.map(d => <MenuItem key={d.id} value={d.id}>{d.label}</MenuItem>)}
+          </TextField>
+        )}
         <TextField
           label="Center Frequency"
           variant="outlined"
@@ -83,7 +103,7 @@ const RfDebugDialog: React.FC<Props> = ({
         <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', mb: 1 }}>
           <Typography variant="caption" sx={{ color: 'warning.main', fontWeight: 700, minWidth: 100 }}>SYSTEM NOTE</Typography>
           <Typography variant="caption" color="text.secondary">
-            Debug mode requires exclusive hardware access. Scanning and decoding are suspended while active.
+            Debug mode requires exclusive use of the SDR it sweeps with. That SDR stops scanning and decoding while active; any others keep scanning.
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>

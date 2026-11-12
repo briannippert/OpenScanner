@@ -15,6 +15,15 @@ A channel is one frequency for the scanner to listen on. Open **Manage Channels*
 | **Tag** | Optional label, such as `Fire` or `EMS`. |
 | **Avoid Channel** | Leave the channel out of the scan without deleting it. |
 
+## SDR
+
+With more than one dongle, the channel list shows which SDR carries each channel.
+
+- In **Auto** mode it shows where OpenScanner put the channel, e.g. **Roof · fast** (fast-scanned) or **Attic · hop**.
+- In **Manual** mode it is a dropdown: pick an SDR to pin the channel to it, or **Auto** to let OpenScanner place it. Placed channels show **AUTO → SDR name**; a channel that can't be placed without moving one of your pins shows **NOT SCANNED**.
+
+See [Multiple SDRs](multiple-sdrs.md).
+
 ## Modes
 
 | Mode | Use for |

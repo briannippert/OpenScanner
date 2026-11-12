@@ -29,8 +29,13 @@ export const useRadios = (active: boolean) => {
     }, []);
 
     useEffect(() => {
-        if (active) void refresh();
-    }, [active, refresh]);
+        if (!active) return;
+        let cancelled = false;
+        apiJson<unknown>('/api/radios').then(data => {
+            if (!cancelled && isRadiosResponse(data)) setRadios(data);
+        });
+        return () => { cancelled = true; };
+    }, [active]);
 
     const write = useCallback(async (what: string, path: string, init: RequestInit) => {
         try {
