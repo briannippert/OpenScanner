@@ -298,7 +298,7 @@ public class Database : IDatabase
     public async Task<IEnumerable<CallLog>> GetHistoryAsync(int limit = 100)
     {
         using var conn = GetConnection();
-        return await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetHistory.sql"), new { Limit = limit });
+        return await WithInsightsAsync(conn, await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetHistory.sql"), new { Limit = limit }));
     }
     
     /// <inheritdoc />
@@ -352,7 +352,9 @@ public class Database : IDatabase
     public async Task<CallLog?> GetTransmissionByIdAsync(string id)
     {
         using var conn = GetConnection();
-        return await conn.QueryFirstOrDefaultAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetById.sql"), new { Id = id });
+        var log = await conn.QueryFirstOrDefaultAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetById.sql"), new { Id = id });
+        if (log != null) await WithInsightsAsync(conn, new[] { log });
+        return log;
     }
 
     /// <inheritdoc />
@@ -387,8 +389,8 @@ public class Database : IDatabase
     public async Task<IEnumerable<CallLog>> GetTransmissionsAsync(string year, string month, string day, string alphaTag, double frequency)
     {
         using var conn = GetConnection();
-        return await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetFiltered.sql"), 
-            new { Year = year, Month = month, Day = day, AlphaTag = alphaTag, Frequency = frequency });
+        return await WithInsightsAsync(conn, await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetFiltered.sql"),
+            new { Year = year, Month = month, Day = day, AlphaTag = alphaTag, Frequency = frequency }));
     }
 
     /// <inheritdoc />
@@ -396,7 +398,7 @@ public class Database : IDatabase
     {
         using var conn = GetConnection();
         var searchTerm = $"%{query}%";
-        return await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/Search.sql"), new { Query = searchTerm });
+        return await WithInsightsAsync(conn, await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/Search.sql"), new { Query = searchTerm }));
     }
 
     /// <inheritdoc />
@@ -427,7 +429,7 @@ public class Database : IDatabase
     public async Task<IEnumerable<CallLog>> GetFavoritesAsync()
     {
         using var conn = GetConnection();
-        return await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetFavorites.sql"));
+        return await WithInsightsAsync(conn, await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetFavorites.sql")));
     }
 
     /// <inheritdoc />
@@ -560,6 +562,28 @@ public class Database : IDatabase
         using var conn = GetConnection();
         var result = await conn.QueryAsync<(string Key, string Value)>("SELECT key, value FROM settings");
         return result.ToDictionary(x => x.Key, x => x.Value);
+    }
+
+    /// <summary>
+    /// Attaches the stored AI analysis to each log that was classed as an incident, so calls
+    /// loaded from history show the same call type and summary as ones that arrived live.
+    /// Routine-chatter rows are left off: the client only shows incidents.
+    /// </summary>
+    private static async Task<List<CallLog>> WithInsightsAsync(System.Data.IDbConnection conn, IEnumerable<CallLog> logs)
+    {
+        var list = logs.ToList();
+        var byId = new Dictionary<string, CallLog>(list.Count);
+        foreach (var log in list) byId[log.Id] = log;
+        // Chunked to stay well under SQLite's bound-parameter limit.
+        foreach (var ids in byId.Keys.Chunk(500))
+        {
+            var insights = await conn.QueryAsync<TransmissionInsight>(SqlLoader.GetSql("Insights/GetIncidentsByIds.sql"), new { Ids = ids });
+            foreach (var insight in insights)
+            {
+                if (byId.TryGetValue(insight.TransmissionId, out var log)) log.Insight = insight;
+            }
+        }
+        return list;
     }
 
     /// <inheritdoc />
