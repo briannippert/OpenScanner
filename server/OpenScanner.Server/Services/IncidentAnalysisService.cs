@@ -34,6 +34,7 @@ public class IncidentAnalysisService : IHostedService, IDisposable
     private readonly Channel<CallLog> _queue = System.Threading.Channels.Channel.CreateUnbounded<CallLog>();
     private readonly CancellationTokenSource _cts = new();
     private Task? _worker;
+    private int _disposed;
 
     // Backfill state, guarded by _lock.
     private readonly object _lock = new();
@@ -72,7 +73,7 @@ public class IncidentAnalysisService : IHostedService, IDisposable
     {
         _transcription.OnTranscriptionCompleted -= OnTranscriptionCompleted;
         StopBackfill();
-        _cts.Cancel();
+        if (Volatile.Read(ref _disposed) == 0) _cts.Cancel();
         return Task.CompletedTask;
     }
 
@@ -306,6 +307,9 @@ public class IncidentAnalysisService : IHostedService, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
+        // The service is registered as a singleton and as a hosted service that resolves to
+        // that same instance, so the container disposes it twice. Only the first call counts.
+        if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
         _cts.Cancel();
         _cts.Dispose();
         GC.SuppressFinalize(this);

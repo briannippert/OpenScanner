@@ -203,6 +203,18 @@ public class IncidentAnalysisServiceTests
         Assert.Equal(expected, IncidentAnalysisService.IsWorthAnalyzing(text));
     }
 
+    [Fact]
+    public async Task Dispose_IsSafeToCallTwice()
+    {
+        // DI disposes it twice: once as the singleton, once as the hosted service.
+        var service = CreateService(out _);
+        await service.StartAsync(CancellationToken.None);
+        await service.StopAsync(CancellationToken.None);
+        service.Dispose();
+        service.Dispose();
+        await service.StopAsync(CancellationToken.None);
+    }
+
     private class FakeHandler : HttpMessageHandler
     {
         public Dictionary<string, (HttpStatusCode Status, string Body)> Responses { get; } = new();
