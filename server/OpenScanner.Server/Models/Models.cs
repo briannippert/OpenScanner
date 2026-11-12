@@ -297,6 +297,14 @@ public class CallLog
     /// </summary>
     public bool IsFavorite { get; set; }
 
+    /// <summary>
+    /// AI call analysis (call type, summary, incident location) from the remote
+    /// WhisperServer's <c>/transmission</c> endpoint, when available. Not a column on
+    /// <c>transmissions</c>: it lives in <c>transmission_insights</c> and is attached to
+    /// live broadcasts.
+    /// </summary>
+    public TransmissionInsight? Insight { get; set; }
+
     public CallLog() { }
 
     public CallLog(string id, string timestamp, double frequency, string alphaTag, string description, double? lat, double? lon, string? audioPath, double? duration, string? transcription = null, int? sourceID = null, int? targetID = null, string? detectedTone = null, string? speakerChain = null)
@@ -668,3 +676,82 @@ public record ScannerState(
     SdrDeviceState[]? Devices = null
 );
         
+/// <summary>
+/// The AI analysis of one transmission's transcript, as returned by the remote
+/// WhisperServer's <c>/transmission</c> endpoint. Routine chatter (the server returns
+/// <c>{}</c>) is stored with <see cref="IsIncident"/> false so it is not re-analyzed.
+/// </summary>
+public class TransmissionInsight
+{
+    /// <summary>The transmission this analysis belongs to.</summary>
+    public string TransmissionId { get; set; } = string.Empty;
+    /// <summary>When the analysis ran (round-trip UTC).</summary>
+    public string AnalyzedAt { get; set; } = string.Empty;
+    /// <summary>False for routine chatter.</summary>
+    public bool IsIncident { get; set; }
+    /// <summary>Call type, e.g. fire, medical, traffic_stop.</summary>
+    public string? CallType { get; set; }
+    /// <summary>police or fire.</summary>
+    public string? Service { get; set; }
+    /// <summary>One-line summary of the call.</summary>
+    public string? Summary { get; set; }
+    /// <summary>e.g. dispatched, en_route, on_scene, cleared.</summary>
+    public string? IncidentStatus { get; set; }
+    /// <summary>Address as spoken.</summary>
+    public string? Address { get; set; }
+    /// <summary>Business or landmark name.</summary>
+    public string? PlaceName { get; set; }
+    /// <summary>Cross street, if given.</summary>
+    public string? CrossStreet { get; set; }
+    /// <summary>City.</summary>
+    public string? City { get; set; }
+    /// <summary>State.</summary>
+    public string? State { get; set; }
+    /// <summary>The geocoder's matched address.</summary>
+    public string? MatchedAddress { get; set; }
+    /// <summary>Incident latitude, when geocoded.</summary>
+    public double? Lat { get; set; }
+    /// <summary>Incident longitude, when geocoded.</summary>
+    public double? Lon { get; set; }
+}
+
+/// <summary>A geolocated incident for the map: the insight plus its transmission.</summary>
+public class MapCall
+{
+    /// <summary>Transmission id.</summary>
+    public string Id { get; set; } = string.Empty;
+    /// <summary>Transmission start (round-trip UTC).</summary>
+    public string Timestamp { get; set; } = string.Empty;
+    /// <summary>Frequency in MHz.</summary>
+    public double Frequency { get; set; }
+    /// <summary>Channel name.</summary>
+    public string AlphaTag { get; set; } = string.Empty;
+    /// <summary>Recording filename (relative to /audio).</summary>
+    [JsonPropertyName("audio_path")]
+    public string? AudioPath { get; set; }
+    /// <summary>Recording length in seconds.</summary>
+    public double? Duration { get; set; }
+    /// <summary>Transcript.</summary>
+    public string? Transcription { get; set; }
+    /// <summary>Call type.</summary>
+    public string? CallType { get; set; }
+    /// <summary>police or fire.</summary>
+    public string? Service { get; set; }
+    /// <summary>Summary.</summary>
+    public string? Summary { get; set; }
+    /// <summary>Incident status.</summary>
+    public string? IncidentStatus { get; set; }
+    /// <summary>Address as spoken.</summary>
+    public string? Address { get; set; }
+    /// <summary>Business or landmark name.</summary>
+    public string? PlaceName { get; set; }
+    /// <summary>The geocoder's matched address.</summary>
+    public string? MatchedAddress { get; set; }
+    /// <summary>Incident latitude.</summary>
+    public double Lat { get; set; }
+    /// <summary>Incident longitude.</summary>
+    public double Lon { get; set; }
+}
+
+/// <summary>Filter for <see cref="MapCall"/> queries.</summary>
+public record MapCallFilter(string SinceUtc, string? UntilUtc, IReadOnlyList<string>? CallTypes, string? Service, int Limit);

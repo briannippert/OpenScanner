@@ -146,6 +146,14 @@ public class Database : IDatabase
             conn.Execute("INSERT INTO settings (key, value) VALUES ('TranscriptionModel', 'large-v3-turbo-q5_0')");
         }
 
+        // AI call analysis (remote WhisperServer /transmission). Off until the user
+        // enables it; the settings UI only offers it when the server supports it.
+        var aiCount = conn.ExecuteScalar<int>("SELECT count(*) FROM settings WHERE key = 'AiFeaturesEnabled'");
+        if (aiCount == 0)
+        {
+            conn.Execute("INSERT INTO settings (key, value) VALUES ('AiFeaturesEnabled', 'false')");
+        }
+
         // PowerDMS department slug, managed from the web-app settings.
         var powerDmsCount = conn.ExecuteScalar<int>("SELECT count(*) FROM settings WHERE key = 'PowerDmsDepartment'");
         if (powerDmsCount == 0)
@@ -433,7 +441,7 @@ public class Database : IDatabase
     public async Task ClearHistoryAsync()
     {
         using var conn = GetConnection();
-        await conn.ExecuteAsync("DELETE FROM transmissions");
+        await conn.ExecuteAsync("DELETE FROM transmission_insights; DELETE FROM transmissions;");
         
         // Delete all audio files
         var recordingsDir = Path.Combine(_dataDir, "recordings");
@@ -552,5 +560,56 @@ public class Database : IDatabase
         using var conn = GetConnection();
         var result = await conn.QueryAsync<(string Key, string Value)>("SELECT key, value FROM settings");
         return result.ToDictionary(x => x.Key, x => x.Value);
+    }
+
+    /// <inheritdoc />
+    public async Task SaveInsightAsync(TransmissionInsight insight)
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync(SqlLoader.GetSql("Insights/Upsert.sql"), insight);
+    }
+
+    /// <inheritdoc />
+    public async Task<TransmissionInsight?> GetInsightAsync(string transmissionId)
+    {
+        using var conn = GetConnection();
+        return await conn.QueryFirstOrDefaultAsync<TransmissionInsight>(SqlLoader.GetSql("Insights/GetById.sql"), new { Id = transmissionId });
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<MapCall>> GetMapCallsAsync(MapCallFilter filter)
+    {
+        using var conn = GetConnection();
+        var sql = SqlLoader.GetSql("Insights/GetMapCalls.sql");
+        var p = new DynamicParameters();
+        p.Add("Since", filter.SinceUtc);
+        p.Add("Until", filter.UntilUtc);
+        if (filter.CallTypes is { Count: > 0 })
+        {
+            sql += "  AND i.callType IN @CallTypes\n";
+            p.Add("CallTypes", filter.CallTypes);
+        }
+        if (!string.IsNullOrWhiteSpace(filter.Service))
+        {
+            sql += "  AND i.service = @Service\n";
+            p.Add("Service", filter.Service);
+        }
+        sql += "ORDER BY t.timestamp DESC LIMIT @Limit";
+        p.Add("Limit", Math.Clamp(filter.Limit, 1, 5000));
+        return await conn.QueryAsync<MapCall>(sql, p);
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<CallLog>> GetUnanalyzedAsync(int limit)
+    {
+        using var conn = GetConnection();
+        return await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Insights/GetUnanalyzed.sql"), new { Limit = limit });
+    }
+
+    /// <inheritdoc />
+    public async Task<int> CountUnanalyzedAsync()
+    {
+        using var conn = GetConnection();
+        return await conn.ExecuteScalarAsync<int>(SqlLoader.GetSql("Insights/CountUnanalyzed.sql"));
     }
 }

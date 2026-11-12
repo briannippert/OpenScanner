@@ -67,3 +67,26 @@ CREATE TABLE IF NOT EXISTS sdr_devices (
     gainMixed REAL NOT NULL DEFAULT 0,
     sortOrder INTEGER NOT NULL DEFAULT 0
 );
+
+-- AI analysis of a transmission's transcript (remote WhisperServer /transmission).
+-- One row per analyzed transmission; routine chatter is stored with isIncident = 0
+-- so it is never re-sent. lat/lon are the incident location, not the receiver's.
+CREATE TABLE IF NOT EXISTS transmission_insights (
+    transmissionId TEXT PRIMARY KEY,
+    analyzedAt TEXT NOT NULL,
+    isIncident INTEGER NOT NULL DEFAULT 0,
+    callType TEXT,
+    service TEXT,
+    summary TEXT,
+    incidentStatus TEXT,
+    address TEXT,
+    placeName TEXT,
+    crossStreet TEXT,
+    city TEXT,
+    state TEXT,
+    matchedAddress TEXT,
+    lat REAL,
+    lon REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_insights_calltype ON transmission_insights(callType);

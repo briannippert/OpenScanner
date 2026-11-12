@@ -1,7 +1,10 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using OpenScanner.Server.Interfaces;
+using OpenScanner.Server.Models;
 
 namespace OpenScanner.Server.Services;
 
@@ -131,4 +134,152 @@ public class RemoteTranscriptionClient
             return null;
         }
     }
+
+    // ---- AI call analysis (/transmission) ----
+
+    /// <summary>Setting: default city used to ground address lookups.</summary>
+    public const string DefaultCitySetting = "AiDefaultCity";
+
+    /// <summary>Setting: default state used to ground address lookups.</summary>
+    public const string DefaultStateSetting = "AiDefaultState";
+
+    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>The server accepts at most this many characters of text.</summary>
+    public const int MaxTransmissionTextLength = 2000;
+
+    private static readonly TimeSpan CapabilityCacheTtl = TimeSpan.FromMinutes(5);
+    private readonly ConcurrentDictionary<string, (bool Supported, DateTime CheckedUtc)> _capabilityCache = new();
+
+    /// <summary>
+    /// Whether the server at <paramref name="url"/> offers AI call analysis, detected by
+    /// a <c>POST /transmission</c> operation in its OpenAPI document
+    /// (<c>/swagger/v1/swagger.json</c>). Cached per URL for a few minutes; any failure
+    /// counts as unsupported.
+    /// </summary>
+    public async Task<bool> HasTransmissionRouteAsync(string url, CancellationToken ct = default)
+    {
+        var baseUrl = Normalize(url);
+        if (_capabilityCache.TryGetValue(baseUrl, out var cached) && DateTime.UtcNow - cached.CheckedUtc < CapabilityCacheTtl)
+        {
+            return cached.Supported;
+        }
+
+        var supported = false;
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(10);
+            using var resp = await client.GetAsync($"{baseUrl}/swagger/v1/swagger.json", ct);
+            if (resp.IsSuccessStatusCode)
+            {
+                var json = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+                supported = json.ValueKind == JsonValueKind.Object
+                    && json.TryGetProperty("paths", out var paths) && paths.ValueKind == JsonValueKind.Object
+                    && paths.TryGetProperty("/transmission", out var route) && route.ValueKind == JsonValueKind.Object
+                    && route.TryGetProperty("post", out _);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Capability probe failed for {Url}", baseUrl);
+        }
+
+        _capabilityCache[baseUrl] = (supported, DateTime.UtcNow);
+        return supported;
+    }
+
+    /// <summary>
+    /// Sends a transcript to the configured server's <c>/transmission</c> endpoint. Returns
+    /// an insight with <see cref="TransmissionInsight.IsIncident"/> false for routine chatter,
+    /// or null when the server could not be reached or failed, so the caller can retry later.
+    /// <see cref="TransmissionInsight.TransmissionId"/> is left for the caller to fill in.
+    /// </summary>
+    public async Task<TransmissionInsight?> ExtractTransmissionAsync(string text, string? service, CancellationToken ct = default)
+    {
+        var baseUrl = await GetConfiguredUrlAsync();
+        if (baseUrl == null) return null;
+        if (string.IsNullOrWhiteSpace(text)) return null;
+
+        var trimmed = text.Trim();
+        if (trimmed.Length > MaxTransmissionTextLength) trimmed = trimmed[..MaxTransmissionTextLength];
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(TimeoutSeconds);
+            // Optional locality that grounds geocoding (the server falls back to its own
+            // configured default area). A city/state spoken in the call still wins.
+            var defaultCity = Blank(await _db.GetSettingAsync(DefaultCitySetting));
+            var defaultState = Blank(await _db.GetSettingAsync(DefaultStateSetting));
+            var body = JsonSerializer.Serialize(new { text = trimmed, service, defaultCity, defaultState });
+            using var content = new StringContent(body, Encoding.UTF8, "application/json");
+            using var resp = await client.PostAsync($"{baseUrl}/transmission", content, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var err = await resp.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning("Transmission analysis failed (HTTP {Code}): {Body}", (int)resp.StatusCode, err);
+                return null;
+            }
+
+            var json = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+            return ParseTransmission(json);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error calling transmission analysis at {Url}", baseUrl);
+            return null;
+        }
+    }
+
+    /// <summary>Maps a <c>/transmission</c> response to an insight. <c>{}</c> is routine chatter.</summary>
+    internal static TransmissionInsight ParseTransmission(JsonElement json)
+    {
+        var insight = new TransmissionInsight { AnalyzedAt = DateTime.UtcNow.ToString("o") };
+        if (json.ValueKind != JsonValueKind.Object) return insight;
+
+        insight.CallType = Str(json, "callType");
+        insight.Service = Str(json, "service");
+        insight.Summary = Str(json, "summary");
+        insight.IncidentStatus = Str(json, "incidentStatus");
+
+        if (json.TryGetProperty("location", out var loc) && loc.ValueKind == JsonValueKind.Object)
+        {
+            insight.Address = Str(loc, "address");
+            insight.PlaceName = Str(loc, "placeName");
+            insight.CrossStreet = Str(loc, "crossStreet");
+            insight.City = Str(loc, "city");
+            insight.State = Str(loc, "state");
+            if (loc.TryGetProperty("geocode", out var geo) && geo.ValueKind == JsonValueKind.Object)
+            {
+                insight.MatchedAddress = Str(geo, "matchedAddress");
+                insight.Lat = Num(geo, "latitude");
+                insight.Lon = Num(geo, "longitude");
+                // A (0,0) or out-of-range fix is not a real location.
+                if (insight.Lat is not { } la || insight.Lon is not { } lo || Math.Abs(la) > 90 || Math.Abs(lo) > 180 || (la == 0 && lo == 0))
+                {
+                    insight.Lat = insight.Lon = null;
+                }
+            }
+        }
+
+        insight.IsIncident = !string.IsNullOrWhiteSpace(insight.CallType);
+        return insight;
+    }
+
+    private static string? Str(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(v.GetString())
+            ? v.GetString()!.Trim()
+            : null;
+
+    private static double? Num(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var d) && double.IsFinite(d) ? d : null;
 }
