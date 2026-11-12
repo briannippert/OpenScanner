@@ -40,6 +40,7 @@ import {
 } from '@mui/icons-material';
 import { Chip } from '@mui/material';
 import type { CallLog, Channel } from '../types';
+import { CALL_GROUPS, callTypeLabel, groupOf } from '../lib/callTypes';
 import { chainLabel, srcLabel, tgLabel, type NameFor } from '../lib/aliasLabels';
 import { status } from '../theme/tokens';
 import EmptyState from './common/EmptyState';
@@ -832,6 +833,22 @@ const LogItemInner = ({ log, tree, playingId, onPlay, onDelete, onFavoriteToggle
                                     </>
                                 )}
                             </Box>
+                            {log.insight?.isIncident && (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.4, minWidth: 0 }}>
+                                    <Chip
+                                        size="small"
+                                        label={callTypeLabel(log.insight.callType)}
+                                        sx={{
+                                            height: 18, fontSize: '0.65rem', fontWeight: 700, flexShrink: 0,
+                                            bgcolor: 'surface.overlay', color: 'text.primary',
+                                            borderLeft: '3px solid', borderLeftColor: CALL_GROUPS[groupOf(log.insight.callType)].color,
+                                        }}
+                                    />
+                                    <Typography variant="caption" noWrap sx={{ color: 'text.primary', fontSize: '0.7rem', minWidth: 0 }}>
+                                        {[log.insight.summary, log.insight.matchedAddress || log.insight.address].filter(Boolean).join(' · ')}
+                                    </Typography>
+                                </Box>
+                            )}
                             {log.transcription && (
                                 <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic', fontSize: '0.72rem', mt: 0.4, lineHeight: 1.3 }}>
                                     "{log.transcription}"

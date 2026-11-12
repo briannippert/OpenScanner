@@ -357,4 +357,94 @@ public class DatabaseTests : IDisposable
             File.Delete(_testDbPath);
         }
     }
+
+    private static CallLog Tx(string id, DateTime when, string? transcript = "Engine 2 respond") =>
+        new(id, when.ToString("o"), 154.0, "FD Dispatch", "", null, null, $"{id}.raw", 3, transcript);
+
+    private static TransmissionInsight Incident(string id, string callType, string service, double? lat = 42.78, double? lon = -71.23) => new()
+    {
+        TransmissionId = id, AnalyzedAt = DateTime.UtcNow.ToString("o"), IsIncident = true,
+        CallType = callType, Service = service, Summary = "s", Address = "45 Main Street", Lat = lat, Lon = lon,
+    };
+
+    [Fact]
+    public async Task Insight_SaveAndGet_RoundTrips()
+    {
+        await _db.SaveTransmissionAsync(Tx("a", DateTime.UtcNow));
+        await _db.SaveInsightAsync(Incident("a", "fire", "fire"));
+
+        var got = await _db.GetInsightAsync("a");
+        Assert.NotNull(got);
+        Assert.True(got!.IsIncident);
+        Assert.Equal("fire", got.CallType);
+        Assert.Equal(42.78, got.Lat);
+
+        // Upsert replaces.
+        await _db.SaveInsightAsync(Incident("a", "medical", "fire"));
+        Assert.Equal("medical", (await _db.GetInsightAsync("a"))!.CallType);
+    }
+
+    [Fact]
+    public async Task GetMapCalls_FiltersByWindowTypeServiceAndLocation()
+    {
+        var now = DateTime.UtcNow;
+        await _db.SaveTransmissionAsync(Tx("fire1", now.AddMinutes(-5)));
+        await _db.SaveTransmissionAsync(Tx("med1", now.AddMinutes(-10)));
+        await _db.SaveTransmissionAsync(Tx("theft1", now.AddMinutes(-15)));
+        await _db.SaveTransmissionAsync(Tx("old", now.AddDays(-3)));
+        await _db.SaveTransmissionAsync(Tx("nogeo", now.AddMinutes(-1)));
+        await _db.SaveTransmissionAsync(Tx("routine", now.AddMinutes(-1)));
+        await _db.SaveInsightAsync(Incident("fire1", "fire", "fire"));
+        await _db.SaveInsightAsync(Incident("med1", "medical", "fire"));
+        await _db.SaveInsightAsync(Incident("theft1", "theft", "police"));
+        await _db.SaveInsightAsync(Incident("old", "fire", "fire"));
+        await _db.SaveInsightAsync(Incident("nogeo", "fire", "fire", null, null));
+        await _db.SaveInsightAsync(new TransmissionInsight { TransmissionId = "routine", AnalyzedAt = now.ToString("o") });
+
+        var since = now.AddDays(-1).ToString("o");
+        var all = (await _db.GetMapCallsAsync(new MapCallFilter(since, null, null, null, 100))).ToList();
+        Assert.Equal(new[] { "fire1", "med1", "theft1" }, all.Select(c => c.Id));
+        Assert.Equal("fire1.raw", all[0].AudioPath);
+
+        var fireOnly = await _db.GetMapCallsAsync(new MapCallFilter(since, null, new[] { "fire", "theft" }, null, 100));
+        Assert.Equal(new[] { "fire1", "theft1" }, fireOnly.Select(c => c.Id));
+
+        var police = await _db.GetMapCallsAsync(new MapCallFilter(since, null, null, "police", 100));
+        Assert.Equal(new[] { "theft1" }, police.Select(c => c.Id));
+
+        var until = await _db.GetMapCallsAsync(new MapCallFilter(since, now.AddMinutes(-8).ToString("o"), null, null, 100));
+        Assert.Equal(new[] { "med1", "theft1" }, until.Select(c => c.Id));
+    }
+
+    [Fact]
+    public async Task GetUnanalyzed_SkipsAnalyzedAndUntranscribed()
+    {
+        var now = DateTime.UtcNow;
+        await _db.SaveTransmissionAsync(Tx("done", now));
+        await _db.SaveTransmissionAsync(Tx("todo", now.AddMinutes(-1)));
+        await _db.SaveTransmissionAsync(Tx("blank", now.AddMinutes(-2), null));
+        await _db.SaveInsightAsync(new TransmissionInsight { TransmissionId = "done", AnalyzedAt = now.ToString("o") });
+
+        var pending = (await _db.GetUnanalyzedAsync(10)).ToList();
+        Assert.Equal(new[] { "todo" }, pending.Select(l => l.Id));
+        Assert.Equal("Engine 2 respond", pending[0].Transcription);
+        Assert.Equal(1, await _db.CountUnanalyzedAsync());
+    }
+
+    [Fact]
+    public async Task DeleteTransmission_RemovesItsInsight()
+    {
+        await _db.SaveTransmissionAsync(Tx("gone", DateTime.UtcNow));
+        await _db.SaveInsightAsync(Incident("gone", "fire", "fire"));
+
+        await _db.DeleteTransmissionAsync("gone");
+
+        Assert.Null(await _db.GetInsightAsync("gone"));
+    }
+
+    [Fact]
+    public async Task AiFeaturesEnabled_DefaultsToFalse()
+    {
+        Assert.Equal("false", await _db.GetSettingAsync("AiFeaturesEnabled"));
+    }
 }

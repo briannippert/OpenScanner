@@ -6,6 +6,8 @@ Open **Settings** from the header. Changes apply immediately.
 
 Backend, model and thread count for speech-to-text. See [Transcription](transcription.md).
 
+With a remote server that supports it, this section also has **AI call analysis**, its **Default location** and **Analyze history**. See [Call map](map.md).
+
 ## Radios
 
 Shown once OpenScanner has found a dongle. It lists every RTL-SDR it has seen, attached or not.

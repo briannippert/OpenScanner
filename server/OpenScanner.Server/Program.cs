@@ -60,6 +60,8 @@ builder.Services.AddSingleton<RecordingCleanupService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RecordingCleanupService>());
 builder.Services.AddSingleton<NtfyNotificationService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NtfyNotificationService>());
+builder.Services.AddSingleton<IncidentAnalysisService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IncidentAnalysisService>());
 
 var radioProvider = builder.Configuration["Radio:Provider"] ?? "RTL-SDR";
 if (radioProvider == "Mock")
@@ -141,6 +143,9 @@ app.MapControllers(); // Map the controllers
 
 // --- WebSockets ---
 var wsBroadcaster = app.Services.GetRequiredService<WebSocketBroadcaster>();
+// AI call analysis finishes after the transcript was already broadcast; re-send the log so
+// clients pick up its call type and incident location.
+app.Services.GetRequiredService<IncidentAnalysisService>().OnInsightReady += wsBroadcaster.BroadcastLog;
 
 app.Map("/ws/control", async (HttpContext context) =>
 {

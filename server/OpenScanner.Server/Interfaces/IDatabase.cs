@@ -285,4 +285,21 @@ public interface IDatabase
     /// </summary>
     /// <returns>A dictionary of all settings.</returns>
     Task<Dictionary<string, string>> GetAllSettingsAsync();
+
+    // AI call analysis
+
+    /// <summary>Inserts or replaces the AI analysis of a transmission.</summary>
+    Task SaveInsightAsync(TransmissionInsight insight);
+
+    /// <summary>Gets the AI analysis of a transmission, or null if it has none.</summary>
+    Task<TransmissionInsight?> GetInsightAsync(string transmissionId);
+
+    /// <summary>Geolocated incidents matching <paramref name="filter"/>, newest first.</summary>
+    Task<IEnumerable<MapCall>> GetMapCallsAsync(MapCallFilter filter);
+
+    /// <summary>Transcribed transmissions that have not been analyzed yet, newest first.</summary>
+    Task<IEnumerable<CallLog>> GetUnanalyzedAsync(int limit);
+
+    /// <summary>Number of transcribed transmissions that have not been analyzed yet.</summary>
+    Task<int> CountUnanalyzedAsync();
 }

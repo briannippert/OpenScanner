@@ -286,7 +286,11 @@ public class WebSocketBroadcaster
         _ = BroadcastJson(new { type = "STATE_UPDATE", payload = toSend });
     }
 
-    private void BroadcastLog(CallLog log)
+    /// <summary>
+    /// Sends a log entry to control clients as <c>NEW_LOG</c>. Clients upsert by id, so this
+    /// also updates an entry already shown (e.g. when its AI analysis arrives).
+    /// </summary>
+    public void BroadcastLog(CallLog log)
     {
         var msg = new { type = "NEW_LOG", payload = log };
         _ = BroadcastJson(msg);

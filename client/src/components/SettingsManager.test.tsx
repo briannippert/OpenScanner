@@ -61,3 +61,45 @@ describe('SettingsManager diagnostics', () => {
     expect(screen.queryByText('Diagnostics')).not.toBeInTheDocument();
   });
 });
+
+describe('SettingsManager AI call analysis', () => {
+  const remoteSettings = {
+    EnableTranscription: 'true',
+    TranscriptionBackend: 'remote',
+    RemoteTranscriptionUrl: 'http://whisper.test:8099',
+    AiFeaturesEnabled: 'false',
+  };
+
+  const respond = (supported: boolean) => (url: string) => {
+    const body =
+      url.endsWith('/api/settings') ? remoteSettings
+      : url.includes('/api/ai/capabilities') ? { supported, enabled: false }
+      : url.includes('/api/transcription/remote/models') ? []
+      : {};
+    return Promise.resolve({ ok: true, json: async () => body });
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('offers the AI toggle when the remote server supports /transmission', async () => {
+    fetchMock.mockImplementation(respond(true));
+    render(<SettingsManager open onClose={() => {}} />);
+
+    expect(await screen.findByText('AI call analysis', {}, { timeout: 3000 })).toBeInTheDocument();
+    const probe = fetchMock.mock.calls.map(c => String(c[0])).find(u => u.includes('/api/ai/capabilities'));
+    expect(probe).toContain(encodeURIComponent('http://whisper.test:8099'));
+  });
+
+  it('hides the AI toggle when the remote server does not support it', async () => {
+    fetchMock.mockImplementation(respond(false));
+    render(<SettingsManager open onClose={() => {}} />);
+
+    await screen.findAllByText('Server URL');
+    // Wait past the debounced probe.
+    await new Promise(r => setTimeout(r, 800));
+    expect(fetchMock.mock.calls.some(c => String(c[0]).includes('/api/ai/capabilities'))).toBe(true);
+    expect(screen.queryByText('AI call analysis')).not.toBeInTheDocument();
+  });
+});

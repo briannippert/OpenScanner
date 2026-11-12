@@ -68,6 +68,7 @@ nav:
       - Multiple SDRs: guide/multiple-sdrs.md
       - History and playback: guide/history.md
       - Statistics: guide/statistics.md
+      - Call map: guide/map.md
       - Transcription: guide/transcription.md
       - Fire tone-outs: guide/fire-tones.md
       - Radio aliases: guide/aliases.md

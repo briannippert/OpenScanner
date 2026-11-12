@@ -44,8 +44,11 @@ function computePeaks(buffer: AudioBuffer, buckets = 400): number[] {
  * playback with a seekable transport (position, pause, rate) for the Now Playing bar.
  *
  * @param volume 0..1, driven by the header slider. Gain is smoothed toward it.
+ * @param options.live Stream live scanner audio (default true). The map page turns this
+ *   off until the user asks for it, so it only plays recorded clips.
  */
-export function useAudioPipeline(volume: number) {
+export function useAudioPipeline(volume: number, options: { live?: boolean } = {}) {
+  const live = options.live ?? true;
   const [isAudioInitialized, setIsAudioInitialized] = useState(false);
   const [audioAnalyser, setAudioAnalyser] = useState<AnalyserNode | undefined>(undefined);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
@@ -386,6 +389,7 @@ export function useAudioPipeline(volume: number) {
   // Live audio WebSocket. The server sends whichever codec we ask for: Opus (~24 kbps) where the
   // browser can decode it, raw Int16 PCM (768 kbps) otherwise.
   useEffect(() => {
+    if (!live) return;
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsAudioBase = `${wsProtocol}//${window.location.host}/ws/audio`;
     let closed = false;
@@ -532,7 +536,7 @@ export function useAudioPipeline(volume: number) {
     };
     // ensureCtx/ensureLiveGraph/pushSamples are stable (memoized with empty deps); listed to
     // satisfy exhaustive-deps without re-running the socket setup.
-  }, [ensureCtx, ensureLiveGraph, pushSamples]);
+  }, [live, ensureCtx, ensureLiveGraph, pushSamples]);
 
   return {
     isAudioInitialized,

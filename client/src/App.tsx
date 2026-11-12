@@ -16,7 +16,7 @@ import { useScannerSocket } from './hooks/useScannerSocket';
 import { useDialogs } from './hooks/useDialogs';
 import { apiJson } from './components/common/apiBase';
 import { sameFrequency } from './lib/frequency';
-import type { Channel, RadioEvent, UpdateStatus } from './types';
+import type { AiCapabilities, Channel, RadioEvent, UpdateStatus } from './types';
 
 function App() {
   const [volume, setVolume] = useState<number>(() => {
@@ -55,6 +55,20 @@ function App() {
     const id = setTimeout(preloadDialogs, 2000);
     return () => clearTimeout(id);
   }, []);
+
+  // The call map is offered only when AI call analysis is supported and on. Re-checked
+  // whenever Settings closes, since that is where it gets switched on.
+  const settingsOpen = dialogs.isOpen('settings');
+  const [mapAvailable, setMapAvailable] = useState(false);
+  useEffect(() => {
+    if (settingsOpen) return;
+    let cancelled = false;
+    void apiJson<AiCapabilities>('/api/ai/capabilities').then(caps => {
+      if (!cancelled) setMapAvailable(!!caps?.supported && caps.enabled);
+    });
+    return () => { cancelled = true; };
+  }, [settingsOpen]);
+  const openMap = useCallback(() => { window.open('/map', '_blank', 'noopener'); }, []);
 
   // Poll update availability for the ribbon indicator.
   useEffect(() => {
@@ -239,6 +253,7 @@ function App() {
           updateAvailable={updateAvailable}
           onOpenUpdate={dialog.update.open}
           onOpenPalette={dialog.palette.open}
+          onOpenMap={mapAvailable ? openMap : undefined}
         />
 
         <Box sx={{ flexGrow: 1, p: { xs: 1, sm: 2 }, height: '100%', overflowY: { xs: 'auto', md: 'hidden' } }}>
@@ -373,6 +388,7 @@ function App() {
               onOpenDebug={openDebug}
               onOpenSystemDebug={dialog.systemDebug.open}
               onToggleFullscreen={toggleFullscreen}
+              onOpenMap={mapAvailable ? openMap : undefined}
             />
           )}
           {dialogs.wasOpened('rfDebug') && (

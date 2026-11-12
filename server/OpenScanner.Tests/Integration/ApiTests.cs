@@ -16,6 +16,8 @@ public class ApiTests : IClassFixture<WebApplicationFactory<Program>>
     [Theory]
     [InlineData("/api/channels")]
     [InlineData("/api/history")]
+    [InlineData("/api/ai/calls")]
+    [InlineData("/api/ai/backfill")]
     [InlineData("/swagger")]
     public async Task Get_EndpointsReturnSuccess(string url)
     {

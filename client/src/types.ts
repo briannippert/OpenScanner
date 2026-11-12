@@ -156,6 +156,54 @@ export interface CallLog {
     speakerChain?: string;
     detectedTone?: string;
     isFavorite?: boolean;
+    /** AI call analysis, when the remote server produced one (see /api/ai). */
+    insight?: TransmissionInsight | null;
+}
+
+/** AI analysis of one transmission (remote WhisperServer /transmission). */
+export interface TransmissionInsight {
+    transmissionId: string;
+    analyzedAt: string;
+    /** False for routine chatter. */
+    isIncident: boolean;
+    callType?: string | null;
+    service?: string | null;
+    summary?: string | null;
+    incidentStatus?: string | null;
+    address?: string | null;
+    placeName?: string | null;
+    crossStreet?: string | null;
+    city?: string | null;
+    state?: string | null;
+    matchedAddress?: string | null;
+    lat?: number | null;
+    lon?: number | null;
+}
+
+/** A geolocated incident for the map (GET /api/ai/calls). */
+export interface MapCall {
+    id: string;
+    timestamp: string;
+    frequency: number;
+    alphaTag: string;
+    audio_path?: string | null;
+    duration?: number | null;
+    transcription?: string | null;
+    callType?: string | null;
+    service?: string | null;
+    summary?: string | null;
+    incidentStatus?: string | null;
+    address?: string | null;
+    placeName?: string | null;
+    matchedAddress?: string | null;
+    lat: number;
+    lon: number;
+}
+
+/** GET /api/ai/capabilities */
+export interface AiCapabilities {
+    supported: boolean;
+    enabled: boolean;
 }
 
 export interface FireToneSet {
