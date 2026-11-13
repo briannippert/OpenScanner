@@ -5,7 +5,16 @@ using OpenScanner.Server.Interfaces;
 namespace OpenScanner.Server.Services;
 
 /// <summary>
-/// Service for detecting Fire Tone Out (FTO) 2-tone paging sequences in audio streams.
+/// Detects Fire Tone Out pages in audio: two-tone sequential pages (Quick Call II: tone A,
+/// typically ~1 s, then tone B, typically ~3 s) and single long-tone pages.
+///
+/// Audio is analysed in fixed 100 ms Hann-windowed blocks with 50 ms hops, whatever chunk
+/// size the caller delivers. A tone counts as present in a block when it carries at least
+/// <see cref="MinPurity"/> of the block's energy, so detection depends on how pure the
+/// signal is, not how loud. Each tone must also be held for a minimum time
+/// (<see cref="MinToneASeconds"/>, <see cref="MinToneBSeconds"/>). Speech often touches a
+/// tone frequency for a moment but never holds one, so a dispatcher's voice does not
+/// trigger pages.
 /// </summary>
 public class ToneDetector
 {
@@ -13,43 +22,100 @@ public class ToneDetector
     private readonly ILogger<ToneDetector> _logger;
     private readonly TimeProvider _time;
     private List<FireToneSet> _activeToneSets = new();
-    private readonly int _sampleRate = 48000;
-    
+    // Distinct frequencies across the active tone sets, analysed once per block.
+    private double[] _frequencies = Array.Empty<double>();
+
+    private const int SampleRate = 48000;
+
+    /// <summary>Analysis block length: 100 ms, so ~10 Hz frequency resolution.</summary>
+    internal const int BlockSamples = SampleRate / 10;
+
+    /// <summary>Hop between blocks: 50 ms.</summary>
+    internal const int HopSamples = BlockSamples / 2;
+
+    /// <summary>Share of a block's energy a tone must carry to count as present.</summary>
+    internal const double MinPurity = 0.5;
+
+    /// <summary>Blocks quieter than this RMS (about -46 dBFS) are treated as silence.</summary>
+    internal const double MinRms = 0.005;
+
+    /// <summary>Minimum length of tone A in a two-tone page.</summary>
+    internal const double MinToneASeconds = 0.5;
+
     /// <summary>
-    /// Detection state for one audio stream. The detector is stateful (Tone A must be followed
-    /// by Tone B; a single tone must persist), so each independent audio source needs its own
-    /// copy: feeding several channels' audio into one state interleaves unrelated chunks and
-    /// breaks the A-then-B timing and the sustained-tone run.
+    /// Minimum length of tone B in a two-tone page. Tone B is normally ~3 s, while speech
+    /// was measured holding a tone frequency for up to ~0.45 s, so this leaves headroom.
+    /// </summary>
+    internal const double MinToneBSeconds = 0.8;
+
+    /// <summary>Longest gap allowed between the end of tone A and the start of tone B.</summary>
+    internal const double MaxToneGapSeconds = 1.0;
+
+    /// <summary>A single-tone page must be held at least this long.</summary>
+    internal const double SingleToneMinDurationSeconds = 1.0;
+
+    /// <summary>Dropouts up to this long don't break a tone (fades, a lost block).</summary>
+    internal const double DropoutToleranceSeconds = 0.15;
+
+    /// <summary>
+    /// When a stream receives no audio for this long (squelch closed, channel idle), its
+    /// state is dropped, so tone A from one transmission never pairs with tone B from a
+    /// later one.
+    /// </summary>
+    internal static readonly TimeSpan StreamIdleReset = TimeSpan.FromSeconds(1);
+
+    private static readonly double[] Window = BuildHann(BlockSamples);
+    private static readonly double WindowSum = Window.Sum();
+    private static readonly double WindowSumSquares = Window.Sum(w => w * w);
+
+    /// <summary>A continuous stretch of one tone, in samples on the stream's own clock.</summary>
+    private sealed class ToneRun
+    {
+        public long Id;
+        public long Start;
+        public long End;
+        public double Seconds => (End - Start) / (double)SampleRate;
+    }
+
+    /// <summary>Per-tone-set progress through a page.</summary>
+    private sealed class PageState
+    {
+        // The qualifying tone-A run (two-tone), or 0.
+        public long ToneARunId;
+        public long ToneAStart;
+        public long ToneAEnd;
+        // The run that already fired, so one page fires once.
+        public long FiredRunId;
+    }
+
+    /// <summary>
+    /// Detection state for one audio stream. The detector is stateful (tone A must be
+    /// followed by tone B; a single tone must persist), so each independent audio source
+    /// needs its own copy: feeding several channels' audio into one state interleaves
+    /// unrelated chunks and breaks the timing.
     /// </summary>
     private sealed class StreamState
     {
-        // Two-tone (Quick Call II) detection state
-        public string? DetectedToneAName;
-        public DateTime ToneADetectedTime = DateTime.MinValue;
-        public double LastToneAFreq;
+        public float[] Buffer = new float[BlockSamples * 2];
+        public int Buffered;
+        // Stream clock: the sample index of Buffer[0].
+        public long BufferStart;
+        public DateTime LastChunk = DateTime.MinValue;
+        public long NextRunId = 1;
+        public readonly Dictionary<double, ToneRun> Runs = new();
+        public readonly Dictionary<string, PageState> Pages = new();
 
-        // Single (long) tone detection state, keyed by tone set name. Some agencies page
-        // with a single sustained tone instead of a two-tone A/B sequence; a FireToneSet
-        // with FrequencyB <= 0 is treated as single-tone.
-        public readonly Dictionary<string, SingleToneRun> SingleToneRuns = new();
+        public void Reset()
+        {
+            Buffered = 0;
+            BufferStart = 0;
+            Runs.Clear();
+            Pages.Clear();
+        }
     }
 
     private readonly StreamState _defaultStream = new();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<double, StreamState> _streams = new();
-
-    // A single tone must be continuously present for at least this long before it fires,
-    // which rejects the brief tones that occur in speech.
-    private const double SingleToneMinDurationSeconds = 1.0;
-
-    // Momentary dropouts shorter than this don't reset a sustained-tone run.
-    private const double SingleToneGapToleranceSeconds = 0.3;
-
-    private struct SingleToneRun
-    {
-        public DateTime Start;
-        public DateTime LastSeen;
-        public bool Fired;
-    }
 
     /// <summary>
     /// Event triggered when a complete 2-tone sequence is detected.
@@ -83,7 +149,7 @@ public class ToneDetector
     /// </summary>
     /// <param name="db">Database interface.</param>
     /// <param name="logger">Logger instance.</param>
-    /// <param name="time">Clock used to time tone durations.</param>
+    /// <param name="time">Clock used to notice when a stream goes idle.</param>
     public ToneDetector(IDatabase db, ILogger<ToneDetector> logger, TimeProvider time)
     {
         _db = db;
@@ -98,22 +164,28 @@ public class ToneDetector
     public void ReloadTones()
     {
         Task.Run(async () => {
-            _activeToneSets = (await _db.GetAllFireTonesAsync()).ToList();
-            _logger.LogInformation($"ToneDetector: Loaded {_activeToneSets.Count} tone sets.");
+            var sets = (await _db.GetAllFireTonesAsync()).ToList();
+            _frequencies = sets
+                .SelectMany(t => new[] { t.FrequencyA, t.FrequencyB })
+                .Where(f => f > 0 && f < SampleRate / 2.0)
+                .Distinct()
+                .ToArray();
+            _activeToneSets = sets;
+            _logger.LogInformation($"ToneDetector: Loaded {sets.Count} tone sets.");
         });
     }
 
     /// <summary>
     /// Processes a chunk of PCM audio data to check for tone sequences.
     /// </summary>
-    /// <param name="pcmData">16-bit PCM audio data.</param>
+    /// <param name="pcmData">16-bit PCM audio data at 48 kHz.</param>
     public void ProcessAudio(byte[] pcmData) => ProcessAudio(pcmData, _defaultStream, null);
 
     /// <summary>
     /// Processes audio belonging to an independent stream (one parallel channel). Each key has
     /// its own detection state, and detections raise <see cref="OnStreamToneDetected"/>.
     /// </summary>
-    /// <param name="pcmData">16-bit PCM audio data.</param>
+    /// <param name="pcmData">16-bit PCM audio data at 48 kHz.</param>
     /// <param name="streamKey">Identifies the audio source, e.g. the channel frequency.</param>
     public void ProcessAudio(byte[] pcmData, double streamKey) =>
         ProcessAudio(pcmData, _streams.GetOrAdd(streamKey, _ => new StreamState()), streamKey);
@@ -136,133 +208,148 @@ public class ToneDetector
     private void ProcessAudio(byte[] pcmData, StreamState st, double? streamKey)
     {
         var toneSets = _activeToneSets;
-        if (toneSets.Count == 0) return;
-
-        // Convert byte array to float samples
-        int sampleCount = pcmData.Length / 2;
-        float[] samples = new float[sampleCount];
-        for (int i = 0; i < sampleCount; i++)
-        {
-            short s = BitConverter.ToInt16(pcmData, i * 2);
-            samples[i] = s / 32768f;
-        }
+        var frequencies = _frequencies;
+        if (toneSets.Count == 0 || frequencies.Length == 0) return;
 
         var now = _time.GetUtcNow().UtcDateTime;
+        if (st.LastChunk != DateTime.MinValue && now - st.LastChunk > StreamIdleReset) st.Reset();
+        st.LastChunk = now;
 
-        // Check for active tones in this chunk
-        // Standard FTO: Tone A (approx 1s) followed by Tone B (approx 3s)
-
-        foreach (var toneSet in toneSets)
+        int sampleCount = pcmData.Length / 2;
+        if (st.Buffered + sampleCount > st.Buffer.Length)
         {
-            // A tone set with no second frequency is a single (long) tone page.
-            if (toneSet.FrequencyB <= 0)
-            {
-                HandleSingleTone(toneSet, samples, now, st, streamKey);
-                continue;
-            }
-
-            // check Tone A
-            bool toneAPresent = IsFrequencyPresent(samples, toneSet.FrequencyA);
-            
-            if (toneAPresent)
-            {
-                if (st.DetectedToneAName != toneSet.Name)
-                {
-                    _logger.LogInformation($"ToneDetector: Potential Tone A for {toneSet.Name} ({toneSet.FrequencyA} Hz)");
-                    st.DetectedToneAName = toneSet.Name;
-                    st.ToneADetectedTime = now;
-                    st.LastToneAFreq = toneSet.FrequencyA;
-                }
-            }
-            
-            // Check Tone B if Tone A was recently detected
-            if (st.DetectedToneAName == toneSet.Name && (now - st.ToneADetectedTime).TotalSeconds < 2.0)
-            {
-                bool toneBPresent = IsFrequencyPresent(samples, toneSet.FrequencyB);
-                if (toneBPresent && Math.Abs(toneSet.FrequencyB - st.LastToneAFreq) > 5) // ensure it's not the same tone
-                {
-                    _logger.LogInformation($"ToneDetector: DETECTED {toneSet.Name} (A: {toneSet.FrequencyA}, B: {toneSet.FrequencyB})");
-                    Fire(toneSet, streamKey);
-                    st.DetectedToneAName = null; // Reset
-                }
-            }
+            Array.Resize(ref st.Buffer, Math.Max(st.Buffer.Length * 2, st.Buffered + sampleCount));
         }
-
-        // Cleanup stale Tone A detections
-        if (st.DetectedToneAName != null && (now - st.ToneADetectedTime).TotalSeconds > 3.0)
+        for (int i = 0; i < sampleCount; i++)
         {
-            st.DetectedToneAName = null;
+            st.Buffer[st.Buffered + i] = BitConverter.ToInt16(pcmData, i * 2) / 32768f;
+        }
+        st.Buffered += sampleCount;
+
+        int offset = 0;
+        while (st.Buffered - offset >= BlockSamples)
+        {
+            AnalyzeBlock(st, st.Buffer.AsSpan(offset, BlockSamples), st.BufferStart + offset, frequencies, toneSets, streamKey);
+            offset += HopSamples;
+        }
+        if (offset > 0)
+        {
+            Array.Copy(st.Buffer, offset, st.Buffer, 0, st.Buffered - offset);
+            st.Buffered -= offset;
+            st.BufferStart += offset;
         }
     }
 
-    /// <summary>
-    /// Detects a single sustained tone. Fires once FrequencyA has been continuously
-    /// present for <see cref="SingleToneMinDurationSeconds"/>, then stays quiet until
-    /// the tone drops out so a long page only fires a single event.
-    /// </summary>
-    private void HandleSingleTone(FireToneSet toneSet, float[] samples, DateTime now, StreamState st, double? streamKey)
+    private void AnalyzeBlock(StreamState st, ReadOnlySpan<float> block, long blockStart, double[] frequencies,
+        List<FireToneSet> toneSets, double? streamKey)
     {
-        bool present = IsFrequencyPresent(samples, toneSet.FrequencyA);
+        long blockEnd = blockStart + BlockSamples;
+        long tolerance = (long)(DropoutToleranceSeconds * SampleRate);
 
-        if (present)
+        // Windowed energy, as the mean power of the windowed signal.
+        double energy = 0;
+        for (int i = 0; i < block.Length; i++)
         {
-            if (!st.SingleToneRuns.TryGetValue(toneSet.Name, out var run) ||
-                (now - run.LastSeen).TotalSeconds > SingleToneGapToleranceSeconds)
+            double v = block[i] * Window[i];
+            energy += v * v;
+        }
+        double meanPower = energy / WindowSumSquares;
+        bool loudEnough = meanPower >= MinRms * MinRms;
+
+        foreach (var freq in frequencies)
+        {
+            if (!loudEnough || Purity(block, freq, meanPower) < MinPurity) continue;
+
+            // Present: extend the current run, or start a new one after a real gap.
+            if (st.Runs.TryGetValue(freq, out var run) && blockStart - run.End <= tolerance)
             {
-                // No active run (or the previous one lapsed): start a fresh one.
-                run = new SingleToneRun { Start = now, LastSeen = now, Fired = false };
+                run.End = blockEnd;
             }
             else
             {
-                run.LastSeen = now;
+                st.Runs[freq] = new ToneRun { Id = st.NextRunId++, Start = blockStart, End = blockEnd };
             }
-
-            if (!run.Fired && (now - run.Start).TotalSeconds >= SingleToneMinDurationSeconds)
-            {
-                _logger.LogInformation($"ToneDetector: DETECTED single-tone {toneSet.Name} ({toneSet.FrequencyA} Hz)");
-                Fire(toneSet, streamKey);
-                run.Fired = true;
-            }
-
-            st.SingleToneRuns[toneSet.Name] = run;
         }
-        else if (st.SingleToneRuns.TryGetValue(toneSet.Name, out var run) &&
-                 (now - run.LastSeen).TotalSeconds > SingleToneGapToleranceSeconds)
+
+        foreach (var set in toneSets)
         {
-            // Tone has been absent long enough — end the run so it can re-fire later.
-            st.SingleToneRuns.Remove(toneSet.Name);
+            if (!st.Pages.TryGetValue(set.Name, out var page))
+            {
+                page = new PageState();
+                st.Pages[set.Name] = page;
+            }
+            if (set.FrequencyB <= 0) CheckSingleTone(set, st, page, blockEnd, streamKey);
+            else CheckTwoTone(set, st, page, blockEnd, streamKey);
         }
     }
 
-    private bool IsFrequencyPresent(float[] samples, double targetFreq)
+    private void CheckSingleTone(FireToneSet set, StreamState st, PageState page, long blockEnd, double? streamKey)
     {
-        if (targetFreq <= 0) return false;
+        if (!st.Runs.TryGetValue(set.FrequencyA, out var run) || run.End != blockEnd) return;
+        if (run.Id == page.FiredRunId || run.Seconds < SingleToneMinDurationSeconds) return;
 
-        // Goertzel Algorithm
-        int n = samples.Length;
-        double k = 0.5 + ((n * targetFreq) / _sampleRate);
-        double omega = (2.0 * Math.PI * k) / n;
-        double sine = Math.Sin(omega);
-        double cosine = Math.Cos(omega);
-        double coeff = 2.0 * cosine;
-        double q0 = 0, q1 = 0, q2 = 0;
+        page.FiredRunId = run.Id;
+        _logger.LogInformation("ToneDetector: DETECTED single-tone {Name} ({Freq} Hz)", set.Name, set.FrequencyA);
+        Fire(set, streamKey);
+    }
 
-        foreach (float sample in samples)
+    private void CheckTwoTone(FireToneSet set, StreamState st, PageState page, long blockEnd, double? streamKey)
+    {
+        // Remember the latest tone A that was held long enough.
+        if (st.Runs.TryGetValue(set.FrequencyA, out var a) && a.Seconds >= MinToneASeconds)
         {
-            q0 = coeff * q1 - q2 + sample;
+            if (a.Id != page.ToneARunId)
+            {
+                _logger.LogDebug("ToneDetector: tone A for {Name} ({Freq} Hz)", set.Name, set.FrequencyA);
+            }
+            page.ToneARunId = a.Id;
+            page.ToneAStart = a.Start;
+            page.ToneAEnd = a.End;
+        }
+
+        if (page.ToneARunId == 0) return;
+        if (!st.Runs.TryGetValue(set.FrequencyB, out var b) || b.End != blockEnd) return;
+        if (b.Id == page.FiredRunId || b.Seconds < MinToneBSeconds) return;
+
+        // Tone B must follow tone A: start after it began, and within the allowed gap of its end.
+        // The overlapping blocks at the A/B boundary may see both, so B may start slightly
+        // before A's last block ends.
+        if (b.Start <= page.ToneAStart) return;
+        if ((b.Start - page.ToneAEnd) / (double)SampleRate > MaxToneGapSeconds) return;
+
+        page.FiredRunId = b.Id;
+        page.ToneARunId = 0;
+        _logger.LogInformation("ToneDetector: DETECTED {Name} (A: {A}, B: {B})", set.Name, set.FrequencyA, set.FrequencyB);
+        Fire(set, streamKey);
+    }
+
+    /// <summary>
+    /// The share of the block's power at <paramref name="freq"/>: 1 for a pure tone at that
+    /// frequency, near 0 when the block is something else. Goertzel on the Hann-windowed
+    /// block, normalised by the window so it doesn't depend on block length or level.
+    /// </summary>
+    private static double Purity(ReadOnlySpan<float> block, double freq, double meanPower)
+    {
+        if (meanPower <= 0) return 0;
+        double omega = 2.0 * Math.PI * freq / SampleRate;
+        double coeff = 2.0 * Math.Cos(omega);
+        double q1 = 0, q2 = 0;
+        for (int i = 0; i < block.Length; i++)
+        {
+            double q0 = coeff * q1 - q2 + block[i] * Window[i];
             q2 = q1;
             q1 = q0;
         }
+        double magSquared = q1 * q1 + q2 * q2 - q1 * q2 * coeff;
+        // A sine of amplitude A gives |X| = A * sum(w) / 2, i.e. power A^2/2.
+        double tonePower = 2.0 * magSquared / (WindowSum * WindowSum);
+        return tonePower / meanPower;
+    }
 
-        double magnitude = Math.Sqrt(q1 * q1 + q2 * q2 - q1 * q2 * coeff);
-        
-        // Threshold check (relative to signal strength/length)
-        // Magnitude is roughly proportional to N * Amplitude / 2
-        // We want a robust threshold.
-        double threshold = samples.Length * 0.1; // Require avg amplitude > 0.2 approx?
-        
-        // _logger.LogInformation($"Freq {targetFreq}: Mag {magnitude:F1} (Thresh {threshold:F1})");
-
-        return magnitude > threshold; 
+    private static double[] BuildHann(int n)
+    {
+        var w = new double[n];
+        for (int i = 0; i < n; i++) w[i] = 0.5 - 0.5 * Math.Cos(2.0 * Math.PI * i / n);
+        return w;
     }
 }

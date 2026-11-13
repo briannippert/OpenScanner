@@ -13,6 +13,13 @@ Open **Fire Tone Outs** from the header, then add a tone set:
 | **Tone B (Hz)** | The second tone's frequency. Leave blank for a single long tone. |
 | **Description** | Optional note. |
 
+### How tones are matched
+
+- A tone must be within a few Hz of the frequency you enter (about ±7 Hz), so the neighbouring tones on a Quick Call II chart don't match.
+- A two-tone page fires when Tone A is held for at least ½ second and Tone B for at least 0.8 second, starting within a second of Tone A ending. A typical page (about 1 s + 3 s) is detected about 0.8 s into Tone B.
+- A single-tone page fires once the tone has been held for 1 second.
+- Detection depends on how clean the tone is, not how loud, so quiet pages are still caught. Voice that briefly hits a tone frequency doesn't trigger a page.
+
 ## When a tone-out is detected
 
 - The scanner display shows <span class="chip chip--warn">ALERT</span> with the tone set's name.
