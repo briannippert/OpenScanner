@@ -20,6 +20,9 @@ public interface IDatabase
     /// <returns>A collection of channels.</returns>
     Task<IEnumerable<Channel>> GetAllChannelsAsync();
 
+    /// <summary>The channel on <paramref name="frequency"/> (MHz), or null when none is configured.</summary>
+    Task<Channel?> GetChannelByFrequencyAsync(double frequency);
+
     /// <summary>
     /// Retrieves channels near a specific geographic location.
     /// </summary>
@@ -302,4 +305,22 @@ public interface IDatabase
 
     /// <summary>Number of transcribed transmissions that have not been analyzed yet.</summary>
     Task<int> CountUnanalyzedAsync();
+
+    /// <summary>
+    /// Grouped incidents that may be the same incident as a new call: same
+    /// <paramref name="service"/> (null matches null), inside a box of
+    /// <paramref name="boxDegrees"/> around the point, with a transmission timestamp
+    /// between <paramref name="sinceUtc"/> and <paramref name="untilUtc"/> (round-trip UTC),
+    /// excluding <paramref name="excludeTransmissionId"/>.
+    /// </summary>
+    Task<IEnumerable<IncidentCandidate>> FindIncidentCandidatesAsync(string? service, double lat, double lon, double boxDegrees, string sinceUtc, string untilUtc, string excludeTransmissionId);
+
+    /// <summary>
+    /// Geolocated incidents saved before incident grouping existed (null incident id),
+    /// oldest first.
+    /// </summary>
+    Task<IEnumerable<UngroupedIncident>> GetUngroupedIncidentsAsync();
+
+    /// <summary>Sets the incident group of one analyzed transmission.</summary>
+    Task SetIncidentIdAsync(string transmissionId, string incidentId);
 }

@@ -36,6 +36,10 @@ public class IncidentAnalysisService : IHostedService, IDisposable
     private Task? _worker;
     private int _disposed;
 
+    // Serializes incident grouping and saving, so the live worker, the backfill and the
+    // start-up regrouping never both open a new incident for the same call pair.
+    private readonly SemaphoreSlim _groupLock = new(1, 1);
+
     // Backfill state, guarded by _lock.
     private readonly object _lock = new();
     private CancellationTokenSource? _backfillCts;
@@ -65,6 +69,13 @@ public class IncidentAnalysisService : IHostedService, IDisposable
     {
         _transcription.OnTranscriptionCompleted += OnTranscriptionCompleted;
         _worker = Task.Run(() => WorkerLoop(_cts.Token));
+        var token = _cts.Token;
+        _ = Task.Run(async () =>
+        {
+            try { await GroupUngroupedAsync(token); }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { _logger.LogWarning(ex, "Grouping existing incidents failed"); }
+        });
         return Task.CompletedTask;
     }
 
@@ -136,11 +147,26 @@ public class IncidentAnalysisService : IHostedService, IDisposable
         if (!IsWorthAnalyzing(log.Transcription)) return null;
         if (!await IsActiveAsync(ct)) return null;
 
-        var insight = await _remote.ExtractTransmissionAsync(log.Transcription!, ServiceHint(log.AlphaTag, log.Description), ct);
+        // The channel's city/state grounds the geocoder when the call doesn't name a town.
+        var channel = await _db.GetChannelByFrequencyAsync(log.Frequency);
+        var insight = await _remote.ExtractTransmissionAsync(log.Transcription!, ServiceHint(log.AlphaTag, log.Description),
+            channel?.City, channel?.State, ct);
         if (insight == null) return null;
 
         insight.TransmissionId = log.Id;
-        await _db.SaveInsightAsync(insight);
+        await _groupLock.WaitAsync(ct);
+        try
+        {
+            if (insight.IsIncident && insight.Lat is { } lat && insight.Lon is { } lon)
+            {
+                insight.IncidentId = await IncidentGrouping.ResolveAsync(_db, log.Id, insight.Service, lat, lon, log.Timestamp);
+            }
+            await _db.SaveInsightAsync(insight);
+        }
+        finally
+        {
+            _groupLock.Release();
+        }
 
         if (insight.IsIncident)
         {
@@ -150,6 +176,34 @@ public class IncidentAnalysisService : IHostedService, IDisposable
             OnInsightReady?.Invoke(log);
         }
         return insight;
+    }
+
+    /// <summary>
+    /// Assigns incident groups to geolocated incidents analyzed before grouping existed,
+    /// oldest first, so earlier duplicates collapse on the map too. Returns how many were
+    /// grouped.
+    /// </summary>
+    internal async Task<int> GroupUngroupedAsync(CancellationToken ct)
+    {
+        var pending = (await _db.GetUngroupedIncidentsAsync()).ToList();
+        if (pending.Count == 0) return 0;
+
+        foreach (var item in pending)
+        {
+            ct.ThrowIfCancellationRequested();
+            await _groupLock.WaitAsync(ct);
+            try
+            {
+                var id = await IncidentGrouping.ResolveAsync(_db, item.TransmissionId, item.Service, item.Lat, item.Lon, item.Timestamp);
+                await _db.SetIncidentIdAsync(item.TransmissionId, id);
+            }
+            finally
+            {
+                _groupLock.Release();
+            }
+        }
+        _logger.LogInformation("Grouped {Count} earlier map call(s) into incidents.", pending.Count);
+        return pending.Count;
     }
 
     /// <summary>A transcript needs at least two words to be worth an LLM call.</summary>
@@ -312,6 +366,7 @@ public class IncidentAnalysisService : IHostedService, IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
         _cts.Cancel();
         _cts.Dispose();
+        _groupLock.Dispose();
         GC.SuppressFinalize(this);
     }
 }

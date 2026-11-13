@@ -118,5 +118,46 @@ export function mapCallFromLog(log: {
     matchedAddress: i.matchedAddress,
     lat: i.lat,
     lon: i.lon,
+    incidentId: i.incidentId,
   };
+}
+
+/** The key that groups calls about one incident: its incident id, else the call's own id. */
+export const incidentKeyOf = (call: Pick<MapCall, 'id' | 'incidentId'>): string => call.incidentId || call.id;
+
+/**
+ * One map marker: every call about the same incident (same service, same spot, close in
+ * time, as grouped by the server). The fields of the newest call (type, status, summary,
+ * position) describe the incident, while `id` is the stable incident key, so selection
+ * and highlighting survive new calls joining.
+ */
+export interface MapIncident extends MapCall {
+  /** The incident key (see incidentKeyOf). */
+  id: string;
+  /** Every call in the incident, newest first. calls[0] is the one described. */
+  calls: MapCall[];
+  /** Timestamp of the first call. */
+  firstSeen: string;
+}
+
+const timeOf = (call: MapCall) => {
+  const t = Date.parse(call.timestamp);
+  return Number.isNaN(t) ? 0 : t;
+};
+
+/** Collapses calls into incidents, newest incident (by latest call) first. */
+export function groupIncidents(calls: MapCall[]): MapIncident[] {
+  const byKey = new Map<string, MapCall[]>();
+  for (const call of calls) {
+    const key = incidentKeyOf(call);
+    const list = byKey.get(key);
+    if (list) list.push(call); else byKey.set(key, [call]);
+  }
+  const incidents: MapIncident[] = [];
+  for (const [key, list] of byKey) {
+    list.sort((a, b) => timeOf(b) - timeOf(a));
+    const latest = list[0];
+    incidents.push({ ...latest, id: key, calls: list, firstSeen: list[list.length - 1].timestamp });
+  }
+  return incidents.sort((a, b) => timeOf(b.calls[0]) - timeOf(a.calls[0]));
 }

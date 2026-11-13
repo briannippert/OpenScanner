@@ -137,12 +137,6 @@ public class RemoteTranscriptionClient
 
     // ---- AI call analysis (/transmission) ----
 
-    /// <summary>Setting: default city used to ground address lookups.</summary>
-    public const string DefaultCitySetting = "AiDefaultCity";
-
-    /// <summary>Setting: default state used to ground address lookups.</summary>
-    public const string DefaultStateSetting = "AiDefaultState";
-
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>The server accepts at most this many characters of text.</summary>
@@ -198,8 +192,10 @@ public class RemoteTranscriptionClient
     /// an insight with <see cref="TransmissionInsight.IsIncident"/> false for routine chatter,
     /// or null when the server could not be reached or failed, so the caller can retry later.
     /// <see cref="TransmissionInsight.TransmissionId"/> is left for the caller to fill in.
+    /// <paramref name="defaultCity"/>/<paramref name="defaultState"/> (from the channel the
+    /// call came in on) ground geocoding; blank leaves it to the server's default area.
     /// </summary>
-    public async Task<TransmissionInsight?> ExtractTransmissionAsync(string text, string? service, CancellationToken ct = default)
+    public async Task<TransmissionInsight?> ExtractTransmissionAsync(string text, string? service, string? defaultCity = null, string? defaultState = null, CancellationToken ct = default)
     {
         var baseUrl = await GetConfiguredUrlAsync();
         if (baseUrl == null) return null;
@@ -214,9 +210,7 @@ public class RemoteTranscriptionClient
             client.Timeout = TimeSpan.FromSeconds(TimeoutSeconds);
             // Optional locality that grounds geocoding (the server falls back to its own
             // configured default area). A city/state spoken in the call still wins.
-            var defaultCity = Blank(await _db.GetSettingAsync(DefaultCitySetting));
-            var defaultState = Blank(await _db.GetSettingAsync(DefaultStateSetting));
-            var body = JsonSerializer.Serialize(new { text = trimmed, service, defaultCity, defaultState });
+            var body = JsonSerializer.Serialize(new { text = trimmed, service, defaultCity = Blank(defaultCity), defaultState = Blank(defaultState) });
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
             using var resp = await client.PostAsync($"{baseUrl}/transmission", content, ct);
             if (!resp.IsSuccessStatusCode)

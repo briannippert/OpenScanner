@@ -2,7 +2,8 @@
 -- lexicographic comparison is chronological. The callType/service filters are
 -- appended by Database.GetMapCallsAsync when set.
 SELECT t.id, t.timestamp, t.frequency, t.alphaTag, t.audio_path AS AudioPath, t.duration, t.transcription,
-       i.callType, i.service, i.summary, i.incidentStatus, i.address, i.placeName, i.matchedAddress, i.lat, i.lon
+       i.callType, i.service, i.summary, i.incidentStatus, i.address, i.placeName, i.matchedAddress, i.lat, i.lon,
+       COALESCE(i.incidentId, i.transmissionId) AS incidentId
 FROM transmission_insights i
 JOIN transmissions t ON t.id = i.transmissionId
 WHERE i.isIncident = 1

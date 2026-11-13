@@ -90,6 +90,10 @@ public class Database : IDatabase
         try { conn.Execute("CREATE INDEX IF NOT EXISTS idx_transmissions_timestamp ON transmissions(timestamp);"); } catch (Exception ex) { _logger.LogWarning(ex, "Could not create the transmissions timestamp index"); }
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN speakerChain TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: speakerChain column already exists or failed"); }
         try { conn.Execute("ALTER TABLE channels ADD COLUMN sdrDeviceId TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: sdrDeviceId column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE channels ADD COLUMN city TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: city column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE channels ADD COLUMN state TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: state column already exists or failed"); }
+        try { conn.Execute("ALTER TABLE transmission_insights ADD COLUMN incidentId TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: incidentId column already exists or failed"); }
+        try { conn.Execute("CREATE INDEX IF NOT EXISTS idx_insights_incident ON transmission_insights(incidentId);"); } catch (Exception ex) { _logger.LogWarning(ex, "Could not create the insights incident index"); }
 
         conn.Execute(@"
             CREATE TABLE IF NOT EXISTS fire_tones (
@@ -181,6 +185,13 @@ public class Database : IDatabase
     {
         using var conn = GetConnection();
         return await conn.QueryAsync<Channel>(SqlLoader.GetSql("Channels/GetAll.sql"));
+    }
+
+    /// <inheritdoc />
+    public async Task<Channel?> GetChannelByFrequencyAsync(double frequency)
+    {
+        using var conn = GetConnection();
+        return await conn.QueryFirstOrDefaultAsync<Channel>(SqlLoader.GetSql("Channels/GetByFrequency.sql"), new { Frequency = frequency });
     }
 
     /// <inheritdoc />
@@ -635,5 +646,39 @@ public class Database : IDatabase
     {
         using var conn = GetConnection();
         return await conn.ExecuteScalarAsync<int>(SqlLoader.GetSql("Insights/CountUnanalyzed.sql"));
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<IncidentCandidate>> FindIncidentCandidatesAsync(string? service, double lat, double lon, double boxDegrees, string sinceUtc, string untilUtc, string excludeTransmissionId)
+    {
+        using var conn = GetConnection();
+        // Longitude degrees shrink with latitude; widen the box so it still covers the radius.
+        var lonBox = boxDegrees / Math.Max(0.01, Math.Cos(lat * Math.PI / 180.0));
+        return await conn.QueryAsync<IncidentCandidate>(SqlLoader.GetSql("Insights/FindIncidentCandidates.sql"), new
+        {
+            Service = service,
+            MinLat = lat - boxDegrees,
+            MaxLat = lat + boxDegrees,
+            MinLon = lon - lonBox,
+            MaxLon = lon + lonBox,
+            Since = sinceUtc,
+            Until = untilUtc,
+            ExcludeId = excludeTransmissionId,
+        });
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<UngroupedIncident>> GetUngroupedIncidentsAsync()
+    {
+        using var conn = GetConnection();
+        return await conn.QueryAsync<UngroupedIncident>(SqlLoader.GetSql("Insights/GetUngrouped.sql"));
+    }
+
+    /// <inheritdoc />
+    public async Task SetIncidentIdAsync(string transmissionId, string incidentId)
+    {
+        using var conn = GetConnection();
+        await conn.ExecuteAsync("UPDATE transmission_insights SET incidentId = @IncidentId WHERE transmissionId = @Id",
+            new { IncidentId = incidentId, Id = transmissionId });
     }
 }

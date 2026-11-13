@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CALL_TYPES, GROUP_ORDER, callTypeLabel, filterMapCalls, groupOf, mapCallFromLog, typesInGroup,
+  CALL_TYPES, GROUP_ORDER, callTypeLabel, filterMapCalls, groupIncidents, groupOf, mapCallFromLog, typesInGroup,
 } from './callTypes';
 import type { CallLog, MapCall } from '../types';
 
@@ -52,5 +52,29 @@ describe('callTypes', () => {
     expect(mapCallFromLog({ ...log, insight: { ...log.insight!, lat: null } })).toBeNull();
     expect(mapCallFromLog({ ...log, insight: { ...log.insight!, isIncident: false } })).toBeNull();
     expect(mapCallFromLog({ ...log, insight: undefined })).toBeNull();
+  });
+
+  it('carries the incident id from a live log', () => {
+    const log: CallLog = {
+      id: 'y', timestamp: '2026-11-11T12:00:00Z', frequency: 154.4, alphaTag: 'Salem FD', description: '',
+      insight: { transmissionId: 'y', analyzedAt: '', isIncident: true, callType: 'fire', lat: 42.7, lon: -71.2, incidentId: 'x' },
+    };
+    expect(mapCallFromLog(log)?.incidentId).toBe('x');
+  });
+
+  it('collapses calls about one incident into one, described by its newest call', () => {
+    const calls: MapCall[] = [
+      { ...call('d1', 'fire', 'fire', '2026-11-11T12:00:00Z'), incidentId: 'd1', incidentStatus: 'dispatched' },
+      { ...call('d2', 'fire', 'fire', '2026-11-11T12:06:00Z'), incidentId: 'd1', incidentStatus: 'on_scene' },
+      { ...call('pd', 'theft', 'police', '2026-11-11T12:03:00Z'), incidentId: 'pd' },
+      // Not grouped yet (no incident id): its own incident.
+      call('solo', 'medical', 'fire', '2026-11-11T11:00:00Z'),
+    ];
+    const incidents = groupIncidents(calls);
+    expect(incidents.map(i => i.id)).toEqual(['d1', 'pd', 'solo']);
+    expect(incidents[0].calls.map(c => c.id)).toEqual(['d2', 'd1']);
+    expect(incidents[0].incidentStatus).toBe('on_scene');
+    expect(incidents[0].firstSeen).toBe('2026-11-11T12:00:00Z');
+    expect(incidents[2].calls).toHaveLength(1);
   });
 });

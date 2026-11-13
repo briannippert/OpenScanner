@@ -2,13 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Box, ButtonBase, Typography } from '@mui/material';
 import NavigationIcon from '@mui/icons-material/Navigation';
 import L, { heatLayer, type HeatLayer } from './leaflet';
-import type { MapCall } from '../../types';
-import { CALL_GROUPS, callTypeLabel, groupOf } from '../../lib/callTypes';
+import { CALL_GROUPS, callTypeLabel, groupOf, type MapIncident } from '../../lib/callTypes';
 
 export type LayerMode = 'markers' | 'heat' | 'both';
 
 interface Props {
-  calls: MapCall[];
+  /** One entry per incident; several calls about the same incident share a marker. */
+  calls: MapIncident[];
   layers: LayerMode;
   selectedId: string | null;
   /**
@@ -18,8 +18,8 @@ interface Props {
   fresh: ReadonlyMap<string, number>;
   /** Changes when the map should re-fit to the calls (e.g. a new time range loaded). */
   fitKey: number;
-  onSelect: (call: MapCall) => void;
-  onPlay: (call: MapCall) => void;
+  onSelect: (call: MapIncident) => void;
+  onPlay: (call: MapIncident) => void;
 }
 
 const DEFAULT_CENTER: L.LatLngExpression = [39.8, -98.6]; // continental US
@@ -72,7 +72,7 @@ export const CALLOUT_MS = 6000;
 const ageStyle = (arrivedAt: number | undefined) =>
   arrivedAt == null ? '' : `--age:${Math.max(0, (Date.now() - arrivedAt) / 1000).toFixed(2)}s;`;
 
-const locationOf = (call: MapCall) => call.matchedAddress || call.address || call.placeName || '';
+const locationOf = (call: MapIncident) => call.matchedAddress || call.address || call.placeName || '';
 
 /** Compass bearing in degrees (0 = north) from one point to another, for the off-screen arrow. */
 function bearing(from: L.LatLng, to: L.LatLng): number {
@@ -83,7 +83,7 @@ function bearing(from: L.LatLng, to: L.LatLng): number {
 }
 
 /** Arrival callout: call type, summary and address. Built as DOM; the text is untrusted. */
-function calloutFor(call: MapCall, arrivedAt: number): HTMLElement {
+function calloutFor(call: MapIncident, arrivedAt: number): HTMLElement {
   const root = document.createElement('div');
   root.className = 'os-callout__body';
   root.setAttribute('style', `${ageStyle(arrivedAt)}--marker-color:${CALL_GROUPS[groupOf(call.callType)].color}`);
@@ -101,7 +101,7 @@ function calloutFor(call: MapCall, arrivedAt: number): HTMLElement {
 }
 
 interface EdgeToast {
-  call: MapCall;
+  call: MapIncident;
   /** Bearing from the map centre, for the arrow. */
   heading: number;
 }
@@ -112,7 +112,7 @@ const fmtTime = (iso: string) => {
 };
 
 /** Marker icon: color and shape both encode the call group, so color is never the only cue. */
-function iconFor(call: MapCall, selected: boolean, arrivedAt: number | undefined): L.DivIcon {
+function iconFor(call: MapIncident, selected: boolean, arrivedAt: number | undefined): L.DivIcon {
   const group = CALL_GROUPS[groupOf(call.callType)];
   const size = selected ? 20 : group.shape === 'dot' ? 12 : 16;
   const classes = ['os-marker', `os-marker--${group.shape}`];
@@ -135,7 +135,7 @@ function iconFor(call: MapCall, selected: boolean, arrivedAt: number | undefined
  * Popup content built as DOM nodes, never HTML strings: summaries and transcripts come
  * from an LLM and the radio, so they are treated as untrusted text.
  */
-function popupFor(call: MapCall, onPlay: (call: MapCall) => void): HTMLElement {
+function popupFor(call: MapIncident, onPlay: (call: MapIncident) => void): HTMLElement {
   const root = document.createElement('div');
   root.className = 'os-popup';
   const add = (tag: string, className: string, text?: string | null) => {
@@ -152,12 +152,13 @@ function popupFor(call: MapCall, onPlay: (call: MapCall) => void): HTMLElement {
   add('div', 'os-popup__summary', call.summary);
   add('div', 'os-popup__address', call.matchedAddress || call.address || call.placeName);
   add('div', 'os-popup__meta', `${fmtTime(call.timestamp)} · ${call.alphaTag || `${call.frequency.toFixed(4)} MHz`}`);
+  if (call.calls.length > 1) add('div', 'os-popup__meta', `${call.calls.length} calls since ${fmtTime(call.firstSeen)}`);
   add('div', 'os-popup__transcript', call.transcription ? `“${call.transcription}”` : null);
   if (call.audio_path) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'os-popup__play';
-    btn.textContent = '▶ Play recording';
+    btn.textContent = call.calls.length > 1 ? '▶ Play latest' : '▶ Play recording';
     btn.addEventListener('click', () => onPlay(call));
     root.appendChild(btn);
   }
@@ -244,7 +245,7 @@ const CallMap: React.FC<Props> = ({ calls, layers, selectedId, fresh, fitKey, on
       const marker = L.marker([call.lat, call.lon], {
         icon: iconFor(call, call.id === selectedId, arrivedAt),
         keyboard: true,
-        title: `${callTypeLabel(call.callType)} – ${call.matchedAddress || call.address || ''}`,
+        title: `${callTypeLabel(call.callType)} – ${call.matchedAddress || call.address || ''}${call.calls.length > 1 ? ` (${call.calls.length} calls)` : ''}`,
         zIndexOffset: call.id === selectedId ? 1000 : 0,
       });
       marker.bindPopup(() => popupFor(call, c => onPlayRef.current(c)), { maxWidth: 300, minWidth: 220 });

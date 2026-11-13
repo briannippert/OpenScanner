@@ -1,5 +1,6 @@
 using OpenScanner.Server;
 using OpenScanner.Server.Models;
+using OpenScanner.Server.Services;
 using OpenScanner.Server.Interfaces;
 using Xunit;
 using Microsoft.Extensions.Configuration;
@@ -414,6 +415,92 @@ public class DatabaseTests : IDisposable
 
         var until = await _db.GetMapCallsAsync(new MapCallFilter(since, now.AddMinutes(-8).ToString("o"), null, null, 100));
         Assert.Equal(new[] { "med1", "theft1" }, until.Select(c => c.Id));
+    }
+
+    [Fact]
+    public async Task Channel_CityAndState_RoundTripAndLookUpByFrequency()
+    {
+        var id = await _db.AddChannelAsync(new Channel(154.43, "Salem FD", "Fire") { City = "Salem", State = "NH" });
+        var got = await _db.GetChannelByFrequencyAsync(154.43);
+        Assert.NotNull(got);
+        Assert.Equal("Salem", got!.City);
+        Assert.Equal("NH", got.State);
+
+        got.City = "Windham";
+        await _db.UpdateChannelAsync(got);
+        Assert.Equal("Windham", (await _db.GetAllChannelsAsync()).Single(c => c.Id == id).City);
+
+        Assert.Null(await _db.GetChannelByFrequencyAsync(460.1));
+    }
+
+    [Fact]
+    public async Task IncidentGrouping_SameServiceNearbyAndRecentShareAnIncident()
+    {
+        var t0 = DateTime.UtcNow.AddHours(-2);
+        async Task<string> Analyze(string id, DateTime when, string service, double lat = 42.78, double lon = -71.23)
+        {
+            await _db.SaveTransmissionAsync(Tx(id, when));
+            var insight = Incident(id, "fire", service, lat, lon);
+            insight.IncidentId = await IncidentGrouping.ResolveAsync(_db, id, service, lat, lon, when.ToString("o"));
+            await _db.SaveInsightAsync(insight);
+            return insight.IncidentId;
+        }
+
+        Assert.Equal("dispatch", await Analyze("dispatch", t0, "fire"));
+        // 50 m away, 5 min later: same incident.
+        Assert.Equal("dispatch", await Analyze("onscene", t0.AddMinutes(5), "fire", 42.78045));
+        // Chains: 18 min after dispatch but 13 min after "onscene".
+        Assert.Equal("dispatch", await Analyze("cleared", t0.AddMinutes(18), "fire"));
+        // Police at the same address stays separate.
+        Assert.Equal("pd", await Analyze("pd", t0.AddMinutes(1), "police"));
+        // Same service but a different street (~1 km).
+        Assert.Equal("elsewhere", await Analyze("elsewhere", t0.AddMinutes(2), "fire", 42.79));
+        // Same spot, an hour later: a new incident.
+        Assert.Equal("later", await Analyze("later", t0.AddMinutes(80), "fire"));
+
+        var calls = (await _db.GetMapCallsAsync(new MapCallFilter(t0.AddMinutes(-1).ToString("o"), null, null, null, 100))).ToList();
+        Assert.Equal("dispatch", calls.Single(c => c.Id == "cleared").IncidentId);
+    }
+
+    [Fact]
+    public async Task IncidentGrouping_BackfillOrderNewestFirstStillGroups()
+    {
+        var t0 = DateTime.UtcNow.AddHours(-2);
+        await _db.SaveTransmissionAsync(Tx("first", t0));
+        await _db.SaveTransmissionAsync(Tx("second", t0.AddMinutes(4)));
+
+        var second = Incident("second", "fire", "fire");
+        second.IncidentId = await IncidentGrouping.ResolveAsync(_db, "second", "fire", 42.78, -71.23, t0.AddMinutes(4).ToString("o"));
+        await _db.SaveInsightAsync(second);
+        var first = Incident("first", "fire", "fire");
+        first.IncidentId = await IncidentGrouping.ResolveAsync(_db, "first", "fire", 42.78, -71.23, t0.ToString("o"));
+
+        Assert.Equal("second", first.IncidentId);
+    }
+
+    [Fact]
+    public async Task UngroupedIncidents_AreListedOldestFirstUntilAssigned()
+    {
+        var t0 = DateTime.UtcNow.AddHours(-1);
+        await _db.SaveTransmissionAsync(Tx("b", t0.AddMinutes(2)));
+        await _db.SaveTransmissionAsync(Tx("a", t0));
+        await _db.SaveTransmissionAsync(Tx("nogeo", t0));
+        await _db.SaveInsightAsync(Incident("b", "fire", "fire"));
+        await _db.SaveInsightAsync(Incident("a", "fire", "fire"));
+        await _db.SaveInsightAsync(Incident("nogeo", "fire", "fire", null, null));
+
+        var pending = (await _db.GetUngroupedIncidentsAsync()).ToList();
+        Assert.Equal(new[] { "a", "b" }, pending.Select(p => p.TransmissionId));
+        Assert.Equal("fire", pending[0].Service);
+
+        // Before grouping, a map call is its own incident.
+        var since = t0.AddMinutes(-1).ToString("o");
+        Assert.Equal("a", (await _db.GetMapCallsAsync(new MapCallFilter(since, null, null, null, 100))).Single(c => c.Id == "a").IncidentId);
+
+        await _db.SetIncidentIdAsync("a", "a");
+        await _db.SetIncidentIdAsync("b", "a");
+        Assert.Empty(await _db.GetUngroupedIncidentsAsync());
+        Assert.Equal("a", (await _db.GetInsightAsync("b"))!.IncidentId);
     }
 
     [Fact]
