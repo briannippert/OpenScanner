@@ -526,34 +526,6 @@ const SettingsManager: React.FC<Props> = ({ open, onClose, onRecordingsDeleted, 
                                                     />
                                                     {aiEnabled && (
                                                         <Row
-                                                            label="Default location"
-                                                            description="City and state that ground address lookups when a call doesn't say where. Leave blank to use the server's default area."
-                                                            control={
-                                                                <Box sx={{ display: 'flex', gap: 1 }}>
-                                                                    <TextField
-                                                                        size="small"
-                                                                        variant="outlined"
-                                                                        placeholder="City"
-                                                                        style={{ width: '150px' }}
-                                                                        inputProps={{ 'aria-label': 'Default city' }}
-                                                                        value={settings['AiDefaultCity'] || ''}
-                                                                        onChange={(e) => handleValueChange('AiDefaultCity', e.target.value)}
-                                                                    />
-                                                                    <TextField
-                                                                        size="small"
-                                                                        variant="outlined"
-                                                                        placeholder="State"
-                                                                        style={{ width: '80px' }}
-                                                                        inputProps={{ 'aria-label': 'Default state', maxLength: 32 }}
-                                                                        value={settings['AiDefaultState'] || ''}
-                                                                        onChange={(e) => handleValueChange('AiDefaultState', e.target.value)}
-                                                                    />
-                                                                </Box>
-                                                            }
-                                                        />
-                                                    )}
-                                                    {aiEnabled && (
-                                                        <Row
                                                             label="Analyze history"
                                                             description={
                                                                 aiBackfill?.running

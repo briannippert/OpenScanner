@@ -95,6 +95,15 @@ public class Channel
     public string? SdrDeviceId { get; set; }
 
     /// <summary>
+    /// City this channel serves. Sent with AI call analysis to ground address lookups
+    /// when a call doesn't say which town it is in; null leaves it to the server's default.
+    /// </summary>
+    public string? City { get; set; }
+
+    /// <summary>State this channel serves; see <see cref="City"/>.</summary>
+    public string? State { get; set; }
+
+    /// <summary>
     /// Whether this channel is digital voice (decoded by dsd-fme) or analog. Digital
     /// decoding and analog listening want different tuner gain, so this drives which
     /// gain an SDR runs at.
@@ -713,6 +722,41 @@ public class TransmissionInsight
     public double? Lat { get; set; }
     /// <summary>Incident longitude, when geocoded.</summary>
     public double? Lon { get; set; }
+    /// <summary>
+    /// Groups transmissions about the same incident: the transmission id of the call that
+    /// started the group. Null for routine chatter and incidents without a location.
+    /// </summary>
+    public string? IncidentId { get; set; }
+}
+
+/// <summary>A geolocated incident saved before incident grouping existed.</summary>
+public class UngroupedIncident
+{
+    /// <summary>The analyzed transmission.</summary>
+    public string TransmissionId { get; set; } = string.Empty;
+    /// <summary>police or fire.</summary>
+    public string? Service { get; set; }
+    /// <summary>Incident latitude.</summary>
+    public double Lat { get; set; }
+    /// <summary>Incident longitude.</summary>
+    public double Lon { get; set; }
+    /// <summary>Transmission start (round-trip UTC).</summary>
+    public string Timestamp { get; set; } = string.Empty;
+}
+
+/// <summary>An existing incident call that a new call may belong to.</summary>
+public class IncidentCandidate
+{
+    /// <summary>The candidate's transmission.</summary>
+    public string TransmissionId { get; set; } = string.Empty;
+    /// <summary>The incident group it belongs to.</summary>
+    public string IncidentId { get; set; } = string.Empty;
+    /// <summary>Incident latitude.</summary>
+    public double Lat { get; set; }
+    /// <summary>Incident longitude.</summary>
+    public double Lon { get; set; }
+    /// <summary>Transmission start (round-trip UTC).</summary>
+    public string Timestamp { get; set; } = string.Empty;
 }
 
 /// <summary>A geolocated incident for the map: the insight plus its transmission.</summary>
@@ -751,6 +795,11 @@ public class MapCall
     public double Lat { get; set; }
     /// <summary>Incident longitude.</summary>
     public double Lon { get; set; }
+    /// <summary>
+    /// The incident this call belongs to. Calls sharing it are the same incident and are
+    /// shown as one marker.
+    /// </summary>
+    public string IncidentId { get; set; } = string.Empty;
 }
 
 /// <summary>Filter for <see cref="MapCall"/> queries.</summary>

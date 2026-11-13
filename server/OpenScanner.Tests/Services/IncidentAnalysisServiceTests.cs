@@ -101,10 +101,10 @@ public class IncidentAnalysisServiceTests
     }
 
     [Fact]
-    public async Task Analyze_SendsConfiguredDefaultCityAndState()
+    public async Task Analyze_SendsTheChannelsCityAndState()
     {
-        _settings["AiDefaultCity"] = " Salem ";
-        _settings["AiDefaultState"] = "NH";
+        _db.Setup(d => d.GetChannelByFrequencyAsync(154.43))
+            .ReturnsAsync(new Channel(154.43, "Salem FD", "Fire dispatch") { City = " Salem ", State = "NH" });
         var service = CreateService(out _);
         _handler.Responses["/swagger/v1/swagger.json"] = (HttpStatusCode.OK, SwaggerWithTransmission);
         _handler.Responses["/transmission"] = (HttpStatusCode.OK, FireResponse);
@@ -114,6 +114,77 @@ public class IncidentAnalysisServiceTests
         var body = JsonDocument.Parse(_handler.Bodies["/transmission"]).RootElement;
         Assert.Equal("Salem", body.GetProperty("defaultCity").GetString());
         Assert.Equal("NH", body.GetProperty("defaultState").GetString());
+    }
+
+    [Fact]
+    public async Task Analyze_BlankChannelLocalityIsSentAsNull()
+    {
+        _db.Setup(d => d.GetChannelByFrequencyAsync(It.IsAny<double>()))
+            .ReturnsAsync(new Channel(154.43, "Salem FD", "Fire dispatch") { City = "  ", State = null });
+        var service = CreateService(out _);
+        _handler.Responses["/swagger/v1/swagger.json"] = (HttpStatusCode.OK, SwaggerWithTransmission);
+        _handler.Responses["/transmission"] = (HttpStatusCode.OK, FireResponse);
+
+        await service.AnalyzeAsync(Log(), CancellationToken.None);
+
+        var body = JsonDocument.Parse(_handler.Bodies["/transmission"]).RootElement;
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("defaultCity").ValueKind);
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("defaultState").ValueKind);
+    }
+
+    [Fact]
+    public async Task Analyze_JoinsANearbyIncidentFromTheSameService()
+    {
+        var service = CreateService(out _);
+        _handler.Responses["/swagger/v1/swagger.json"] = (HttpStatusCode.OK, SwaggerWithTransmission);
+        _handler.Responses["/transmission"] = (HttpStatusCode.OK, FireResponse);
+        var log = Log();
+        _db.Setup(d => d.FindIncidentCandidatesAsync("fire", It.IsAny<double>(), It.IsAny<double>(), It.IsAny<double>(),
+                It.IsAny<string>(), It.IsAny<string>(), "tx1"))
+            .ReturnsAsync(new[]
+            {
+                new IncidentCandidate { TransmissionId = "tx0", IncidentId = "first", Lat = 42.7825, Lon = -71.2334, Timestamp = DateTime.UtcNow.AddMinutes(-4).ToString("o") },
+            });
+
+        var insight = await service.AnalyzeAsync(log, CancellationToken.None);
+
+        Assert.Equal("first", insight!.IncidentId);
+        Assert.Equal("first", _saved.Single().IncidentId);
+    }
+
+    [Fact]
+    public async Task Analyze_StartsANewIncidentWhenNothingIsNearby()
+    {
+        var service = CreateService(out _);
+        _handler.Responses["/swagger/v1/swagger.json"] = (HttpStatusCode.OK, SwaggerWithTransmission);
+        _handler.Responses["/transmission"] = (HttpStatusCode.OK, FireResponse);
+
+        var insight = await service.AnalyzeAsync(Log(), CancellationToken.None);
+
+        Assert.Equal("tx1", insight!.IncidentId);
+    }
+
+    [Fact]
+    public async Task GroupUngrouped_AssignsEachEarlierIncident()
+    {
+        var service = CreateService(out _);
+        var t0 = DateTime.UtcNow.AddHours(-1);
+        _db.Setup(d => d.GetUngroupedIncidentsAsync()).ReturnsAsync(new[]
+        {
+            new UngroupedIncident { TransmissionId = "a", Service = "fire", Lat = 42.78, Lon = -71.23, Timestamp = t0.ToString("o") },
+            new UngroupedIncident { TransmissionId = "b", Service = "fire", Lat = 42.78, Lon = -71.23, Timestamp = t0.AddMinutes(3).ToString("o") },
+        });
+        // "b" finds "a", which was grouped just before it.
+        _db.Setup(d => d.FindIncidentCandidatesAsync(It.IsAny<string?>(), It.IsAny<double>(), It.IsAny<double>(), It.IsAny<double>(),
+                It.IsAny<string>(), It.IsAny<string>(), "b"))
+            .ReturnsAsync(new[] { new IncidentCandidate { TransmissionId = "a", IncidentId = "a", Lat = 42.78, Lon = -71.23, Timestamp = t0.ToString("o") } });
+        var assigned = new Dictionary<string, string>();
+        _db.Setup(d => d.SetIncidentIdAsync(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((tx, id) => assigned[tx] = id).Returns(Task.CompletedTask);
+
+        Assert.Equal(2, await service.GroupUngroupedAsync(CancellationToken.None));
+        Assert.Equal("a", assigned["a"]);
+        Assert.Equal("a", assigned["b"]);
     }
 
     [Fact]

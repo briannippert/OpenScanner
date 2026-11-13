@@ -50,7 +50,9 @@ CREATE TABLE IF NOT EXISTS channels (
     dmrSlot INTEGER,
     dmrColorCode INTEGER,
     dmrTalkgroup INTEGER,
-    sdrDeviceId TEXT
+    sdrDeviceId TEXT,
+    city TEXT,
+    state TEXT
 );
 
 -- One row per RTL-SDR dongle OpenScanner has seen. The id is stable across replugs: the
@@ -86,7 +88,10 @@ CREATE TABLE IF NOT EXISTS transmission_insights (
     state TEXT,
     matchedAddress TEXT,
     lat REAL,
-    lon REAL
+    lon REAL,
+    -- Groups transmissions about the same incident (same service, same spot, close in
+    -- time); the transmission id of the call that started the group.
+    incidentId TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_insights_calltype ON transmission_insights(callType);

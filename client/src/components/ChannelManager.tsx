@@ -227,6 +227,22 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                         </Box>
                     )}
                     <Box display="flex" gap={2}>
+                        <TextField
+                            label="City"
+                            value={editing.city ?? ''}
+                            onChange={e => handleChange('city', e.target.value)}
+                            sx={{ flex: 2 }}
+                            helperText="Grounds AI address lookups for calls on this channel"
+                        />
+                        <TextField
+                            label="State"
+                            value={editing.state ?? ''}
+                            onChange={e => handleChange('state', e.target.value)}
+                            sx={{ flex: 1 }}
+                            inputProps={{ maxLength: 32 }}
+                        />
+                    </Box>
+                    <Box display="flex" gap={2}>
                         <TextField label="License" value={editing.license} onChange={e => handleChange('license', e.target.value)} sx={{ flex: 1 }} />
                         <TextField label="Tag" value={editing.tag} onChange={e => handleChange('tag', e.target.value)} sx={{ flex: 1 }} />
                     </Box>
@@ -270,7 +286,7 @@ const ChannelManager: React.FC<Props> = ({ open, onClose, channels, onSave, onDe
                                         <Typography variant="body2" color="primary" sx={{ fontFamily: MONO }}>{ch.frequency.toFixed(4)}</Typography>
                                     </Box>
                                 }
-                                secondary={ch.description}
+                                secondary={[ch.description, [ch.city, ch.state].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}
                             />
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 {showSdrs && radios && (

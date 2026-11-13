@@ -14,6 +14,9 @@ export interface Channel {
     dmrTalkgroup?: number;
     /** The SDR this channel is pinned to in Manual assignment mode; null/absent lets the planner place it. */
     sdrDeviceId?: string | null;
+    /** City/state this channel serves; grounds AI address lookups for its calls. */
+    city?: string | null;
+    state?: string | null;
 }
 
 export interface ParallelChannelState {
@@ -178,6 +181,8 @@ export interface TransmissionInsight {
     matchedAddress?: string | null;
     lat?: number | null;
     lon?: number | null;
+    /** Groups transmissions about the same incident; null for routine or unlocated calls. */
+    incidentId?: string | null;
 }
 
 /** A geolocated incident for the map (GET /api/ai/calls). */
@@ -198,6 +203,8 @@ export interface MapCall {
     matchedAddress?: string | null;
     lat: number;
     lon: number;
+    /** Calls sharing this are the same incident (same service, same spot, close in time). */
+    incidentId?: string | null;
 }
 
 /** GET /api/ai/capabilities */

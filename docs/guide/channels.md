@@ -13,6 +13,7 @@ A channel is one frequency for the scanner to listen on. Open **Manage Channels*
 | **Tone** | Optional squelch tone for the channel, e.g. `100.0`. |
 | **License** | Optional reference, such as the FCC callsign. |
 | **Tag** | Optional label, such as `Fire` or `EMS`. |
+| **City / State** | Optional. The town this channel serves. AI call analysis uses it to find addresses when a call doesn't name the town. See [Call map](map.md). |
 | **Avoid Channel** | Leave the channel out of the scan without deleting it. |
 
 ## SDR
