@@ -230,7 +230,8 @@ const UsageBar: React.FC<{ fraction: number }> = ({ fraction }) => {
     : theme.palette.primary.main;
   return (
     <Box sx={{ height: 8, borderRadius: 999, bgcolor: 'surface.border', overflow: 'hidden' }}>
-      <Box sx={{ height: '100%', width: `${f * 100}%`, bgcolor: color, transition: 'width 0.4s' }} />
+      {/* Live value, so inline `style`: through `sx` each distinct width becomes a CSS class that is never freed. */}
+      <Box style={{ width: `${f * 100}%` }} sx={{ height: '100%', bgcolor: color, transition: 'width 0.4s' }} />
     </Box>
   );
 };
