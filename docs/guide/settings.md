@@ -6,7 +6,7 @@ Open **Settings** from the header. Changes apply immediately.
 
 Backend, model and thread count for speech-to-text. See [Transcription](transcription.md).
 
-With a remote server that supports it, this section also has **AI call analysis** and **Analyze history**. See [Call map](map.md).
+With an [AI server](ai-server.md) as the remote server, this section also has **AI call analysis** and **Analyze history**. See [Call map](map.md).
 
 ## Radios
 

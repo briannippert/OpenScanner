@@ -6,7 +6,7 @@ Open it from the **Call Map** button in the header, or search for "map" in the c
 
 ## Turning on AI call analysis
 
-AI call analysis runs on a remote OpenScanner Whisper server that supports it.
+AI call analysis runs on an [OpenScanner AI server](ai-server.md). Set one up first.
 
 1. Go to **Settings → Transcription**, choose **Remote server** as the backend, and enter its **Server URL**.
 2. OpenScanner checks whether the server offers call analysis. If it does, an **AI call analysis** switch appears. It stays hidden for servers that don't support it.

@@ -9,6 +9,7 @@ OpenScanner turns a Raspberry Pi and an RTL-SDR dongle into a web-based digital 
 - **Scans and decodes** P25 and DMR digital voice and narrowband FM.
 - **Records and transcribes** every transmission, so you can read back what you missed.
 - **Searchable history** by transcript text, channel or frequency, with one-click playback.
+- **Optional AI server**: offload transcription to a faster machine and put dispatched calls on a live [call map](guide/map.md). See [AI server](guide/ai-server.md).
 - **Fire tone-out alerts** when a two-tone page you care about goes out, optionally pushed to your phone.
 - **Live across devices**: holds, avoids and status stay in sync in every open browser.
 - **Updates itself** from the web UI.
@@ -43,3 +44,4 @@ OpenScanner turns a Raspberry Pi and an RTL-SDR dongle into a web-based digital 
 | **Radio** | An RTL2832U-based RTL-SDR dongle, such as the RTL-SDR Blog v3 or v4. |
 | **Antenna** | One tuned for the bands you listen to, typically 150–800 MHz for public safety. |
 | **GPS** *(optional)* | Any USB GPS receiver that works with `gpsd`. |
+| **AI server** *(optional)* | A Linux machine, ideally with an NVIDIA GPU, running [OpenScanner.AIServer](guide/ai-server.md) for faster transcription and the call map. |
