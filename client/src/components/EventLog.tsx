@@ -47,19 +47,23 @@ function EventLog({ events, onClear, onEventClick, transcriptions }: EventLogPro
             .filter((id): id is string => !!id && !transcriptions?.has(id) && !attempted.current.has(id));
         if (missing.length === 0) return;
         let cancelled = false;
-        for (const id of missing) {
-            attempted.current.add(id);
-            fetch(`/api/history/entry/${encodeURIComponent(id)}`)
+        // One request per 200 ids (the endpoint's batch limit) rather than one per event.
+        for (let i = 0; i < missing.length; i += 200) {
+            const chunk = missing.slice(i, i + 200);
+            chunk.forEach(id => attempted.current.add(id));
+            fetch(`/api/transmissions?ids=${chunk.map(encodeURIComponent).join(',')}`)
                 .then(res => (res.ok ? res.json() : null))
-                .then((data: CallLog | null) => {
-                    if (cancelled) return;
+                .then((page: { items: CallLog[] } | null) => {
+                    if (cancelled || !page) return;
+                    const byId = new Map(page.items.map(l => [l.id, l.transcription ?? null]));
                     setFetched(prev => {
                         const next = new Map(prev);
-                        next.set(id, data?.transcription ?? null);
+                        // Ids the server no longer has are recorded as fetched-with-no-text.
+                        for (const id of chunk) next.set(id, byId.get(id) ?? null);
                         return next;
                     });
                 })
-                .catch(() => { /* leave unfetched; row simply shows no transcription */ });
+                .catch(() => { /* leave unfetched; rows simply show no transcription */ });
         }
         return () => { cancelled = true; };
     }, [events, transcriptions]);

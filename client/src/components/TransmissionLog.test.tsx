@@ -137,9 +137,9 @@ describe('TransmissionLog Component', () => {
         ];
 
         fetchMock.mockImplementation((url) => {
-            if (url.includes('/api/history/search')) {
+            if (url.includes('/api/transmissions?q=')) {
                 return Promise.resolve({
-                    json: async () => mockSearchResults
+                    json: async () => ({ items: mockSearchResults, nextCursor: null })
                 });
             }
             return Promise.resolve({ json: async () => [] });
@@ -152,7 +152,7 @@ describe('TransmissionLog Component', () => {
 
         await waitFor(() => {
             expect(fetchMock).toHaveBeenCalledWith(
-                expect.stringContaining('/api/history/search?q=Search'),
+                expect.stringContaining('/api/transmissions?q=Search'),
                 expect.objectContaining({ signal: expect.any(AbortSignal) }),
             );
             expect(screen.getByText('Search Result')).toBeInTheDocument();
@@ -169,10 +169,10 @@ describe('TransmissionLog Component', () => {
             if (url.includes('q=first')) {
                 return new Promise((resolve, reject) => {
                     init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
-                    releaseFirst = rows => resolve({ json: async () => rows });
+                    releaseFirst = rows => resolve({ json: async () => ({ items: rows, nextCursor: null }) });
                 });
             }
-            if (url.includes('q=second')) return Promise.resolve({ json: async () => [row('s', 'Second Result')] });
+            if (url.includes('q=second')) return Promise.resolve({ json: async () => ({ items: [row('s', 'Second Result')], nextCursor: null }) });
             return Promise.resolve({ json: async () => [] });
         });
 
@@ -263,5 +263,61 @@ describe('TransmissionLog Component', () => {
 
         rerender(<TransmissionLog liveLogs={mockLogs} playingId={null} onPlay={mockOnPlay} onDelete={mockOnDelete} />);
         expect(screen.queryByLabelText('Stop playback')).not.toBeInTheDocument();
+    });
+
+    it('loads older recordings below the live window, page by page', async () => {
+        const older = (id: string, alphaTag: string): CallLog =>
+            ({ id, frequency: 155, timestamp: '2023-10-26T09:00:00Z', alphaTag, description: '' });
+        fetchMock.mockImplementation((url: string) => {
+            if (url.includes('cursor=NEXT')) return Promise.resolve({ ok: true, json: async () => ({ items: [older('o2', 'Oldest Page')], nextCursor: null }) });
+            if (url.startsWith('/api/transmissions?until=')) return Promise.resolve({ ok: true, json: async () => ({ items: [older('o1', 'Older Page')], nextCursor: 'NEXT' }) });
+            return Promise.resolve({ json: async () => [] });
+        });
+
+        render(<TransmissionLog liveLogs={mockLogs} playingId={null} onPlay={mockOnPlay} onDelete={mockOnDelete} />);
+        await waitForInit();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Load older recordings' }));
+        await screen.findByText('Older Page');
+        // Anchored just below the oldest live row.
+        expect(fetchMock).toHaveBeenCalledWith(
+            expect.stringContaining(`until=${encodeURIComponent(mockLogs[1].timestamp)}`),
+            expect.anything(),
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Load older recordings' }));
+        await screen.findByText('Oldest Page');
+        // The server said that was the last page.
+        expect(screen.queryByRole('button', { name: 'Load older recordings' })).not.toBeInTheDocument();
+        expect(screen.getByText('Police Dispatch')).toBeInTheDocument();
+    });
+
+    it('asks the server for older tone-outs when the Tone-outs filter is on', async () => {
+        fetchMock.mockImplementation(() => Promise.resolve({ ok: true, json: async () => ({ items: [], nextCursor: null }) }));
+
+        render(<TransmissionLog liveLogs={mockLogs} playingId={null} onPlay={mockOnPlay} onDelete={mockOnDelete} />);
+        await waitForInit();
+        fireEvent.click(screen.getByText('Tone-outs'));
+        fireEvent.click(screen.getByRole('button', { name: 'Load older recordings' }));
+
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/until=.*&tones=true/), expect.anything()));
+    });
+
+    it('loads favorites from the paged endpoint, filtered on the server', async () => {
+        fetchMock.mockImplementation((url: string) => {
+            if (url.startsWith('/api/transmissions?favorites=true')) {
+                return Promise.resolve({ ok: true, json: async () => ({ items: [{ ...mockLogs[0], alphaTag: 'Starred One', isFavorite: true }], nextCursor: null }) });
+            }
+            return Promise.resolve({ json: async () => [] });
+        });
+
+        render(<TransmissionLog liveLogs={[]} playingId={null} onPlay={mockOnPlay} onDelete={mockOnDelete} />);
+        await waitForInit();
+        fireEvent.click(screen.getByRole('tab', { name: /Favorites/ }));
+        await screen.findByText('Starred One');
+
+        fireEvent.click(screen.getByText('Tone-outs'));
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+            expect.stringContaining('/api/transmissions?favorites=true&tones=true'), expect.anything()));
     });
 });

@@ -1,4 +1,3 @@
-using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
 using OpenScanner.Server.Interfaces;
 using OpenScanner.Server.Models;
@@ -59,14 +58,14 @@ public class AiController : ControllerBase
         [FromQuery] string? callTypes, [FromQuery] string? service, [FromQuery] int? limit)
     {
         DateTime sinceUtc = DateTime.UtcNow.AddHours(-24);
-        if (!string.IsNullOrWhiteSpace(since) && !TryParseUtc(since, out sinceUtc))
+        if (!string.IsNullOrWhiteSpace(since) && !ApiDates.TryParseUtc(since, out sinceUtc))
         {
             return BadRequest(new { error = "since must be an ISO 8601 date/time." });
         }
         DateTime? untilUtc = null;
         if (!string.IsNullOrWhiteSpace(until))
         {
-            if (!TryParseUtc(until, out var u)) return BadRequest(new { error = "until must be an ISO 8601 date/time." });
+            if (!ApiDates.TryParseUtc(until, out var u)) return BadRequest(new { error = "until must be an ISO 8601 date/time." });
             untilUtc = u;
         }
 
@@ -105,17 +104,6 @@ public class AiController : ControllerBase
     {
         _analysis.StopBackfill();
         return _analysis.GetBackfillStatus();
-    }
-
-    private static bool TryParseUtc(string value, out DateTime utc)
-    {
-        if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dto))
-        {
-            utc = dto.UtcDateTime;
-            return true;
-        }
-        utc = default;
-        return false;
     }
 }
 

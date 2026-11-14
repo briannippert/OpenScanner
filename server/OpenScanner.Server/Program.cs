@@ -87,6 +87,17 @@ builder.Services.AddHttpClient();
 builder.Services.AddSingleton<IUpdateService, UpdateService>();
 builder.Services.AddHostedService(sp => (UpdateService)sp.GetRequiredService<IUpdateService>());
 builder.Services.AddCors();
+// JSON lists with transcriptions shrink several-fold; matters most for the mobile app on
+// cellular. Audio (/audio/*, /ws/audio) isn't in the MIME list and is left alone.
+builder.Services.AddResponseCompression(o =>
+{
+    o.EnableForHttps = true;
+    o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+    o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+    o.MimeTypes = new[] { "application/json", "text/plain", "text/html", "text/css", "application/javascript", "text/javascript", "image/svg+xml" };
+});
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProviderOptions>(o => o.Level = System.IO.Compression.CompressionLevel.Fastest);
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProviderOptions>(o => o.Level = System.IO.Compression.CompressionLevel.Fastest);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApiDocument(config => 
 {
@@ -104,6 +115,7 @@ builder.Services.AddOpenApiDocument(config =>
 
 var app = builder.Build();
 
+app.UseResponseCompression();
 app.UseCors(c => c.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
 app.UseWebSockets();
 app.UseOpenApi();

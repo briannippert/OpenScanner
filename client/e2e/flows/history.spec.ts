@@ -19,8 +19,8 @@ test.describe('Transmission Log', () => {
     const searchInput = page.getByPlaceholder('Search logs…');
     
     // Mock search results
-    await page.route(/\/api\/history\/search/, async route => {
-        await route.fulfill({ json: [mockLogs[1]] });
+    await page.route(/\/api\/transmissions\?q=/, async route => {
+        await route.fulfill({ json: { items: [mockLogs[1]], nextCursor: null } });
     });
 
     await searchInput.fill('Fire');
@@ -52,5 +52,18 @@ test.describe('Transmission Log', () => {
       // Note: HTML5 Audio might not fully trigger in headless without interaction or specific codec, 
       // but the network request should happen.
       await expect.poll(() => audioRequested).toBeTruthy();
+  });
+
+  test('loads older recordings below the live list', async ({ page }) => {
+    await page.route(/\/api\/transmissions\?until=/, async route => {
+      await route.fulfill({ json: { items: [{ ...mockLogs[0], id: 'older-1', alphaTag: 'Older Channel' }], nextCursor: null } });
+    });
+
+    const log = page.getByTestId('transmission-log');
+    await log.getByRole('button', { name: 'Load older recordings' }).click();
+
+    await expect(log.getByText('Older Channel')).toBeVisible();
+    // That was the last page, so the button goes away.
+    await expect(log.getByRole('button', { name: 'Load older recordings' })).toHaveCount(0);
   });
 });

@@ -88,6 +88,12 @@ public class Database : IDatabase
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN isFavorite INTEGER DEFAULT 0;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: isFavorite column already exists or failed"); }
         // Every history, activity and statistics query filters or sorts on timestamp.
         try { conn.Execute("CREATE INDEX IF NOT EXISTS idx_transmissions_timestamp ON transmissions(timestamp);"); } catch (Exception ex) { _logger.LogWarning(ex, "Could not create the transmissions timestamp index"); }
+        // Keyset paging for GET /api/transmissions orders by (timestamp, id).
+        try { conn.Execute("CREATE INDEX IF NOT EXISTS idx_transmissions_ts_id ON transmissions(timestamp, id);"); } catch (Exception ex) { _logger.LogWarning(ex, "Could not create the transmissions paging index"); }
+        // Per-channel history (browse by day, channel filter).
+        try { conn.Execute("CREATE INDEX IF NOT EXISTS idx_transmissions_channel_ts ON transmissions(alphaTag, timestamp);"); } catch (Exception ex) { _logger.LogWarning(ex, "Could not create the transmissions channel index"); }
+        // Starred rows are few; a partial index keeps the favorites list from scanning the table.
+        try { conn.Execute("CREATE INDEX IF NOT EXISTS idx_transmissions_fav ON transmissions(timestamp) WHERE isFavorite = 1;"); } catch (Exception ex) { _logger.LogWarning(ex, "Could not create the transmissions favorites index"); }
         try { conn.Execute("ALTER TABLE transmissions ADD COLUMN speakerChain TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: speakerChain column already exists or failed"); }
         try { conn.Execute("ALTER TABLE channels ADD COLUMN sdrDeviceId TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: sdrDeviceId column already exists or failed"); }
         try { conn.Execute("ALTER TABLE channels ADD COLUMN city TEXT;"); } catch (Exception ex) { _logger.LogDebug(ex, "Migration skip: city column already exists or failed"); }
@@ -119,6 +125,8 @@ public class Database : IDatabase
                 transmissionId TEXT
             );
         ");
+        // The tone-out filter looks transmissions up by the event that references them.
+        try { conn.Execute("CREATE INDEX IF NOT EXISTS idx_radio_events_tx ON radio_events(transmissionId);"); } catch (Exception ex) { _logger.LogWarning(ex, "Could not create the radio events transmission index"); }
 
         conn.Execute(@"
             CREATE TABLE IF NOT EXISTS settings (
@@ -292,7 +300,8 @@ public class Database : IDatabase
         using var conn = GetConnection();
         if (string.IsNullOrEmpty(log.Timestamp))
         {
-            log.Timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+            // Same round-trip format as RecordingService so string ordering stays chronological.
+            log.Timestamp = DateTime.UtcNow.ToString("o");
         }
 
         await conn.ExecuteAsync(SqlLoader.GetSql("Transmissions/Insert.sql"), log);
@@ -399,9 +408,20 @@ public class Database : IDatabase
     /// <inheritdoc />
     public async Task<IEnumerable<CallLog>> GetTransmissionsAsync(string year, string month, string day, string alphaTag, double frequency)
     {
+        if (!int.TryParse(year, out var y) || !int.TryParse(month, out var m) || !int.TryParse(day, out var d)
+            || y < 1 || m is < 1 or > 12 || d < 1 || d > DateTime.DaysInMonth(y, m))
+        {
+            return Enumerable.Empty<CallLog>();
+        }
+        // The browse tree groups days by server local time (strftime 'localtime'),
+        // so the day's bounds are local midnights converted to UTC.
+        var startLocal = new DateTime(y, m, d, 0, 0, 0, DateTimeKind.Local);
+        var start = startLocal.ToUniversalTime().ToString("o");
+        var end = startLocal.AddDays(1).ToUniversalTime().ToString("o");
+
         using var conn = GetConnection();
         return await WithInsightsAsync(conn, await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/GetFiltered.sql"),
-            new { Year = year, Month = month, Day = day, AlphaTag = alphaTag, Frequency = frequency }));
+            new { Start = start, End = end, AlphaTag = alphaTag, Frequency = frequency }));
     }
 
     /// <inheritdoc />
@@ -410,6 +430,85 @@ public class Database : IDatabase
         using var conn = GetConnection();
         var searchTerm = $"%{query}%";
         return await WithInsightsAsync(conn, await conn.QueryAsync<CallLog>(SqlLoader.GetSql("Transmissions/Search.sql"), new { Query = searchTerm }));
+    }
+
+    /// <inheritdoc />
+    public async Task<TransmissionPage> QueryTransmissionsAsync(TransmissionQuery query)
+    {
+        using var conn = GetConnection();
+        var sql = new System.Text.StringBuilder(SqlLoader.GetSql("Transmissions/QueryBase.sql")).Append('\n');
+        var where = new List<string>();
+        var p = new DynamicParameters();
+        var batch = query.Ids is { Count: > 0 };
+
+        if (batch)
+        {
+            where.Add("t.id IN @Ids");
+            p.Add("Ids", query.Ids);
+        }
+        else
+        {
+            if (query.Cursor is { } cursor)
+            {
+                where.Add("(t.timestamp < @CursorTs OR (t.timestamp = @CursorTs AND t.id < @CursorId))");
+                p.Add("CursorTs", cursor.Timestamp);
+                p.Add("CursorId", cursor.Id);
+            }
+            if (query.SinceUtc != null)
+            {
+                where.Add("t.timestamp >= @Since");
+                p.Add("Since", query.SinceUtc);
+            }
+            if (query.UntilUtc != null)
+            {
+                where.Add("t.timestamp < @Until");
+                p.Add("Until", query.UntilUtc);
+            }
+            if (!string.IsNullOrEmpty(query.Channel))
+            {
+                where.Add("t.alphaTag = @Channel");
+                p.Add("Channel", query.Channel);
+            }
+            if (query.Frequency is { } freq)
+            {
+                where.Add("ABS(t.frequency - @Frequency) < 0.0005");
+                p.Add("Frequency", freq);
+            }
+            if (!string.IsNullOrWhiteSpace(query.Search))
+            {
+                where.Add("(t.transcription LIKE @Query OR t.description LIKE @Query OR t.alphaTag LIKE @Query OR CAST(t.frequency AS TEXT) LIKE @Query)");
+                p.Add("Query", $"%{query.Search}%");
+            }
+            if (query.FavoritesOnly) where.Add("t.isFavorite = 1");
+            if (query.TonesOnly)
+            {
+                where.Add("((t.detectedTone IS NOT NULL AND t.detectedTone != '') OR t.id IN (SELECT transmissionId FROM radio_events WHERE type = 'TONE_OUT' AND transmissionId IS NOT NULL))");
+            }
+            if (query.IncidentsOnly)
+            {
+                where.Add("t.id IN (SELECT transmissionId FROM transmission_insights WHERE isIncident = 1)");
+            }
+        }
+
+        if (where.Count > 0) sql.Append("WHERE ").AppendJoin("\n  AND ", where).Append('\n');
+        sql.Append("ORDER BY t.timestamp DESC, t.id DESC");
+
+        var limit = Math.Max(1, query.Limit);
+        if (!batch)
+        {
+            // One extra row tells us whether another page exists without a COUNT.
+            sql.Append(" LIMIT @Take");
+            p.Add("Take", limit + 1);
+        }
+
+        var rows = (await conn.QueryAsync<CallLog>(sql.ToString(), p)).ToList();
+        string? next = null;
+        if (!batch && rows.Count > limit)
+        {
+            rows.RemoveRange(limit, rows.Count - limit);
+            next = TransmissionCursor.After(rows[^1]).Encode();
+        }
+        return new TransmissionPage { Items = await WithInsightsAsync(conn, rows), NextCursor = next };
     }
 
     /// <inheritdoc />

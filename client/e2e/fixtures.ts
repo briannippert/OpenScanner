@@ -88,6 +88,11 @@ export const test = base.extend({
        await route.fulfill({ json: mockLogs });
     });
 
+    // Paged history (search, favorites, older recordings): empty unless a test overrides it.
+    await page.route(/\/api\/transmissions(\?.*)?$/, async route => {
+      await route.fulfill({ json: { items: [], nextCursor: null } });
+    });
+
     await page.route(/\/api\/history\/years/, async route => {
       await route.fulfill({ json: ["2024"] });
     });

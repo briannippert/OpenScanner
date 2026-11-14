@@ -47,6 +47,7 @@ import EmptyState from './common/EmptyState';
 import PanelSkeleton from './common/PanelSkeleton';
 import SegmentedControl from './common/SegmentedControl';
 import ConfirmDialog from './common/ConfirmDialog';
+import { transmissionQuery, useTransmissionPages, type PageStatus } from '../hooks/useTransmissionPages';
 
 type LogTab = 'recent' | 'favorites' | 'browse';
 type LogFilter = 'all' | 'tones';
@@ -115,17 +116,16 @@ interface Props {
 
 const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelete, highlight, loaded = true, toneOutIds, nameFor }) => {
     const [searchQuery, setSearchQuery] = useState('');
-    const [searchResults, setSearchResults] = useState<CallLog[] | null>(null);
+    const [debouncedQuery, setDebouncedQuery] = useState('');
     const [years, setYears] = useState<string[]>([]);
-    const [loading, setLoading] = useState(false);
     const [tab, setTab] = useState<LogTab>('recent');
     const [filter, setFilter] = useState<LogFilter>('all');
-    const [favoritesRefreshKey, setFavoritesRefreshKey] = useState(0);
     const [powerDmsDept, setPowerDmsDept] = useState<string | null>(null);
     const [linkedLog, setLinkedLog] = useState<CallLog | null>(null);
 
-    // Stable identity: it is passed to every row, and rows are memoized.
-    const handleFavoriteToggle = useCallback(() => setFavoritesRefreshKey(k => k + 1), []);
+    // Rows keep their own star state, and the Favorites tab refetches whenever it is
+    // opened, so a toggle needs no list refresh. Stable identity: rows are memoized.
+    const handleFavoriteToggle = useCallback(() => {}, []);
 
     // When a new highlight arrives, expand Recent Activity and clear any active
     // search so the target item is rendered and can be scrolled into view. This
@@ -174,16 +174,49 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
         deleteTarget?.proceed();
     };
 
-    // Stable identity, like handleFavoriteToggle: search-result rows are memoized too.
-    const handleDelete = useCallback((id: string) => {
-        setSearchResults(prev => prev ? prev.filter(log => log.id !== id) : null);
-        onDelete(id);
-    }, [onDelete]);
+    // Search pages through the server. The box is debounced; clearing it hides the
+    // results at once (searchResults keys off the live box value too).
+    useEffect(() => {
+        const q = searchQuery.trim();
+        const timer = setTimeout(() => setDebouncedQuery(q), q ? 500 : 0);
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+    const search = useTransmissionPages(debouncedQuery ? transmissionQuery({ q: debouncedQuery }) : null);
+    const searchResults = searchQuery.trim() && debouncedQuery ? search.items : null;
+    const searchLoading = !!searchResults && search.status === 'loading' && search.items.length === 0;
 
-    const recentLogs = useMemo(
-        () => liveLogs.filter(l => matchesFilter(l, filter, toneOutIds)),
-        [liveLogs, filter, toneOutIds],
+    // Older history below the live window. The first "Load older" pins the current live
+    // list as a snapshot, so rows that later scroll out of the live window (it keeps the
+    // newest 100) stay put rather than leaving a gap above the older pages.
+    const [olderAnchor, setOlderAnchor] = useState<{ until: string; snapshot: CallLog[] } | null>(null);
+    const older = useTransmissionPages(
+        olderAnchor ? transmissionQuery({ until: olderAnchor.until, tones: filter === 'tones' }) : null,
     );
+    const { loadMore: loadMoreOlder } = older;
+    const loadOlder = useCallback(() => {
+        if (olderAnchor) { loadMoreOlder(); return; }
+        const oldest = liveLogs[liveLogs.length - 1];
+        setOlderAnchor({ until: oldest?.timestamp ?? new Date().toISOString(), snapshot: liveLogs });
+    }, [olderAnchor, loadMoreOlder, liveLogs]);
+
+    // Stable identity, like handleFavoriteToggle: search-result rows are memoized too.
+    const { remove: removeSearchRow } = search;
+    const { remove: removeOlderRow } = older;
+    const handleDelete = useCallback((id: string) => {
+        removeSearchRow(id);
+        removeOlderRow(id);
+        setOlderAnchor(prev => prev && { ...prev, snapshot: prev.snapshot.filter(l => l.id !== id) });
+        onDelete(id);
+    }, [onDelete, removeSearchRow, removeOlderRow]);
+
+    const recentLogs = useMemo(() => {
+        const live = liveLogs.filter(l => matchesFilter(l, filter, toneOutIds));
+        if (!olderAnchor) return live;
+        const seen = new Set(live.map(l => l.id));
+        const rest = [...olderAnchor.snapshot.filter(l => matchesFilter(l, filter, toneOutIds)), ...older.items]
+            .filter(l => !seen.has(l.id) && !!seen.add(l.id));
+        return [...live, ...rest];
+    }, [liveLogs, filter, toneOutIds, olderAnchor, older.items]);
 
     // Initial load of years
     useEffect(() => {
@@ -201,34 +234,6 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
             .catch(() => setPowerDmsDept(null));
     }, []);
 
-    // Search handler
-    useEffect(() => {
-        // Aborting on every change means a slow response to an earlier query can never
-        // land after, and overwrite, the results of a later one.
-        const controller = new AbortController();
-        const timer = setTimeout(() => {
-            if (!searchQuery.trim()) {
-                setSearchResults(null);
-                setLoading(false);
-                return;
-            }
-
-            setLoading(true);
-            fetch(`/api/history/search?q=${encodeURIComponent(searchQuery)}`, { signal: controller.signal })
-                .then(res => res.json())
-                .then(data => {
-                    setSearchResults(data);
-                    setLoading(false);
-                })
-                .catch(err => {
-                    if (controller.signal.aborted) return; // superseded by a newer query
-                    console.error("Search failed:", err);
-                    setLoading(false);
-                });
-        }, searchQuery.trim() ? 500 : 0); // clearing the box takes effect at once
-
-        return () => { clearTimeout(timer); controller.abort(); };
-    }, [searchQuery]);
 
     return (
         <AliasContext.Provider value={nameFor ?? null}>
@@ -305,16 +310,19 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
             </Box>
 
             <Box data-log-scroll sx={{ flexGrow: 1, minHeight: 0, overflowY: 'auto' }}>
-                {loading && <Box sx={{ p: 2, textAlign: 'center' }}><CircularProgress size={20} /></Box>}
+                {searchLoading && <Box sx={{ p: 2, textAlign: 'center' }}><CircularProgress size={20} /></Box>}
 
                 {searchResults ? (
                     <List dense>
-                        {searchResults.length === 0 && !loading && (
+                        {searchResults.length === 0 && search.status === 'loaded' && (
                             <EmptyState icon={<SearchOff />} title="No results found" hint="Try a different search term." />
                         )}
                         {searchResults.map(log => (
                             <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={handleFavoriteToggle} />
                         ))}
+                        {searchResults.length > 0 && (
+                            <LoadMoreRow status={search.status} hasMore={search.hasMore} onLoadMore={search.loadMore} label="Load more results" />
+                        )}
                     </List>
                 ) : tab === 'recent' ? (
                     <List dense disablePadding>
@@ -332,16 +340,27 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                         )}
                         {!loaded ? (
                             <Box sx={{ p: 2 }}><PanelSkeleton rows={6} rowHeight={44} /></Box>
-                        ) : recentLogs.length === 0 ? (
-                            <EmptyState icon={<Inbox />} title="No recent activity" hint={filter === 'all' ? 'Live transmissions will appear here as they are received.' : 'No recordings match this filter.'} />
+                        ) : recentLogs.length === 0 && !olderAnchor && filter === 'all' ? (
+                            <EmptyState icon={<Inbox />} title="No recent activity" hint="Live transmissions will appear here as they are received." />
                         ) : (
-                            recentLogs.map(log => (
-                                <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
-                            ))
+                            <>
+                                {recentLogs.length === 0 && older.status !== 'loading' && (
+                                    <EmptyState icon={<Inbox />} title="No recent activity" hint={olderAnchor ? 'No recordings match this filter.' : 'No recent recordings match this filter.'} />
+                                )}
+                                {recentLogs.map(log => (
+                                    <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={handleFavoriteToggle} />
+                                ))}
+                                <LoadMoreRow
+                                    status={olderAnchor ? older.status : 'idle'}
+                                    hasMore={!olderAnchor || older.hasMore}
+                                    onLoadMore={loadOlder}
+                                    label="Load older recordings"
+                                />
+                            </>
                         )}
                     </List>
                 ) : tab === 'favorites' ? (
-                    <FavoritesList key={favoritesRefreshKey} filter={filter} toneOutIds={toneOutIds} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
+                    <FavoritesList filter={filter} playingId={playingId} onPlay={onPlay} onDelete={onDelete} onFavoriteToggle={handleFavoriteToggle} />
                 ) : (
                     <>
                         <List dense component="nav">
@@ -374,38 +393,59 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     );
 };
 
-// Remounted (via `key`) whenever favorites should refresh, so `loaded` starts
-// false naturally and the effect only sets state in its async callbacks.
-const FavoritesList = ({ filter, toneOutIds, playingId, onPlay, onDelete, onFavoriteToggle }: { filter: LogFilter; toneOutIds?: Set<string> } & LogNodeProps) => {
-    const [logs, setLogs] = useState<CallLog[]>([]);
-    const [loaded, setLoaded] = useState(false);
+// Fetched each time the Favorites tab opens (switching tabs unmounts it), one page at
+// a time. The tone-out filter runs on the server so it covers every starred recording.
+const FavoritesList = ({ filter, playingId, onPlay, onDelete, onFavoriteToggle }: { filter: LogFilter } & LogNodeProps) => {
+    const favorites = useTransmissionPages(transmissionQuery({ favorites: true, tones: filter === 'tones' }));
+    const { remove } = favorites;
 
-    useEffect(() => {
-        let cancelled = false;
-        fetch('/api/history/favorites')
-            .then(res => res.json())
-            .then(data => { if (!cancelled) setLogs(data); })
-            .catch(err => console.error('Failed to fetch favorites:', err))
-            .finally(() => { if (!cancelled) setLoaded(true); });
-        return () => { cancelled = true; };
-    }, []);
-
-    const handleDelete = (id: string) => {
-        setLogs(prev => prev.filter(log => log.id !== id));
+    const handleDelete = useCallback((id: string) => {
+        remove(id);
         onDelete(id);
-    };
+    }, [remove, onDelete]);
 
-    const visible = logs.filter(l => matchesFilter(l, filter, toneOutIds));
-    if (!loaded) return <Box sx={{ p: 2 }}><PanelSkeleton rows={5} rowHeight={44} /></Box>;
-    if (visible.length === 0) {
-        return <EmptyState icon={<StarBorder />} title="No favorites yet" hint="Star a recording to add it here." />;
+    if (favorites.items.length === 0) {
+        if (favorites.status === 'idle' || favorites.status === 'loading') {
+            return <Box sx={{ p: 2 }}><PanelSkeleton rows={5} rowHeight={44} /></Box>;
+        }
+        if (favorites.status === 'error') {
+            return <LoadMoreRow status="error" hasMore onLoadMore={favorites.loadMore} label="Load favorites" />;
+        }
+        return filter === 'tones'
+            ? <EmptyState icon={<StarBorder />} title="No starred tone-outs" hint="Starred recordings with a tone-out appear here." />
+            : <EmptyState icon={<StarBorder />} title="No favorites yet" hint="Star a recording to add it here." />;
     }
     return (
         <List dense disablePadding>
-            {visible.map(log => (
+            {favorites.items.map(log => (
                 <LogItem key={log.id} log={log} playingId={playingId} onPlay={onPlay} onDelete={handleDelete} onFavoriteToggle={onFavoriteToggle} />
             ))}
+            <LoadMoreRow status={favorites.status} hasMore={favorites.hasMore} onLoadMore={favorites.loadMore} label="Load more favorites" />
         </List>
+    );
+};
+
+/**
+ * Footer for a paged list: a "load more" button, a spinner while a page loads, or a
+ * retry after a failure. Renders nothing once the server says there is no more.
+ */
+const LoadMoreRow = ({ status, hasMore, onLoadMore, label }: { status: PageStatus; hasMore: boolean; onLoadMore: () => void; label: string }) => {
+    if (status === 'loading') {
+        return <Box sx={{ p: 1.5, textAlign: 'center' }}><CircularProgress size={18} aria-label="Loading" /></Box>;
+    }
+    if (status === 'error') {
+        return (
+            <Box sx={{ p: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                <Typography variant="body2" color="text.secondary">Couldn't load recordings.</Typography>
+                <Button size="small" onClick={onLoadMore}>Retry</Button>
+            </Box>
+        );
+    }
+    if (!hasMore) return null;
+    return (
+        <Box sx={{ p: 1, textAlign: 'center' }}>
+            <Button size="small" onClick={onLoadMore}>{label}</Button>
+        </Box>
     );
 };
 
