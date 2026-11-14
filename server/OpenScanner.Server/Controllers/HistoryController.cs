@@ -23,6 +23,7 @@ public class HistoryController : ControllerBase
     /// Retrieves the most recent transmission logs.
     /// </summary>
     /// <returns>A list of the latest 100 transmission logs.</returns>
+    /// <remarks>For paging or filters use <c>GET /api/transmissions</c>.</remarks>
     [HttpGet("")]
     [ProducesResponseType(typeof(IEnumerable<CallLog>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<CallLog>> GetHistory()
@@ -133,6 +134,7 @@ public class HistoryController : ControllerBase
     /// <param name="alphaTag">Channel Name.</param>
     /// <param name="frequency">Frequency in MHz.</param>
     /// <returns>Filtered logs.</returns>
+    /// <remarks>Superseded by <c>GET /api/transmissions?channel=&amp;since=&amp;until=</c>, which pages.</remarks>
     [HttpGet("filter")]
     [ProducesResponseType(typeof(IEnumerable<CallLog>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<CallLog>> GetFilteredTransmissions(string year, string month, string day, string alphaTag, double frequency)
@@ -144,7 +146,8 @@ public class HistoryController : ControllerBase
     /// Searches transmissions by text content (transcription or metadata).
     /// </summary>
     /// <param name="q">Search query string.</param>
-    /// <returns>Matching logs.</returns>
+    /// <returns>Matching logs (at most 100).</returns>
+    /// <remarks>Superseded by <c>GET /api/transmissions?q=</c>, which pages.</remarks>
     [HttpGet("search")]
     [ProducesResponseType(typeof(IEnumerable<CallLog>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<CallLog>> SearchTransmissions(string q)
@@ -156,6 +159,7 @@ public class HistoryController : ControllerBase
     /// Retrieves all favorited transmission logs.
     /// </summary>
     /// <returns>List of favorited call logs.</returns>
+    /// <remarks>Superseded by <c>GET /api/transmissions?favorites=true</c>, which pages.</remarks>
     [HttpGet("favorites")]
     [ProducesResponseType(typeof(IEnumerable<CallLog>), StatusCodes.Status200OK)]
     public async Task<IEnumerable<CallLog>> GetFavorites()

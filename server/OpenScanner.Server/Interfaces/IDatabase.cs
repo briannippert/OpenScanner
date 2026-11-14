@@ -134,6 +134,14 @@ public interface IDatabase
     Task<IEnumerable<CallLog>> SearchTransmissionsAsync(string query);
 
     /// <summary>
+    /// One page of transmissions matching <paramref name="query"/>, newest first, with
+    /// incident insights attached. <see cref="TransmissionPage.NextCursor"/> is set when
+    /// older matching rows remain.
+    /// </summary>
+    /// <param name="query">Filters and paging position.</param>
+    Task<TransmissionPage> QueryTransmissionsAsync(TransmissionQuery query);
+
+    /// <summary>
     /// Retrieves all favorited transmission logs.
     /// </summary>
     /// <returns>A collection of favorited call logs.</returns>

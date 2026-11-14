@@ -15,7 +15,8 @@ on:
 jobs:
   build:
     name: Client (React)
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, which the pinned Playwright has no browser build for.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: ./client

@@ -550,6 +550,113 @@ public class DatabaseTests : IDisposable
     }
 
     [Fact]
+    public async Task QueryTransmissions_PagesWithoutGapsOrDuplicates()
+    {
+        var t0 = new DateTime(2026, 11, 1, 12, 0, 0, DateTimeKind.Utc);
+        for (var i = 0; i < 25; i++)
+        {
+            await _db.SaveTransmissionAsync(Tx($"log_{i:D2}", t0.AddMinutes(i)));
+        }
+        // Two rows sharing a timestamp must still be split cleanly across pages.
+        await _db.SaveTransmissionAsync(Tx("log_tie", t0.AddMinutes(14)));
+
+        var seen = new List<string>();
+        var pageSizes = new List<int>();
+        TransmissionCursor? cursor = null;
+        do
+        {
+            var page = await _db.QueryTransmissionsAsync(new TransmissionQuery { Limit = 10, Cursor = cursor });
+            pageSizes.Add(page.Items.Count);
+            seen.AddRange(page.Items.Select(l => l.Id));
+            cursor = page.NextCursor is null ? null : Decode(page.NextCursor);
+        } while (cursor != null);
+
+        Assert.Equal(new[] { 10, 10, 6 }, pageSizes);
+        Assert.Equal(26, seen.Distinct().Count());
+        Assert.Equal("log_24", seen[0]);
+        Assert.Equal("log_00", seen[^1]);
+        // Newest first, ties broken by id descending.
+        Assert.True(seen.IndexOf("log_tie") < seen.IndexOf("log_14"));
+    }
+
+    [Fact]
+    public async Task QueryTransmissions_ExactPageHasNoNextCursor()
+    {
+        var now = DateTime.UtcNow;
+        for (var i = 0; i < 5; i++) await _db.SaveTransmissionAsync(Tx($"x{i}", now.AddSeconds(i)));
+
+        var page = await _db.QueryTransmissionsAsync(new TransmissionQuery { Limit = 5 });
+
+        Assert.Equal(5, page.Items.Count);
+        Assert.Null(page.NextCursor);
+    }
+
+    [Fact]
+    public async Task QueryTransmissions_AppliesEachFilter()
+    {
+        var t0 = new DateTime(2026, 11, 1, 12, 0, 0, DateTimeKind.Utc);
+        await _db.SaveTransmissionAsync(new CallLog("a", t0.ToString("o"), 154.43, "FD Dispatch", "", null, null, "a.raw", 3, "Engine 2 respond to Main"));
+        await _db.SaveTransmissionAsync(new CallLog("b", t0.AddHours(1).ToString("o"), 155.61, "PD Dispatch", "", null, null, "b.raw", 3, "Traffic stop on Elm") { DetectedTone = "Station 1" });
+        await _db.SaveTransmissionAsync(new CallLog("c", t0.AddHours(2).ToString("o"), 154.43, "FD Dispatch", "", null, null, "c.raw", 3, "Box alarm"));
+        await _db.SaveTransmissionAsync(new CallLog("d", t0.AddHours(3).ToString("o"), 155.61, "PD Dispatch", "", null, null, "d.raw", 3, "Clear"));
+        await _db.SetFavoriteAsync("c", true);
+        await _db.AddRadioEventAsync(new RadioEvent { Id = "ev1", Timestamp = t0.AddHours(2).ToString("o"), Type = "TONE_OUT", Label = "Station 2", TransmissionId = "c" });
+        await _db.AddRadioEventAsync(new RadioEvent { Id = "ev2", Timestamp = t0.AddHours(3).ToString("o"), Type = "MDC_PTT", Label = "Unit 5", TransmissionId = "d" });
+        await _db.SaveInsightAsync(Incident("a", "fire", "fire"));
+
+        async Task<string[]> Ids(TransmissionQuery q) =>
+            (await _db.QueryTransmissionsAsync(q)).Items.Select(l => l.Id).ToArray();
+
+        Assert.Equal(new[] { "c", "a" }, await Ids(new() { Channel = "FD Dispatch" }));
+        Assert.Equal(new[] { "d", "b" }, await Ids(new() { Frequency = 155.6100001 }));
+        Assert.Equal(new[] { "c", "b" }, await Ids(new() { SinceUtc = t0.AddHours(1).ToString("o"), UntilUtc = t0.AddHours(3).ToString("o") }));
+        Assert.Equal(new[] { "b" }, await Ids(new() { Search = "elm" }));
+        Assert.Equal(new[] { "c" }, await Ids(new() { FavoritesOnly = true }));
+        // Tone-outs: a detected tone, or referenced by a TONE_OUT event (not other event types).
+        Assert.Equal(new[] { "c", "b" }, await Ids(new() { TonesOnly = true }));
+        Assert.Equal(new[] { "a" }, await Ids(new() { IncidentsOnly = true }));
+        Assert.Equal(new[] { "c" }, await Ids(new() { Channel = "FD Dispatch", FavoritesOnly = true }));
+
+        var batch = await _db.QueryTransmissionsAsync(new TransmissionQuery { Ids = new[] { "a", "d", "missing" }, Limit = 1 });
+        Assert.Equal(new[] { "d", "a" }, batch.Items.Select(l => l.Id));
+        Assert.Null(batch.NextCursor);
+        Assert.Equal("fire", batch.Items.Single(l => l.Id == "a").Insight?.CallType);
+    }
+
+    [Fact]
+    public async Task GetTransmissions_ByLocalDay_IncludesTheWholeLocalDayOnly()
+    {
+        var dayStart = new DateTime(2026, 3, 10, 0, 0, 0, DateTimeKind.Local);
+        await _db.SaveTransmissionAsync(new CallLog("before", dayStart.AddMinutes(-1).ToUniversalTime().ToString("o"), 155.0, "ChanA", "", null, null, null, 1));
+        await _db.SaveTransmissionAsync(new CallLog("first", dayStart.ToUniversalTime().ToString("o"), 155.0, "ChanA", "", null, null, null, 1));
+        await _db.SaveTransmissionAsync(new CallLog("last", dayStart.AddDays(1).AddMinutes(-1).ToUniversalTime().ToString("o"), 155.0, "ChanA", "", null, null, null, 1));
+        await _db.SaveTransmissionAsync(new CallLog("after", dayStart.AddDays(1).ToUniversalTime().ToString("o"), 155.0, "ChanA", "", null, null, null, 1));
+
+        var logs = (await _db.GetTransmissionsAsync("2026", "03", "10", "ChanA", 155.0)).Select(l => l.Id).ToArray();
+
+        Assert.Equal(new[] { "last", "first" }, logs);
+        Assert.Empty(await _db.GetTransmissionsAsync("2026", "02", "30", "ChanA", 155.0));
+    }
+
+    [Fact]
+    public async Task SaveTransmission_WithoutTimestamp_UsesRoundTripFormat()
+    {
+        var log = new CallLog("no_ts", "", 155.0, "Tag", "", null, null, null, 1);
+
+        await _db.SaveTransmissionAsync(log);
+
+        var saved = await _db.GetTransmissionByIdAsync("no_ts");
+        Assert.EndsWith("Z", saved!.Timestamp);
+        Assert.Contains("T", saved.Timestamp);
+    }
+
+    private static TransmissionCursor Decode(string cursor)
+    {
+        Assert.True(TransmissionCursor.TryDecode(cursor, out var c));
+        return c;
+    }
+
+    [Fact]
     public async Task AiFeaturesEnabled_DefaultsToFalse()
     {
         Assert.Equal("false", await _db.GetSettingAsync("AiFeaturesEnabled"));
