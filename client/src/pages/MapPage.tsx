@@ -211,7 +211,9 @@ const MapPage: React.FC = () => {
     const until = untilRef.current;
     if (until != null && Date.parse(call.timestamp) > until) return;
     const key = incidentKeyOf(call);
-    setCalls(prev => [call, ...prev.filter(c => c.id !== call.id)]);
+    // Same cap as the initial load: a map left open for days would otherwise grow without
+    // bound, and every arrival redraws every marker.
+    setCalls(prev => [call, ...prev.filter(c => c.id !== call.id)].slice(0, QUERY_LIMIT));
     // A re-broadcast of an incident that is already fresh keeps its original arrival time.
     setFresh(prev => prev.has(key) ? prev : new Map(prev).set(key, Date.now()));
     setTimeout(() => setFresh(prev => {

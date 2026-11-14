@@ -148,11 +148,18 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                                     flex: 1, height: 6, bgcolor: 'surface.raised', borderRadius: 1,
                                                     overflow: 'hidden', border: '1px solid', borderColor: 'surface.border',
                                                 }}>
-                                                    <Box sx={{
-                                                        width: `${meterPct}%`, height: '100%', bgcolor: meterColor, borderRadius: 1,
-                                                        transition: 'width 0.15s linear, background-color 0.3s ease',
-                                                        boxShadow: pc.isActive ? `0 0 6px ${meterColor}` : 'none',
-                                                    }} />
+                                                    {/* The width changes on nearly every state update (10 Hz), so it
+                                                        goes in `style`: through `sx`, emotion would mint and keep a
+                                                        new CSS class for every distinct value, and over hours the
+                                                        ever-growing stylesheet slows the whole page down. */}
+                                                    <Box
+                                                        style={{ width: `${meterPct.toFixed(1)}%` }}
+                                                        sx={{
+                                                            height: '100%', bgcolor: meterColor, borderRadius: 1,
+                                                            transition: 'width 0.15s linear, background-color 0.3s ease',
+                                                            boxShadow: pc.isActive ? `0 0 6px ${meterColor}` : 'none',
+                                                        }}
+                                                    />
                                                 </Box>
                                                 <Typography sx={{ ...monoFont, fontSize: '0.6rem', color: text.disabled, minWidth: 36, textAlign: 'right' }}>
                                                     {pc.signalStrength > -90 ? `${pc.signalStrength.toFixed(0)}dB` : '---'}

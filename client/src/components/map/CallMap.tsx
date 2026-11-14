@@ -462,7 +462,7 @@ const CallMap: React.FC<Props> = ({ calls, layers, selectedId, fresh, fitKey, on
               '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
             }}
           >
-            <NavigationIcon fontSize="small" sx={{ color: 'text.secondary', transform: `rotate(${heading}deg)`, flexShrink: 0 }} />
+            <NavigationIcon fontSize="small" style={{ transform: `rotate(${heading}deg)` }} sx={{ color: 'text.secondary', flexShrink: 0 }} />
             <Box sx={{ minWidth: 0 }}>
               <Typography variant="caption" sx={{ display: 'block', fontWeight: 700 }} noWrap>
                 New: {callTypeLabel(call.callType)}{call.summary ? ` · ${call.summary}` : ''}
