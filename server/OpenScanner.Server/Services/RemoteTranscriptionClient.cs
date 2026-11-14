@@ -37,6 +37,10 @@ public class RemoteTranscriptionClient
 
     private static string Normalize(string url) => url.TrimEnd('/');
 
+    /// <summary>Strips line breaks so a user-supplied URL cannot forge extra log entries.</summary>
+    private static string SafeForLog(string? value) =>
+        (value ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+
     /// <summary>The configured remote server base URL, or null when not set.</summary>
     public async Task<string?> GetConfiguredUrlAsync()
     {
@@ -86,7 +90,7 @@ public class RemoteTranscriptionClient
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error calling remote transcription server at {Url}", baseUrl);
+            _logger.LogError(ex, "Error calling remote transcription server at {Url}", SafeForLog(baseUrl));
             return null;
         }
     }
@@ -130,7 +134,7 @@ public class RemoteTranscriptionClient
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Health probe failed for {Url}", baseUrl);
+            _logger.LogWarning(ex, "Health probe failed for {Url}", SafeForLog(baseUrl));
             return null;
         }
     }
@@ -180,7 +184,7 @@ public class RemoteTranscriptionClient
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Capability probe failed for {Url}", baseUrl);
+            _logger.LogDebug(ex, "Capability probe failed for {Url}", SafeForLog(baseUrl));
         }
 
         _capabilityCache[baseUrl] = (supported, DateTime.UtcNow);
@@ -229,7 +233,7 @@ public class RemoteTranscriptionClient
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Error calling transmission analysis at {Url}", baseUrl);
+            _logger.LogWarning(ex, "Error calling transmission analysis at {Url}", SafeForLog(baseUrl));
             return null;
         }
     }
