@@ -60,7 +60,8 @@ Most often the dongle is off frequency.
 
 - Open **System Debug** (Settings → Diagnostics) and look at **Transcription Queue** and the service statuses.
 - The first transcription after an install, or after changing the model, waits for the model to download. Check the model status in **Settings → Transcription**.
-- On slower hardware a large model can fall behind. Try a smaller [model](guide/transcription.md#model).
+- On slower hardware a large model can fall behind. Try a smaller [model](guide/transcription.md#model), or move transcription to an [AI server](guide/ai-server.md).
+- With the **Remote server** backend, click **Test** in Settings → Transcription. See [AI server troubleshooting](guide/ai-server.md#troubleshooting).
 - To transcribe recordings that were missed, use [Transcription Backfill](guide/transcription.md#catching-up-on-missed-transcripts).
 
 ## The disk is filling up
