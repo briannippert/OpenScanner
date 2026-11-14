@@ -12,6 +12,9 @@ on:
       - 'client/**'
       - '.github/workflows/frontend.yml'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Client (React)

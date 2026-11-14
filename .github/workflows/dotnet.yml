@@ -12,6 +12,9 @@ on:
       - 'server/**'
       - '.github/workflows/dotnet.yml'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     # Named so it's distinguishable from the frontend job in the checks list —
