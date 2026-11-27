@@ -1,11 +1,39 @@
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using OpenScanner.Server.Models;
 
 namespace OpenScanner.Server.Decoders;
 
+/// <summary>
+/// DMR Tier II conventional (repeater and simplex) via dsd-fme. Line formats referenced below
+/// are from build_deps/dsd-fme/src (dmr_bs.c, dmr_ms.c, dmr_dburst.c, dmr_flco.c).
+/// </summary>
 public class DMR : DSDBase
 {
     private Channel? _channel;
+
+    // Voice sync:  "Sync: +DMR  [SLOT1]  slot2  | Color Code=01 | VC2"
+    // Data sync:   "Sync: +DMR  [slot1]  slot2  | Color Code=01 | IDLE" (lower-case brackets)
+    // Call LC:     " SLOT 1 TGT=1234 SRC=5678 Group Emergency Call"
+    private static readonly Regex SlotRegex =
+        new(@"\[SLOT([12])\]|\bSLOT ([12])\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex ColorCodeRegex =
+        new(@"Color Code=(\d+)", RegexOptions.Compiled);
+
+    // A voice burst: "| VC1".."| VC6", "| VC1*" (late entry) and "| VC*" (MS/simplex mono).
+    private static readonly Regex VoiceBurstRegex =
+        new(@"\|\s*VC[\d*]", RegexOptions.Compiled);
+
+    private static readonly Regex TgtSrcRegex =
+        new(@"TGT=(\d+)\s+SRC=(\d+)", RegexOptions.Compiled);
+
+    // dmr_flco.c prints "Emergency" after the call type when service-options bit 7 is set.
+    private static readonly Regex EmergencyRegex =
+        new(@"\bEmergency\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex AnsiRegex =
+        new(@"\x1B\[[0-9;]*[A-Za-z]", RegexOptions.Compiled);
 
     public DMR(ILogger<DMR> logger) : base(logger)
     {
@@ -18,100 +46,94 @@ public class DMR : DSDBase
         // 48000 Hz: required — dsd-fme -s only accepts 48000 or 96000.
         // -fs: DMR TDMA BS and MS Simplex.
         // -ma: auto-select modulation optimizer — more robust than forcing -mg (GFSK).
-        // -V 1: synthesize voice for slot 1 only. -V 3 (both slots) doubles the PCM
-        //       output data on a single-slot call, making audio play at half speed.
+        // -V: which slot(s) to synthesize voice for — the configured slot, or both (3).
+        // -I: TG hold. Outside trunking this still mutes every talkgroup but the held one in
+        //     the stereo mixer (dsd_audio2.c, playSynthesizedVoiceSS3), so the talkgroup
+        //     filter applies to audio, not just to the metadata we parse.
         //
-        // IMPORTANT: -fs hardcodes pulse_digi_out_channels=2 in dsd-fme source (dmr_bs.c).
-        // dsd-fme always writes STEREO (interleaved L=slot1, R=slot2) to stdout when
-        // using any DMR simplex mode, regardless of -V. With -V 1, R channel is silence.
-        // ffmpeg must read with -ac 2; volume=2.0 compensates for the L+R downmix
-        // halving the volume (out = (L+0)/2 = L/2 without compensation).
+        // Audio: in -fs mode dsd-fme always writes 8 kHz interleaved STEREO (L=slot 1,
+        // R=slot 2). When only one slot is enabled, or only one slot carries voice, it copies
+        // that slot to both channels, so ffmpeg's -ac 2 -> -ac 1 downmix yields full level.
+        // There was once a volume=2.0 here on the theory that R was silent; it isn't, and the
+        // doubling clipped every call.
         int captureRate = 48000;
         int outputRate = 48000;
         int dsdOutputRate = 8000;
         string rtlMode = "fm";
-        string dsdArgs = "-fs -ma -V 1"; // DMR TDMA Simplex, auto modulation, slot 1
+
+        int voiceSlots = channel.DmrSlot is 1 or 2 ? channel.DmrSlot.Value : 3;
+        string dsdArgs = $"-fs -ma -V {voiceSlots}";
+        if (channel.DmrTalkgroup is > 0)
+            dsdArgs += $" -I {channel.DmrTalkgroup.Value}";
 
         // -l 0: no squelch, for the same reason as P25 — dsd-fme needs an unbroken sample
         // stream to hold TDMA sync. This was already implicit (rtl_fm defaults to 0); it is
         // now explicit so it cannot be "tidied" back into a squelched pipeline.
         string source = InputSource ?? $"{PlatformTools.RtlFm} -f {channel.Frequency}M -s {captureRate} -r {outputRate} {Tuning.RtlFmArgs()} -l 0 -M {rtlMode} -";
 
-        return $"{PlatformTools.Stdbuf("-o0")}{source} | {PlatformTools.Stdbuf("-i0 -o0")}{PlatformTools.DsdFme} {dsdArgs} -i - -o - -s {outputRate} | {PlatformTools.Stdbuf("-o0")}{PlatformTools.Ffmpeg} -f s16le -ar {dsdOutputRate} -ac 2 -probesize 32 -analyzeduration 0 -i - -af volume=2.0 -f s16le -ar 48000 -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
+        return $"{PlatformTools.Stdbuf("-o0")}{source} | {PlatformTools.Stdbuf("-i0 -o0")}{PlatformTools.DsdFme} {dsdArgs} -i - -o - -s {outputRate} | {PlatformTools.Stdbuf("-o0")}{PlatformTools.Ffmpeg} -f s16le -ar {dsdOutputRate} -ac 2 -probesize 32 -analyzeduration 0 -i - -f s16le -ar 48000 -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
     }
+
+    /// <summary>Test hook: parse one dsd-fme stderr line.</summary>
+    internal void ParseLine(string line) => ParseMetadata(line);
+
+    /// <summary>Test hook: bind the channel without building a command line.</summary>
+    internal void SetChannel(Channel channel) => _channel = channel;
+
+    // Per-slot state carried between lines: voice-burst lines carry the color code but not
+    // the talkgroup, call-LC lines the reverse, so each filter has to remember what the
+    // other kind of line said. Index 0 = no slot (MS/simplex mono), 1 and 2 = TDMA slots.
+    private readonly bool[] _slotCcMismatch = new bool[3];
+    private readonly int?[] _slotTalkgroup = new int?[3];
 
     protected override void ParseMetadata(string line)
     {
-        // Detect which DMR slot this line belongs to.
-        // dsd-fme emits "SLOT 1" / "SLOT 2" (all caps).
-        int? lineSlot = null;
-        if (line.Contains("SLOT 1")) lineSlot = 1;
-        else if (line.Contains("SLOT 2")) lineSlot = 2;
+        line = AnsiRegex.Replace(line, "");
 
-        // Filter by configured slot — skip lines from the wrong slot
-        if (_channel?.DmrSlot.HasValue == true && lineSlot.HasValue && lineSlot != _channel.DmrSlot)
-            return;
+        var slotMatch = SlotRegex.Match(line);
+        int slot = slotMatch.Success
+            ? int.Parse(slotMatch.Groups[1].Success ? slotMatch.Groups[1].Value : slotMatch.Groups[2].Value)
+            : 0;
 
-        // Broad activity detection: includes lock/sync lines so HandleActivity fires
-        // early and the session timeout gets reset while dsd-fme is still syncing.
-        bool isActivity =
-            line.Contains("Voice") ||
-            line.Contains("SLOT 1") || line.Contains("SLOT 2") ||
-            line.Contains("CACH") ||
-            line.Contains("LC:") ||
-            line.Contains("MFID:") ||
-            line.Contains("Sync:") ||
-            line.Contains("Group Call") ||
-            line.Contains("Private Call") ||
-            (line.Contains("DMR") && !line.Contains("dsd-fme"));
+        // Track color code from every sync line (voice or data), so a co-channel repeater's
+        // call LC — which carries no color code — is rejected too. "XX" (undecoded) is ignored.
+        var ccMatch = ColorCodeRegex.Match(line);
+        if (ccMatch.Success && int.TryParse(ccMatch.Groups[1].Value, out var cc))
+            _slotCcMismatch[slot] = _channel?.DmrColorCode is int wantCc && cc != wantCc;
 
-        if (!isActivity) return;
+        // An idle slot has no call, so forget its talkgroup — otherwise a late-entry voice
+        // burst of the next call would inherit the previous call's talkgroup.
+        if (line.Contains("IDLE")) _slotTalkgroup[slot] = null;
+
+        // Only voice counts as activity. Idle bursts, CSBKs, data headers and sync errors are
+        // sent by a repeater in hang time or beaconing; treating them as activity kept the
+        // channel "busy" and produced recordings of dead air.
+        bool isVoiceBurst = line.Contains("Sync:") && VoiceBurstRegex.IsMatch(line);
+        var call = TgtSrcRegex.Match(line);
+        bool isCallLc = call.Success;
+
+        if (!isVoiceBurst && !isCallLc) return;
+
+        // Slot filter. Lines with no slot (MS/simplex mono) pass.
+        if (slot != 0 && _channel?.DmrSlot is int wantSlot && slot != wantSlot) return;
+
+        if (_slotCcMismatch[slot]) return;
 
         int? src = null;
         int? tgt = null;
-
-        // dsd-fme DMR output: "SLOT 1 TGT=763901 SRC=12345678 Group Call"
-        if (line.Contains("SRC="))
+        if (isCallLc)
         {
-            var parts = line.Split("SRC=");
-            if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var s)) src = s;
-        }
-        else if (line.Contains("Src:"))
-        {
-            var parts = line.Split("Src:");
-            if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var s)) src = s;
-        }
-        else if (line.Contains("Source:"))
-        {
-            var parts = line.Split("Source:");
-            if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var s)) src = s;
+            if (int.TryParse(call.Groups[1].Value, out var t)) tgt = t;
+            if (int.TryParse(call.Groups[2].Value, out var s)) src = s;
+            _slotTalkgroup[slot] = tgt;
         }
 
-        if (line.Contains("TGT="))
-        {
-            var parts = line.Split("TGT=");
-            if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var t)) tgt = t;
-        }
-        else if (line.Contains("Dst:"))
-        {
-            var parts = line.Split("Dst:");
-            if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var t)) tgt = t;
-        }
-        else if (line.Contains("Tgt:"))
-        {
-            var parts = line.Split("Tgt:");
-            if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var t)) tgt = t;
-        }
-        else if (line.Contains("Target:"))
-        {
-            var parts = line.Split("Target:");
-            if (parts.Length > 1 && int.TryParse(parts[1].Trim().Split(' ')[0], out var t)) tgt = t;
-        }
-
-        // Filter by configured talkgroup — skip if talkgroup doesn't match
-        if (_channel?.DmrTalkgroup.HasValue == true && tgt.HasValue && tgt != _channel.DmrTalkgroup)
+        // Talkgroup filter: voice bursts inherit the slot's last call LC talkgroup.
+        int? lineTg = tgt ?? _slotTalkgroup[slot];
+        if (_channel?.DmrTalkgroup is int wantTg && lineTg.HasValue && lineTg != wantTg)
             return;
 
-        RaiseActivity(src, tgt, null);
+        string? tone = isCallLc && EmergencyRegex.IsMatch(line) ? "EMRG" : null;
+        RaiseActivity(src, tgt, tone);
     }
 }

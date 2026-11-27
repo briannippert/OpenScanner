@@ -187,4 +187,41 @@ public class DecoderCommandLineTests
         Assert.Equal("-d 1 -g 0 -p 0", new SdrTuning(DeviceIndex: 1).CaptureArgs());
         Assert.Equal("-g 0 -p 0", new SdrTuning().CaptureArgs());
     }
+
+    private static string DmrCommandFor(int? slot = null, int? talkgroup = null) =>
+        new DMR(NullLogger<DMR>.Instance).GetCommandLine(
+            new Channel { Frequency = 451.0, Mode = "DMR", AlphaTag = "DMR", DmrSlot = slot, DmrTalkgroup = talkgroup });
+
+    /// <summary>
+    /// -V 1 used to be hardcoded, so a channel configured for slot 2 never produced audio.
+    /// No slot configured means voice both slots.
+    /// </summary>
+    [Theory]
+    [InlineData(1, "-V 1")]
+    [InlineData(2, "-V 2")]
+    [InlineData(null, "-V 3")]
+    public void Dmr_VoicesTheConfiguredSlot(int? slot, string expected)
+    {
+        Assert.Contains(expected, DmrCommandFor(slot));
+    }
+
+    /// <summary>The talkgroup filter has to reach dsd-fme (TG hold) to mute other talkgroups' audio.</summary>
+    [Fact]
+    public void Dmr_HoldsTheConfiguredTalkgroup()
+    {
+        Assert.Contains("-I 1234", DmrCommandFor(talkgroup: 1234));
+        Assert.DoesNotContain("-I ", DmrCommandFor());
+    }
+
+    /// <summary>
+    /// dsd-fme copies a lone slot's voice to both stereo channels, so the downmix is already
+    /// full level; the old volume=2.0 clipped every call.
+    /// </summary>
+    [Fact]
+    public void Dmr_DoesNotDoubleTheDownmix()
+    {
+        var cmd = DmrCommandFor(1);
+        Assert.DoesNotContain("volume=2.0", cmd);
+        Assert.Contains("-ac 2", cmd);
+    }
 }
