@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging.Abstractions;
-using OpenScanner.Server;
 using OpenScanner.Server.Decoders;
 using OpenScanner.Server.Devices;
 using OpenScanner.Server.Interfaces;
@@ -20,22 +19,17 @@ namespace OpenScanner.Tests.Decoders;
 /// </summary>
 public class OffAirDecodeTests
 {
-    private const double ChannelMhz = 158.400;
-    // Fixtures are 96 kS/s with the channel 25 kHz below centre.
-    private const double CenterMhz = 158.425;
-    private const int FixtureRate = 96000;
-
-    private const string P25Fixture = "p25_nac113_tg1";
-    private const string DmrFixture = "dmr_simplex_ts1_cc9_tg763901";
-
-    private const int SourceId = 12345678;
+    private const double ChannelMhz = OffAirFixtures.ChannelMhz;
+    private const string P25Fixture = OffAirFixtures.P25;
+    private const string DmrFixture = OffAirFixtures.Dmr;
+    private const int SourceId = OffAirFixtures.SourceId;
 
     // ---- End-to-end through ChannelPipeline + dsd-fme ----
 
     [Fact]
     public async Task P25_DecodesTalkgroupSourceNacAndVoice()
     {
-        if (!DsdFmeAvailable()) return;
+        if (!OffAirFixtures.DecoderToolsAvailable()) return;
 
         var r = await RunPipeline(P25Fixture, new Channel { Frequency = ChannelMhz, Mode = "P25", AlphaTag = "P25" });
 
@@ -50,7 +44,7 @@ public class OffAirDecodeTests
     [Fact]
     public async Task DmrSimplex_DecodesTalkgroupSourceColorCodeAndVoice()
     {
-        if (!DsdFmeAvailable()) return;
+        if (!OffAirFixtures.DecoderToolsAvailable()) return;
 
         var r = await RunPipeline(DmrFixture, DmrChannel(cc: 9, tg: 763901));
 
@@ -69,7 +63,7 @@ public class OffAirDecodeTests
     [InlineData(null, 1)]      // another talkgroup
     public async Task DmrSimplex_OtherColorCodeOrTalkgroup_RaisesNoActivity(int? cc, int? tg)
     {
-        if (!DsdFmeAvailable()) return;
+        if (!OffAirFixtures.DecoderToolsAvailable()) return;
 
         var r = await RunPipeline(DmrFixture, DmrChannel(cc, tg));
 
@@ -87,7 +81,7 @@ public class OffAirDecodeTests
         var hits = new List<(int? Src, int? Tgt, string? Tone)>();
         p25.OnActivity += (s, t, tone) => hits.Add((s, t, tone));
 
-        foreach (var line in ReadLog(P25Fixture)) p25.ParseLine(line);
+        foreach (var line in OffAirFixtures.ReadLog(P25Fixture)) p25.ParseLine(line);
 
         Assert.True(hits.Count(h => h.Src == SourceId && h.Tgt == 1) >= 5, Describe(hits));
         Assert.DoesNotContain(hits, h => h.Tone == "EMRG");
@@ -106,7 +100,7 @@ public class OffAirDecodeTests
         var hits = new List<(int? Src, int? Tgt, string? Tone)>();
         dmr.OnActivity += (s, t, tone) => hits.Add((s, t, tone));
 
-        foreach (var line in ReadLog(DmrFixture)) dmr.ParseLine(line);
+        foreach (var line in OffAirFixtures.ReadLog(DmrFixture)) dmr.ParseLine(line);
 
         if (expectCall)
             Assert.True(hits.Count(h => h.Src == SourceId && h.Tgt == 763901) >= 5, Describe(hits));
@@ -134,7 +128,7 @@ public class OffAirDecodeTests
 
     private static async Task<PipelineResult> RunPipeline(string fixture, Channel channel)
     {
-        var iq = await File.ReadAllBytesAsync(FixturePath(fixture + ".iq.u8"));
+        var iq = OffAirFixtures.ReadIq(fixture);
 
         var activity = new List<(int?, int?, string?)>();
         var metadata = new List<string>();
@@ -144,7 +138,7 @@ public class OffAirDecodeTests
         var started = new TaskCompletionSource();
 
         using var pipeline = new ChannelPipeline(
-            channel, FixtureRate, 48000, CenterMhz, new Factory(), NullLogger.Instance, NullLoggerFactory.Instance);
+            channel, OffAirFixtures.SampleRate, 48000, OffAirFixtures.CenterMhz, new Factory(), NullLogger.Instance, NullLoggerFactory.Instance);
 
         pipeline.OnMetadata += (_, line) =>
         {
@@ -154,7 +148,7 @@ public class OffAirDecodeTests
         pipeline.OnActivity += (_, s, t, tone) => { lock (gate) { activity.Add((s, t, tone)); lastEvent.Restart(); } };
         pipeline.OnAudio += (_, chunk) =>
         {
-            bool loud = IsLoud(chunk);
+            bool loud = OffAirFixtures.IsLoud(chunk);
             lock (gate) { audioBytes += chunk.Length; if (loud) loudBytes += chunk.Length; lastEvent.Restart(); }
         };
 
@@ -196,27 +190,9 @@ public class OffAirDecodeTests
 
     private static readonly Regex Ansi = new(@"\x1B\[[0-9;]*[A-Za-z]", RegexOptions.Compiled);
 
-    private static bool IsLoud(byte[] chunk)
-    {
-        for (int i = 0; i + 1 < chunk.Length; i += 8)
-        {
-            short s = (short)(chunk[i] | (chunk[i + 1] << 8));
-            if (s > 1200 || s < -1200) return true;
-        }
-        return false;
-    }
 
-    private static bool DsdFmeAvailable()
-    {
-        if (Path.IsPathRooted(PlatformTools.DsdFme) && Path.IsPathRooted(PlatformTools.Ffmpeg)) return true;
-        Assert.False(Environment.GetEnvironmentVariable("CI") == "true",
-            "dsd-fme and ffmpeg must be installed in CI for the off-air decode tests");
-        return false;
-    }
 
-    private static string FixturePath(string file) => Path.Combine(AppContext.BaseDirectory, "TestData", "OffAir", file);
 
-    private static IEnumerable<string> ReadLog(string fixture) => File.ReadLines(FixturePath(fixture + ".dsdfme.log"));
 
     private static string Describe(IEnumerable<(int? Src, int? Tgt, string? Tone)> hits) =>
         string.Join(", ", hits.GroupBy(h => h).Select(g => $"{g.Key.Src}/{g.Key.Tgt}/{g.Key.Tone}x{g.Count()}"));
