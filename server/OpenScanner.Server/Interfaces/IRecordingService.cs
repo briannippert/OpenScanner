@@ -24,6 +24,12 @@ public interface IRecordingService
     /// </summary>
     string? CurrentRecordingId { get; }
 
+    /// <summary>
+    /// The transmission log id of the recording active on <paramref name="frequency"/>,
+    /// or null when that channel isn't recording.
+    /// </summary>
+    string? RecordingIdFor(double frequency);
+
     /// <summary>Number of recordings currently in flight (parallel channels + legacy single).</summary>
     int ActiveRecordingCount { get; }
 

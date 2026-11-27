@@ -22,8 +22,9 @@ public class TransmissionsControllerTests
     }
 
     private Task<IActionResult> Get(int? limit = null, string? cursor = null, string? since = null, string? until = null,
-        string? channel = null, string? q = null, bool favorites = false, bool tones = false, string? ids = null) =>
-        _controller.Get(limit, cursor, since, until, channel, null, q, favorites, tones, false, ids);
+        string? channel = null, string? q = null, bool favorites = false, bool tones = false, string? ids = null,
+        bool emergencies = false) =>
+        _controller.Get(limit, cursor, since, until, channel, null, q, favorites, tones, false, ids, emergencies);
 
     [Theory]
     [InlineData(null, 50)]
@@ -74,13 +75,14 @@ public class TransmissionsControllerTests
     [Fact]
     public async Task Filters_ArePassedThrough()
     {
-        await Get(channel: "FD Dispatch", q: "  engine ", favorites: true, tones: true);
+        await Get(channel: "FD Dispatch", q: "  engine ", favorites: true, tones: true, emergencies: true);
 
         Assert.Equal("FD Dispatch", _captured!.Channel);
         Assert.Equal("engine", _captured.Search);
         Assert.True(_captured.FavoritesOnly);
         Assert.True(_captured.TonesOnly);
         Assert.False(_captured.IncidentsOnly);
+        Assert.True(_captured.EmergenciesOnly);
     }
 
     [Fact]

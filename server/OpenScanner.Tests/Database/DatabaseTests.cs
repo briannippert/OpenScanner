@@ -598,7 +598,7 @@ public class DatabaseTests : IDisposable
         await _db.SaveTransmissionAsync(new CallLog("a", t0.ToString("o"), 154.43, "FD Dispatch", "", null, null, "a.raw", 3, "Engine 2 respond to Main"));
         await _db.SaveTransmissionAsync(new CallLog("b", t0.AddHours(1).ToString("o"), 155.61, "PD Dispatch", "", null, null, "b.raw", 3, "Traffic stop on Elm") { DetectedTone = "Station 1" });
         await _db.SaveTransmissionAsync(new CallLog("c", t0.AddHours(2).ToString("o"), 154.43, "FD Dispatch", "", null, null, "c.raw", 3, "Box alarm"));
-        await _db.SaveTransmissionAsync(new CallLog("d", t0.AddHours(3).ToString("o"), 155.61, "PD Dispatch", "", null, null, "d.raw", 3, "Clear"));
+        await _db.SaveTransmissionAsync(new CallLog("d", t0.AddHours(3).ToString("o"), 155.61, "PD Dispatch", "", null, null, "d.raw", 3, "Clear") { DetectedTone = "EMRG" });
         await _db.SetFavoriteAsync("c", true);
         await _db.AddRadioEventAsync(new RadioEvent { Id = "ev1", Timestamp = t0.AddHours(2).ToString("o"), Type = "TONE_OUT", Label = "Station 2", TransmissionId = "c" });
         await _db.AddRadioEventAsync(new RadioEvent { Id = "ev2", Timestamp = t0.AddHours(3).ToString("o"), Type = "MDC_PTT", Label = "Unit 5", TransmissionId = "d" });
@@ -615,6 +615,8 @@ public class DatabaseTests : IDisposable
         // Tone-outs: a detected tone, or referenced by a TONE_OUT event (not other event types).
         Assert.Equal(new[] { "c", "b" }, await Ids(new() { TonesOnly = true }));
         Assert.Equal(new[] { "a" }, await Ids(new() { IncidentsOnly = true }));
+        // Emergencies are their own filter and are not tone-outs.
+        Assert.Equal(new[] { "d" }, await Ids(new() { EmergenciesOnly = true }));
         Assert.Equal(new[] { "c" }, await Ids(new() { Channel = "FD Dispatch", FavoritesOnly = true }));
 
         var batch = await _db.QueryTransmissionsAsync(new TransmissionQuery { Ids = new[] { "a", "d", "missing" }, Limit = 1 });

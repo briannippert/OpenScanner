@@ -221,7 +221,8 @@ public class RtlDevice : ISdrWorker
         var locked = _state.CurrentChannel;
         if (_currentDecoder == null || locked == null || Math.Abs(locked.Frequency - freq) > 0.0001) return;
 
-        _lastDetectedTone = tone.Name;
+        // An emergency stays the transmission's flag; the tone-out is still logged as an event.
+        if (_lastDetectedTone != "EMRG") _lastDetectedTone = tone.Name;
         // Extend the current recording's stop timer now so that if the tone is the last
         // audio before the carrier drops, we still wait the full hold (measured from the tone
         // ending) for the dispatch voice to follow.
@@ -575,6 +576,21 @@ public class RtlDevice : ISdrWorker
             TaskContinuationOptions.OnlyOnFaulted);
 
         OnNewEvent?.Invoke(e);
+    }
+
+    /// <summary>
+    /// Log an emergency (P25 LCW emergency bit or MDC1200 emergency packet) to the event
+    /// log, linked to the transmission it was heard on.
+    /// </summary>
+    private void RaiseEmergencyEvent(Channel channel, int? unitId, string? transmissionId)
+    {
+        RaiseRadioEvent(new RadioEvent
+        {
+            Type = "EMERGENCY",
+            Label = unitId.HasValue ? $"Emergency \u2013 Unit {unitId}" : "Emergency",
+            UnitId = unitId,
+            TransmissionId = transmissionId
+        }, channel);
     }
 
     private void StopScanning()
@@ -1028,8 +1044,12 @@ public class RtlDevice : ISdrWorker
     {
         _logger.LogInformation($"[Parallel] Activity on {channel.AlphaTag}: src={src} tgt={tgt} tone={tone}");
 
-        // Track per-channel tones
-        if (tone != null)
+        // Track per-channel tones. An emergency stays flagged for the rest of the
+        // transmission: a later tone (e.g. a fire tone-out) must not overwrite it.
+        // The entry is removed when this channel's recording stops.
+        var prevTone = _parallelLastTones.GetValueOrDefault(channel.Frequency);
+        bool newEmergency = tone == "EMRG" && prevTone != "EMRG";
+        if (tone != null && prevTone != "EMRG")
         {
             _parallelLastTones[channel.Frequency] = tone;
             if (tone == "EMRG")
@@ -1050,6 +1070,10 @@ public class RtlDevice : ISdrWorker
             rs.UpdateSourceTarget(channel.Frequency, src, tgt);
             if (src.HasValue) rs.AppendSpeaker(channel.Frequency, src.Value);
         }
+
+        // Once per transmission, after the recording exists so the event links to it.
+        if (newEmergency)
+            RaiseEmergencyEvent(channel, src, rs.RecordingIdFor(channel.Frequency));
 
         // Reset per-channel activity timeout
         ResetParallelActivityTimeout(channel);
@@ -1695,7 +1719,8 @@ public class RtlDevice : ISdrWorker
 
         // Emergency calls route the tone to _lastDetectedTone so it is persisted
         // to the DB (normally only fire tones flow through that path).
-        if (tone == "EMRG")
+        bool newEmergency = tone == "EMRG" && _lastDetectedTone != "EMRG";
+        if (newEmergency)
             _lastDetectedTone = "EMRG";
         
         // Start recording if not already started. Recordings are keyed by channel so that
@@ -1728,6 +1753,10 @@ public class RtlDevice : ISdrWorker
         {
             _recordingService.UpdateSourceTarget(freq, null, tgt);
         }
+
+        // Once per transmission, after the recording exists so the event links to it.
+        if (newEmergency)
+            RaiseEmergencyEvent(originChannel, src, _recordingService.RecordingIdFor(freq));
 
         ResetActivityTimeout();
     }

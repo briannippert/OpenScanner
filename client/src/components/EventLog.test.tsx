@@ -23,4 +23,18 @@ describe('EventLog', () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(fetchMock).toHaveBeenCalledWith('/api/transmissions?ids=tx1,tx2');
     });
+
+    it('badges emergency events as EMRG and tone-outs as TONE', () => {
+        fetchMock.mockResolvedValue({ ok: true, json: async () => ({ items: [], nextCursor: null }) });
+        const events: RadioEvent[] = [
+            { ...event('1', 'tx1'), type: 'EMERGENCY', label: 'Emergency \u2013 Unit 1234', unitId: 1234 },
+            event('2', 'tx2'),
+        ];
+
+        render(<EventLog events={events} onClear={() => {}} />);
+
+        expect(screen.getByText('EMRG')).toBeInTheDocument();
+        expect(screen.getByText('Emergency \u2013 Unit 1234')).toBeInTheDocument();
+        expect(screen.getByText('TONE')).toBeInTheDocument();
+    });
 });

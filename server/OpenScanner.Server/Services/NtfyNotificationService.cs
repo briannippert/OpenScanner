@@ -8,7 +8,7 @@ namespace OpenScanner.Server.Services;
 
 /// <summary>
 /// Sends a push notification through ntfy (https://ntfy.sh or a self-hosted server)
-/// for each fire tone-out. The push waits for the recording carrying the page to be
+/// for each fire tone-out, and immediately for each radio emergency. A tone-out push waits for the recording carrying the page to be
 /// transcribed and uses the dispatch transcript as its body; if no transcript arrives
 /// (transcription off, blank result, or <see cref="TranscriptTimeout"/> elapses) it falls
 /// back to the channel/frequency/tone details. Configured via the <c>Ntfy*</c> settings:
@@ -92,10 +92,24 @@ public class NtfyNotificationService : IHostedService
     {
         try
         {
-            if (e.Type != "TONE_OUT") return;
+            if (e.Type != "TONE_OUT" && e.Type != "EMERGENCY") return;
             if (await LoadConfigAsync() == null) return;
 
             var now = _time.GetUtcNow();
+
+            // An emergency is pushed straight away: waiting minutes for a transcript
+            // defeats the point of the alert.
+            if (e.Type == "EMERGENCY")
+            {
+                var key = $"EMERGENCY|{e.Frequency}|{e.UnitId}";
+                lock (_lock)
+                {
+                    if (_lastSent.TryGetValue(key, out var lastEmergency) && now - lastEmergency < Cooldown) return;
+                    _lastSent[key] = now;
+                }
+                await SendEmergencyAsync(e);
+                return;
+            }
             var page = new PendingPage { Event = e };
             lock (_lock)
             {
@@ -180,6 +194,16 @@ public class NtfyNotificationService : IHostedService
         if (!ok) _logger.LogWarning("ntfy notification for {Label} failed: {Message}", e.Label, message);
     }
 
+    private async Task SendEmergencyAsync(RadioEvent e)
+    {
+        var config = await LoadConfigAsync();
+        if (config == null) return;
+
+        var where = string.IsNullOrWhiteSpace(e.AlphaTag) ? e.Label : e.AlphaTag;
+        var (ok, message) = await PublishAsync(config, $"EMERGENCY: {where}", FormatMessage(e), "sos");
+        if (!ok) _logger.LogWarning("ntfy emergency notification for {Label} failed: {Message}", e.Label, message);
+    }
+
     /// <summary>
     /// Sends a sample notification with the saved settings (ignores the enabled switch so it
     /// can be tested before turning on). Returns whether it was accepted and a status message.
@@ -196,6 +220,7 @@ public class NtfyNotificationService : IHostedService
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(e.AlphaTag)) parts.Add(e.AlphaTag!);
         if (e.Frequency > 0) parts.Add($"{e.Frequency.ToString("F4", CultureInfo.InvariantCulture)} MHz");
+        if (e.UnitId.HasValue) parts.Add($"Unit {e.UnitId.Value}");
         if (e.ToneA is > 0)
         {
             var tones = $"A {e.ToneA.Value.ToString("0.#", CultureInfo.InvariantCulture)} Hz";

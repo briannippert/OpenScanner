@@ -215,7 +215,7 @@ function App() {
 
   // Recording ids referenced by fire tone-out events (drives the Tone-outs filter).
   const toneOutIds = useMemo(
-    () => new Set(scanner.radioEvents.filter(e => e.transmissionId).map(e => e.transmissionId!)),
+    () => new Set(scanner.radioEvents.filter(e => e.type === 'TONE_OUT' && e.transmissionId).map(e => e.transmissionId!)),
     [scanner.radioEvents],
   );
 

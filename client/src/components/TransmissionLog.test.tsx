@@ -303,6 +303,27 @@ describe('TransmissionLog Component', () => {
         await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/until=.*&tones=true/), expect.anything()));
     });
 
+    it('filters to emergencies locally and asks the server for older ones', async () => {
+        fetchMock.mockImplementation(() => Promise.resolve({ ok: true, json: async () => ({ items: [], nextCursor: null }) }));
+        const logs: CallLog[] = [{ ...mockLogs[0], detectedTone: 'EMRG' }, { ...mockLogs[1], detectedTone: 'Station 1' }];
+
+        render(<TransmissionLog liveLogs={logs} playingId={null} onPlay={mockOnPlay} onDelete={mockOnDelete} />);
+        await waitForInit();
+
+        fireEvent.click(screen.getByText('Emergencies'));
+        expect(screen.getByText('Police Dispatch')).toBeInTheDocument();
+        expect(screen.queryByText('Fire Dispatch')).not.toBeInTheDocument();
+
+        // An emergency is not a tone-out.
+        fireEvent.click(screen.getByText('Tone-outs'));
+        expect(screen.queryByText('Police Dispatch')).not.toBeInTheDocument();
+        expect(screen.getByText('Fire Dispatch')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByText('Emergencies'));
+        fireEvent.click(screen.getByRole('button', { name: 'Load older recordings' }));
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/until=.*&emergencies=true/), expect.anything()));
+    });
+
     it('loads favorites from the paged endpoint, filtered on the server', async () => {
         fetchMock.mockImplementation((url: string) => {
             if (url.startsWith('/api/transmissions?favorites=true')) {
