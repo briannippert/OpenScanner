@@ -18,6 +18,15 @@ public class P25 : DSDBase
     private static readonly Regex ExtendedCallRegex =
         new(@"TGT:\s*(\d+).*?SRC:\s*(\d+)", RegexOptions.Compiled);
 
+    // dsd-fme prints "Emergency" ahead of the LCW call type when the service-options emergency
+    // bit is set (p25_lcw.c), and "EMERGENCY"/"[EMERGENCY]" on some other paths.
+    private static readonly Regex EmergencyRegex =
+        new(@"\bEmergency\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // dsd-fme wraps much of its output in ANSI colour codes (KYEL/KRED/KNRM).
+    private static readonly Regex AnsiRegex =
+        new(@"\x1B\[[0-9;]*[A-Za-z]", RegexOptions.Compiled);
+
     public P25(ILogger<P25> logger) : base(logger)
     {
     }
@@ -38,10 +47,20 @@ public class P25 : DSDBase
         return $"{PlatformTools.Stdbuf("-o0")}{source} | {PlatformTools.Stdbuf("-i0 -o0")}{PlatformTools.DsdFme} {dsdArgs} -i - -o - -s {outputRate} | {PlatformTools.Stdbuf("-o0")}{PlatformTools.Ffmpeg} -f s16le -ar {dsdOutputRate} -ac 1 -probesize 32 -analyzeduration 0 -i - -f s16le -ar {outputRate} -ac 1 -fflags nobuffer -flags low_delay -flush_packets 1 - -loglevel quiet";
     }
 
+    /// <summary>Test hook: parse one dsd-fme stderr line.</summary>
+    internal void ParseLine(string line) => ParseMetadata(line);
+
     protected override void ParseMetadata(string line)
     {
+        line = AnsiRegex.Replace(line, "");
+
+        // TSBKs are control-channel bursts (often grants for other talkgroups), so an
+        // emergency flag on one must not mark the call on this channel.
+        bool isTsbk = line.Contains("TSBK");
+        bool isEmergency = !isTsbk && EmergencyRegex.IsMatch(line);
+
         // P25 activity detection — avoid TSBK (control channel data bursts)
-        bool isActivity =
+        bool isActivity = isEmergency ||
             line.Contains("LDU") ||          // P25 Voice Frame (LDU1/LDU2)
             line.Contains("HDU") ||          // Header Data Unit — start of call
             line.Contains("TDU") ||          // Terminator — end of call
@@ -49,7 +68,7 @@ public class P25 : DSDBase
             line.Contains("Group Voice") ||
             line.Contains("Unit to Unit") ||
             line.Contains("TGT:") ||         // Extended unit-to-unit LCW
-            (line.Contains("P25") && !line.Contains("TSBK"));
+            (line.Contains("P25") && !isTsbk);
 
         if (!isActivity) return;
 
@@ -84,7 +103,7 @@ public class P25 : DSDBase
             }
         }
 
-        string? tone = line.Contains("Emergency") ? "EMRG" : null;
+        string? tone = isEmergency ? "EMRG" : null;
         RaiseActivity(src, tgt, tone);
     }
 }

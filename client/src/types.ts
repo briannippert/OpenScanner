@@ -224,12 +224,15 @@ export interface FireToneSet {
 export interface RadioEvent {
     id: string;
     timestamp: string;
-    type: 'TONE_OUT';
+    /** TONE_OUT: fire tone-out. EMERGENCY: a radio emergency (P25 LCW flag or MDC1200). */
+    type: 'TONE_OUT' | 'EMERGENCY' | 'MDC_PTT';
     label: string;
     frequency: number;
     alphaTag?: string;
     toneA?: number;
     toneB?: number;
+    /** Radio (unit) ID, when known (EMERGENCY / MDC_PTT). */
+    unitId?: number;
     transmissionId?: string;
 }
 

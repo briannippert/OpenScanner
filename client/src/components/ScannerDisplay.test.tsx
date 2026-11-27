@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import ScannerDisplay from './ScannerDisplay';
 import type { ScannerState, Channel } from '../types';
 
@@ -32,5 +32,13 @@ describe('ScannerDisplay', () => {
             rerender(<ScannerDisplay state={parallelState(-60 + i * 0.237)} />);
         }
         expect(cssRuleCount()).toBe(before);
+    });
+
+    it('flags the parallel channel carrying an emergency', () => {
+        const state = parallelState(-30);
+        state.parallelChannels![1] = { ...state.parallelChannels![1], currentTone: 'EMRG' };
+        render(<ScannerDisplay state={state} />);
+        expect(screen.getByLabelText('Emergency on CH 155.2')).toBeInTheDocument();
+        expect(screen.queryByLabelText('Emergency on CH 154.1')).not.toBeInTheDocument();
     });
 });

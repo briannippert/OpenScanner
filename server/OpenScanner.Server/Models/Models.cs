@@ -418,7 +418,7 @@ public class RadioEvent
     /// <summary>Timestamp of the detection (ISO 8601).</summary>
     public string Timestamp { get; set; } = string.Empty;
 
-    /// <summary>Event discriminator: "TONE_OUT", "MDC_PTT", or "MDC_EMERGENCY".</summary>
+    /// <summary>Event discriminator: "TONE_OUT", "MDC_PTT", or "EMERGENCY" (P25 or MDC1200).</summary>
     public string Type { get; set; } = string.Empty;
 
     /// <summary>Human-friendly label (tone set name, or MDC unit/op description).</summary>

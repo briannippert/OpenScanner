@@ -73,6 +73,10 @@ public class RecordingService : IRecordingService
     }
 
     /// <inheritdoc />
+    public string? RecordingIdFor(double frequency) =>
+        _activeRecordings.TryGetValue(frequency, out var rec) ? $"log_{rec.StartTime}" : null;
+
+    /// <inheritdoc />
     public string? CurrentRecordingId
     {
         get

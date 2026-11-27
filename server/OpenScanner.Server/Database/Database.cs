@@ -482,8 +482,9 @@ public class Database : IDatabase
             if (query.FavoritesOnly) where.Add("t.isFavorite = 1");
             if (query.TonesOnly)
             {
-                where.Add("((t.detectedTone IS NOT NULL AND t.detectedTone != '') OR t.id IN (SELECT transmissionId FROM radio_events WHERE type = 'TONE_OUT' AND transmissionId IS NOT NULL))");
+                where.Add("((t.detectedTone IS NOT NULL AND t.detectedTone != '' AND t.detectedTone != 'EMRG') OR t.id IN (SELECT transmissionId FROM radio_events WHERE type = 'TONE_OUT' AND transmissionId IS NOT NULL))");
             }
+            if (query.EmergenciesOnly) where.Add("t.detectedTone = 'EMRG'");
             if (query.IncidentsOnly)
             {
                 where.Add("t.id IN (SELECT transmissionId FROM transmission_insights WHERE isIncident = 1)");

@@ -37,6 +37,7 @@ import {
     Inbox,
     Campaign,
     Close,
+    ReportProblem,
 } from '@mui/icons-material';
 import { Chip } from '@mui/material';
 import type { CallLog, Channel } from '../types';
@@ -50,14 +51,22 @@ import ConfirmDialog from './common/ConfirmDialog';
 import { transmissionQuery, useTransmissionPages, type PageStatus } from '../hooks/useTransmissionPages';
 
 type LogTab = 'recent' | 'favorites' | 'browse';
-type LogFilter = 'all' | 'tones';
+type LogFilter = 'all' | 'tones' | 'emergencies';
 
 // A recording counts as a "tone-out" if it detected a tone itself, or if a fire
 // tone-out event links to it (events carry the transmissionId of their recording).
+// An emergency (detectedTone EMRG) is its own filter, not a tone-out.
 const matchesFilter = (log: CallLog, filter: LogFilter, toneOutIds?: Set<string>): boolean => {
-    if (filter === 'tones') return !!log.detectedTone || (!!toneOutIds && toneOutIds.has(log.id));
+    if (filter === 'tones') return (!!log.detectedTone && log.detectedTone !== 'EMRG') || (!!toneOutIds && toneOutIds.has(log.id));
+    if (filter === 'emergencies') return log.detectedTone === 'EMRG';
     return true;
 };
+
+/** Server-side query flags for a filter (the API mirrors {@link matchesFilter}). */
+const filterParams = (filter: LogFilter) => ({
+    tones: filter === 'tones',
+    emergencies: filter === 'emergencies',
+});
 
 const monoFont = { fontFamily: '"Roboto Mono", ui-monospace, monospace' };
 const GOLD = '#f5c542';
@@ -190,7 +199,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
     // newest 100) stay put rather than leaving a gap above the older pages.
     const [olderAnchor, setOlderAnchor] = useState<{ until: string; snapshot: CallLog[] } | null>(null);
     const older = useTransmissionPages(
-        olderAnchor ? transmissionQuery({ until: olderAnchor.until, tones: filter === 'tones' }) : null,
+        olderAnchor ? transmissionQuery({ until: olderAnchor.until, ...filterParams(filter) }) : null,
     );
     const { loadMore: loadMoreOlder } = older;
     const loadOlder = useCallback(() => {
@@ -291,6 +300,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
                                 {([
                                     { value: 'all', label: 'All' },
                                     { value: 'tones', label: 'Tone-outs', icon: <Campaign sx={{ fontSize: 15 }} /> },
+                                    { value: 'emergencies', label: 'Emergencies', icon: <ReportProblem sx={{ fontSize: 15 }} /> },
                                 ] as { value: LogFilter; label: string; icon?: React.ReactNode }[]).map(f => (
                                     <Chip
                                         key={f.value}
@@ -396,7 +406,7 @@ const TransmissionLog: React.FC<Props> = ({ liveLogs, playingId, onPlay, onDelet
 // Fetched each time the Favorites tab opens (switching tabs unmounts it), one page at
 // a time. The tone-out filter runs on the server so it covers every starred recording.
 const FavoritesList = ({ filter, playingId, onPlay, onDelete, onFavoriteToggle }: { filter: LogFilter } & LogNodeProps) => {
-    const favorites = useTransmissionPages(transmissionQuery({ favorites: true, tones: filter === 'tones' }));
+    const favorites = useTransmissionPages(transmissionQuery({ favorites: true, ...filterParams(filter) }));
     const { remove } = favorites;
 
     const handleDelete = useCallback((id: string) => {
@@ -411,6 +421,8 @@ const FavoritesList = ({ filter, playingId, onPlay, onDelete, onFavoriteToggle }
         if (favorites.status === 'error') {
             return <LoadMoreRow status="error" hasMore onLoadMore={favorites.loadMore} label="Load favorites" />;
         }
+        if (filter === 'emergencies')
+            return <EmptyState icon={<StarBorder />} title="No starred emergencies" hint="Starred recordings flagged as an emergency appear here." />;
         return filter === 'tones'
             ? <EmptyState icon={<StarBorder />} title="No starred tone-outs" hint="Starred recordings with a tone-out appear here." />
             : <EmptyState icon={<StarBorder />} title="No favorites yet" hint="Star a recording to add it here." />;

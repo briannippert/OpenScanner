@@ -34,8 +34,11 @@ public record TransmissionQuery
     /// <summary>Only starred transmissions.</summary>
     public bool FavoritesOnly { get; init; }
 
-    /// <summary>Only fire tone-outs: a detected tone, or referenced by a TONE_OUT event.</summary>
+    /// <summary>Only fire tone-outs: a detected tone (other than EMRG), or referenced by a TONE_OUT event.</summary>
     public bool TonesOnly { get; init; }
+
+    /// <summary>Only transmissions flagged as a radio emergency (detectedTone EMRG).</summary>
+    public bool EmergenciesOnly { get; init; }
 
     /// <summary>Only transmissions the AI analysis classed as incidents.</summary>
     public bool IncidentsOnly { get; init; }

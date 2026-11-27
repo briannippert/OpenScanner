@@ -40,6 +40,7 @@ public class TransmissionsController : ControllerBase
     /// <param name="favorites">Only starred transmissions.</param>
     /// <param name="tones">Only fire tone-outs.</param>
     /// <param name="incidents">Only transmissions the AI analysis classed as incidents.</param>
+    /// <param name="emergencies">Only transmissions flagged as a radio emergency (P25 or MDC1200).</param>
     /// <param name="ids">Comma-separated ids to fetch in one request (at most 200). The
     /// other parameters are ignored; ids that no longer exist are left out.</param>
     [HttpGet("")]
@@ -56,7 +57,8 @@ public class TransmissionsController : ControllerBase
         [FromQuery] bool favorites = false,
         [FromQuery] bool tones = false,
         [FromQuery] bool incidents = false,
-        [FromQuery] string? ids = null)
+        [FromQuery] string? ids = null,
+        [FromQuery] bool emergencies = false)
     {
         if (!string.IsNullOrWhiteSpace(ids))
         {
@@ -105,6 +107,7 @@ public class TransmissionsController : ControllerBase
             FavoritesOnly = favorites,
             TonesOnly = tones,
             IncidentsOnly = incidents,
+            EmergenciesOnly = emergencies,
         };
         return Ok(await _db.QueryTransmissionsAsync(query));
     }

@@ -156,6 +156,44 @@ public class NtfyNotificationServiceTests
         Assert.Empty(_handler.Requests);
     }
 
+    private static RadioEvent Emergency(int? unit = 1234) => new()
+    {
+        Type = "EMERGENCY",
+        Label = unit.HasValue ? $"Emergency – Unit {unit}" : "Emergency",
+        Frequency = 155.1,
+        AlphaTag = "PD Main",
+        UnitId = unit,
+        Timestamp = "2026-10-24T12:00:00Z",
+        TransmissionId = "log_2000",
+    };
+
+    [Fact]
+    public async Task Emergency_IsSentImmediatelyWithoutTranscript()
+    {
+        await _service.HandleEventAsync(Emergency());
+
+        var req = Assert.Single(_handler.Requests);
+        using var json = JsonDocument.Parse(req.Body);
+        Assert.Equal("EMERGENCY: PD Main", json.RootElement.GetProperty("title").GetString());
+        Assert.Contains("Unit 1234", json.RootElement.GetProperty("message").GetString());
+        Assert.Equal("sos", json.RootElement.GetProperty("tags")[0].GetString());
+
+        // The transcript must not trigger a second push.
+        await _service.HandleTranscriptionAsync(Transcribed("help", id: "log_2000", detectedTone: "EMRG"));
+        Assert.Single(_handler.Requests);
+    }
+
+    [Fact]
+    public async Task Emergency_RepeatWithinCooldown_IsSuppressed()
+    {
+        await _service.HandleEventAsync(Emergency());
+        await _service.HandleEventAsync(Emergency());
+        Assert.Single(_handler.Requests);
+
+        await _service.HandleEventAsync(Emergency(unit: 99));
+        Assert.Equal(2, _handler.Requests.Count);
+    }
+
     [Theory]
     [InlineData("NtfyEnabled", "false")]
     [InlineData("NtfyTopic", "")]

@@ -144,6 +144,18 @@ const ScannerDisplay: React.FC<Props> = ({ state, analyser, onScan, channels = [
                                                     {pc.channel.alphaTag || pc.channel.frequency}
                                                     {pc.isRecording ? ' [REC]' : ''}
                                                 </Typography>
+                                                {pc.currentTone === 'EMRG' && (
+                                                    <Chip
+                                                        label="! EMRG"
+                                                        size="small"
+                                                        aria-label={`Emergency on ${pc.channel.alphaTag || pc.channel.frequency}`}
+                                                        sx={{
+                                                            height: 18, fontSize: '0.6rem', fontWeight: 'bold', ...monoFont, letterSpacing: 1,
+                                                            bgcolor: status.error, color: '#fff', flexShrink: 0,
+                                                            animation: 'pulse 0.6s infinite alternate', border: `1px solid ${alpha(status.error, 0.6)}`,
+                                                        }}
+                                                    />
+                                                )}
                                                 <Box sx={{
                                                     flex: 1, height: 6, bgcolor: 'surface.raised', borderRadius: 1,
                                                     overflow: 'hidden', border: '1px solid', borderColor: 'surface.border',
