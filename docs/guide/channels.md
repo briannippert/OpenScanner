@@ -41,7 +41,7 @@ DMR channels have three extra fields that narrow down what you hear:
 |---|---|
 | **Slot** | **Slot 1** or **Slot 2** decodes only that time slot. **Any** decodes both, and mixes them if both carry voice at once. |
 | **Color Code (0–15)** | The repeater's color code. Traffic with a different color code, such as a co-channel repeater in the next town, is ignored. Leave it blank to accept any. |
-| **Talkgroup ID** | Only follow this talkgroup. Other talkgroups are muted and don't start recordings. |
+| **Talkgroup ID** | Only follow this talkgroup. Calls on other talkgroups don't count as activity once their talkgroup has been decoded. |
 
 Only voice counts as activity on a DMR channel. Idle and data bursts a repeater sends during hang time don't keep the channel busy.
 

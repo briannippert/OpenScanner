@@ -205,12 +205,14 @@ public class DecoderCommandLineTests
         Assert.Contains(expected, DmrCommandFor(slot));
     }
 
-    /// <summary>The talkgroup filter has to reach dsd-fme (TG hold) to mute other talkgroups' audio.</summary>
+    /// <summary>
+    /// No TG hold: it mutes audio until dsd-fme has decoded the call's talkgroup, and the
+    /// scanner joins calls late, so held channels played silence. The filter lives in the parser.
+    /// </summary>
     [Fact]
-    public void Dmr_HoldsTheConfiguredTalkgroup()
+    public void Dmr_DoesNotUseTgHold()
     {
-        Assert.Contains("-I 1234", DmrCommandFor(talkgroup: 1234));
-        Assert.DoesNotContain("-I ", DmrCommandFor());
+        Assert.DoesNotContain("-I ", DmrCommandFor(1, talkgroup: 763901));
     }
 
     /// <summary>

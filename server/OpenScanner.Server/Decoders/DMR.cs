@@ -47,9 +47,12 @@ public class DMR : DSDBase
         // -fs: DMR TDMA BS and MS Simplex.
         // -ma: auto-select modulation optimizer — more robust than forcing -mg (GFSK).
         // -V: which slot(s) to synthesize voice for — the configured slot, or both (3).
-        // -I: TG hold. Outside trunking this still mutes every talkgroup but the held one in
-        //     the stereo mixer (dsd_audio2.c, playSynthesizedVoiceSS3), so the talkgroup
-        //     filter applies to audio, not just to the metadata we parse.
+        // Do NOT pass the talkgroup as -I (TG hold). TG hold mutes a slot until its talkgroup
+        // is known (dsd_audio2.c compares against state->lasttg, which starts at 0), and the
+        // scanner locks on after a call has started, missing the voice header that carries
+        // it. Every burst is then muted until an embedded LC decodes cleanly, which on a
+        // marginal (or pulsed simplex) signal can be the whole call. The talkgroup filter is
+        // applied in ParseMetadata instead.
         //
         // Audio: in -fs mode dsd-fme always writes 8 kHz interleaved STEREO (L=slot 1,
         // R=slot 2). When only one slot is enabled, or only one slot carries voice, it copies
@@ -63,8 +66,6 @@ public class DMR : DSDBase
 
         int voiceSlots = channel.DmrSlot is 1 or 2 ? channel.DmrSlot.Value : 3;
         string dsdArgs = $"-fs -ma -V {voiceSlots}";
-        if (channel.DmrTalkgroup is > 0)
-            dsdArgs += $" -I {channel.DmrTalkgroup.Value}";
 
         // -l 0: no squelch, for the same reason as P25 — dsd-fme needs an unbroken sample
         // stream to hold TDMA sync. This was already implicit (rtl_fm defaults to 0); it is
