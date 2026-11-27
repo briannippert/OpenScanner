@@ -83,8 +83,8 @@ public class DMR : DSDBase
 
     // Per-slot state carried between lines: voice-burst lines carry the color code but not
     // the talkgroup, call-LC lines the reverse, so each filter has to remember what the
-    // other kind of line said. Index 0 = no slot (MS/simplex mono), 1 and 2 = TDMA slots.
-    private readonly bool[] _slotCcMismatch = new bool[3];
+    // other kind of line said. Index 0 = no slot marker, 1 and 2 = TDMA slots.
+    private readonly int?[] _slotColorCode = new int?[3];
     private readonly int?[] _slotTalkgroup = new int?[3];
 
     protected override void ParseMetadata(string line)
@@ -92,15 +92,17 @@ public class DMR : DSDBase
         line = AnsiRegex.Replace(line, "");
 
         var slotMatch = SlotRegex.Match(line);
+        // MS/direct-mode (simplex) lines carry no slot marker, but dsd-fme forces simplex to
+        // slot 1 (dmr_ms.c) and prints its call LC as "SLOT 1", so file them together.
         int slot = slotMatch.Success
             ? int.Parse(slotMatch.Groups[1].Success ? slotMatch.Groups[1].Value : slotMatch.Groups[2].Value)
-            : 0;
+            : line.Contains("MS/DM") ? 1 : 0;
 
         // Track color code from every sync line (voice or data), so a co-channel repeater's
         // call LC — which carries no color code — is rejected too. "XX" (undecoded) is ignored.
         var ccMatch = ColorCodeRegex.Match(line);
         if (ccMatch.Success && int.TryParse(ccMatch.Groups[1].Value, out var cc))
-            _slotCcMismatch[slot] = _channel?.DmrColorCode is int wantCc && cc != wantCc;
+            _slotColorCode[slot] = cc;
 
         // An idle slot has no call, so forget its talkgroup — otherwise a late-entry voice
         // burst of the next call would inherit the previous call's talkgroup.
@@ -115,11 +117,9 @@ public class DMR : DSDBase
 
         if (!isVoiceBurst && !isCallLc) return;
 
-        // Slot filter. Lines with no slot (MS/simplex mono) pass.
-        if (slot != 0 && _channel?.DmrSlot is int wantSlot && slot != wantSlot) return;
-
-        if (_slotCcMismatch[slot]) return;
-
+        // Record the call's talkgroup and source before any filter can return early, so a call
+        // LC that is itself held back (e.g. color code not yet known) still tags the voice
+        // bursts that follow it.
         int? src = null;
         int? tgt = null;
         if (isCallLc)
@@ -128,6 +128,14 @@ public class DMR : DSDBase
             if (int.TryParse(call.Groups[2].Value, out var s)) src = s;
             _slotTalkgroup[slot] = tgt;
         }
+
+        // Slot filter. Lines with no slot (MS/simplex mono) pass.
+        if (slot != 0 && _channel?.DmrSlot is int wantSlot && slot != wantSlot) return;
+
+        // With a color code configured, wait until the slot's is known: the first call LC of a
+        // simplex call is printed while dsd-fme still shows "Color Code=XX", and letting it
+        // through would start a recording for a co-channel user on a different color code.
+        if (_channel?.DmrColorCode is int wantCc && _slotColorCode[slot] != wantCc) return;
 
         // Talkgroup filter: voice bursts inherit the slot's last call LC talkgroup.
         int? lineTg = tgt ?? _slotTalkgroup[slot];
