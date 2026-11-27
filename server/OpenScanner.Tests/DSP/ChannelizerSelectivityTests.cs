@@ -150,8 +150,9 @@ public class ChannelizerSelectivityTests
     }
 
     /// <summary>
-    /// P25 C4FM peaks at ±1800 Hz. Scaling for the 5 kHz deviation of analog voice left digital
-    /// audio at ~28% of full scale — about 11 dB of headroom handed to the decoder unused.
+    /// The deviation parameter sets the output scale: a carrier deviated by exactly that much
+    /// lands at the target level. (ChannelPipeline deliberately does not pass the nominal
+    /// digital deviation here — see ChannelPipeline.FilterProfile.)
     /// </summary>
     [Fact]
     public void DeviationScaling_FillsTheRangeForNarrowDeviation()
@@ -232,5 +233,21 @@ public class ChannelizerSelectivityTests
         double realSignal = PowerDbOf(tunedOffsetHz: 0, carrierOffsetHz: 2000, channelCutoffHz: 6250);
         Assert.True(ch.SignalPowerDb < realSignal - 40,
             $"DC spike only suppressed to {ch.SignalPowerDb:F1} dB against a {realSignal:F1} dB carrier");
+    }
+
+    /// <summary>
+    /// Regression guard for DMR/P25 in parallel FastScan. Scaling digital modes to their nominal
+    /// deviation (1800/1944 Hz) clipped the outer symbols once carrier offset and filter overshoot
+    /// were added, and dsd-fme decoded nothing from a strong DMR simplex signal. An off-air sweep
+    /// was clean from a 3.5 kHz scale reference upward.
+    /// </summary>
+    [Theory]
+    [InlineData("DMR")]
+    [InlineData("P25")]
+    public void DigitalModes_KeepHeadroomAboveNominalDeviation(string mode)
+    {
+        var (cutoff, scaleRef) = OpenScanner.Server.Devices.ChannelPipeline.FilterProfile(mode);
+        Assert.Equal(6250, cutoff);
+        Assert.True(scaleRef >= 3500, $"{mode} scale reference {scaleRef} Hz leaves no headroom");
     }
 }
