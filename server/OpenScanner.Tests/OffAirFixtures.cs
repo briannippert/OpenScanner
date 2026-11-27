@@ -27,7 +27,12 @@ internal static class OffAirFixtures
 
     public static byte[] ReadIq(string fixture) => File.ReadAllBytes(PathOf(fixture + ".iq.u8"));
 
-    public static IEnumerable<string> ReadLog(string fixture) => File.ReadLines(PathOf(fixture + ".dsdfme.log"));
+    /// <summary>
+    /// dsd-fme's stderr from decoding a fixture. <paramref name="build"/> picks a log from a
+    /// specific dsd-fme build (e.g. "d6b64f3"); line order differs between builds.
+    /// </summary>
+    public static IEnumerable<string> ReadLog(string fixture, string? build = null) =>
+        File.ReadLines(PathOf(fixture + (build == null ? ".dsdfme.log" : $".dsdfme-{build}.log")));
 
     /// <summary>
     /// Channelizes a fixture with the production filter profile and writes the 48 kHz s16le

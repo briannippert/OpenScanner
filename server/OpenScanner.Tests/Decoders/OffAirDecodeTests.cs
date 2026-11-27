@@ -87,20 +87,29 @@ public class OffAirDecodeTests
         Assert.DoesNotContain(hits, h => h.Tone == "EMRG");
     }
 
+    /// <summary>
+    /// Run over logs from two dsd-fme builds: 719d970 prints the voice header (with the
+    /// talkgroup) before the first voice burst, d6b64f3 (Nov 2026, what CI builds) does not.
+    /// </summary>
     [Theory]
-    [InlineData(1, 9, 763901, true)]
-    [InlineData(null, null, null, true)]
-    [InlineData(2, null, null, false)]      // simplex is always slot 1
-    [InlineData(1, 3, null, false)]
-    [InlineData(1, null, 1, false)]
-    public void DmrLog_FiltersBySlotColorCodeAndTalkgroup(int? slot, int? cc, int? tg, bool expectCall)
+    [InlineData(1, 9, 763901, true, null)]
+    [InlineData(null, null, null, true, null)]
+    [InlineData(2, null, null, false, null)]      // simplex is always slot 1
+    [InlineData(1, 3, null, false, null)]
+    [InlineData(1, null, 1, false, null)]
+    [InlineData(1, 9, 763901, true, "d6b64f3")]
+    [InlineData(null, null, null, true, "d6b64f3")]
+    [InlineData(2, null, null, false, "d6b64f3")]
+    [InlineData(1, 3, null, false, "d6b64f3")]
+    [InlineData(1, null, 1, false, "d6b64f3")]
+    public void DmrLog_FiltersBySlotColorCodeAndTalkgroup(int? slot, int? cc, int? tg, bool expectCall, string? build)
     {
         var dmr = new DMR(NullLogger<DMR>.Instance);
         dmr.SetChannel(new Channel { Mode = "DMR", DmrSlot = slot, DmrColorCode = cc, DmrTalkgroup = tg });
         var hits = new List<(int? Src, int? Tgt, string? Tone)>();
         dmr.OnActivity += (s, t, tone) => hits.Add((s, t, tone));
 
-        foreach (var line in OffAirFixtures.ReadLog(DmrFixture)) dmr.ParseLine(line);
+        foreach (var line in OffAirFixtures.ReadLog(DmrFixture, build)) dmr.ParseLine(line);
 
         if (expectCall)
             Assert.True(hits.Count(h => h.Src == SourceId && h.Tgt == 763901) >= 5, Describe(hits));

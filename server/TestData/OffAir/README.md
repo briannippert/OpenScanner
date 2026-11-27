@@ -7,7 +7,8 @@ Real transmissions recorded with an RTL-SDR (R820T) on 2026-11-27. They are used
 |---|---|
 | `p25_nac113_tg1.iq.u8` | P25 Phase 1 conventional, NAC 113 (0x071), TG 1, source 12345678. One full call: HDU, 10 LDU1/LDU2 pairs, TDU. 5.5 s. |
 | `dmr_simplex_ts1_cc9_tg763901.iq.u8` | DMR simplex (MS/direct mode), TS1, CC 9, TG 763901, source 12345678. One full call: VLC header, 12 voice superframes, TLC terminator. 5.7 s. |
-| `*.dsdfme.log` | dsd-fme stderr (with ANSI colour codes) from decoding the matching IQ through `Channelizer` with the production `ChannelPipeline.FilterProfile`. |
+| `*.dsdfme.log` | dsd-fme stderr (with ANSI colour codes) from decoding the matching IQ through `Channelizer` with the production `ChannelPipeline.FilterProfile`, dsd-fme build 719d970 (Sep 2026). |
+| `*.dsdfme-d6b64f3.log` | The same, from dsd-fme d6b64f3 (Nov 2026, what CI builds). This build doesn't print the DMR voice header, so the first voice burst comes before any talkgroup. The parser must cope with both orders. |
 
 ## Format
 

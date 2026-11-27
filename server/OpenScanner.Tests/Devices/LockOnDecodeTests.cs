@@ -88,6 +88,21 @@ public class LockOnDecodeTests
         Assert.True(r.Recordings.AudioSeconds >= 4.0, $"recording got only {r.Recordings.AudioSeconds:F1}s of audio");
     }
 
+    /// <summary>
+    /// Joined after the voice header, the first voice bursts arrive before any call LC says
+    /// whose call this is. A channel filtered to another talkgroup must not start recording on
+    /// them (it did on dsd-fme builds that skip printing the header).
+    /// </summary>
+    [Fact]
+    public async Task DmrSimplex_JoinedMidCall_OtherTalkgroup_StartsNoRecording()
+    {
+        if (!OffAirFixtures.DecoderToolsAvailable()) return;
+
+        var r = await HoldAndDecode(OffAirFixtures.Dmr, DmrChannel(1, null, 1), skipSeconds: 1.0);
+
+        Assert.Empty(r.Recordings.Started);
+    }
+
     [Theory]
     [InlineData(2, null, null)]     // simplex is always slot 1
     [InlineData(1, 3, null)]        // co-channel user on another color code
