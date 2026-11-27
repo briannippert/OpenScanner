@@ -137,9 +137,13 @@ public class DMR : DSDBase
         // through would start a recording for a co-channel user on a different color code.
         if (_channel?.DmrColorCode is int wantCc && _slotColorCode[slot] != wantCc) return;
 
-        // Talkgroup filter: voice bursts inherit the slot's last call LC talkgroup.
+        // Talkgroup filter: voice bursts inherit the slot's last call LC talkgroup, and until a
+        // call LC has said which talkgroup this is, nothing counts. Joining a call late (as the
+        // scanner does) means voice bursts arrive before any LC; newer dsd-fme builds also skip
+        // printing the voice header, so even a call caught from its start opens with a voice
+        // burst. Letting those through recorded other talkgroups' calls.
         int? lineTg = tgt ?? _slotTalkgroup[slot];
-        if (_channel?.DmrTalkgroup is int wantTg && lineTg.HasValue && lineTg != wantTg)
+        if (_channel?.DmrTalkgroup is int wantTg && lineTg != wantTg)
             return;
 
         string? tone = isCallLc && EmergencyRegex.IsMatch(line) ? "EMRG" : null;

@@ -133,8 +133,9 @@ public class DmrMetadataTests
         dmr.ParseLine("14:56:34 Sync: +DMR MS/DM MODE/MONO | Color Code=09 | VC* ");
         dmr.ParseLine("\u001b[32m SLOT 1 TGT=763901 SRC=12345678 Group Call  ");
         dmr.ParseLine("14:56:34 Sync: +DMR MS/DM MODE/MONO | Color Code=09 | VC* ");
-        Assert.Equal(3, hits.Count);
-        Assert.Equal((12345678, 763901, (string?)null), hits[1]);
+        // The first burst precedes any call LC, so its talkgroup is unknown and it doesn't count.
+        Assert.Equal(2, hits.Count);
+        Assert.Equal((12345678, 763901, (string?)null), hits[0]);
 
         // Another simplex user on a different talkgroup: its call LC blocks its voice bursts.
         var (other, otherHits) = Make(slot: 1, cc: 9, tg: 763901);
@@ -147,5 +148,21 @@ public class DmrMetadataTests
         cc.ParseLine("14:56:34 Sync: +DMR MS/DM MODE/MONO | Color Code=03 | VC* ");
         cc.ParseLine("\u001b[32m SLOT 1 TGT=763901 SRC=12345678 Group Call  ");
         Assert.Empty(ccHits);
+    }
+
+    /// <summary>
+    /// A voice burst before any call LC (late join, or a dsd-fme build that doesn't print the
+    /// voice header) must not count for a talkgroup-filtered channel: it could be anyone's.
+    /// </summary>
+    [Fact]
+    public void Talkgroup_Filter_Waits_For_A_Call_Lc()
+    {
+        var (dmr, hits) = Make(slot: 1, tg: 763901);
+        dmr.ParseLine("16:05:18 Sync: +DMR MS/DM MODE/MONO | Color Code=09 | VC* ");
+        Assert.Empty(hits);
+
+        dmr.ParseLine("\u001b[32m SLOT 1 TGT=763901 SRC=12345678 Group Call  ");
+        dmr.ParseLine("16:05:18 Sync: +DMR MS/DM MODE/MONO | Color Code=09 | VC* ");
+        Assert.Equal(2, hits.Count);
     }
 }
