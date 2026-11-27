@@ -121,4 +121,31 @@ public class DmrMetadataTests
         dmr.ParseLine(Slot1Voice);
         Assert.Null(hits.Single().Tone);
     }
+
+    /// <summary>
+    /// Captured off air (simplex, TS1 CC9). The MS voice line has no slot marker and the call
+    /// LC says SLOT 1; both must land in the same slot so CC and TG filters connect.
+    /// </summary>
+    [Fact]
+    public void Simplex_Voice_And_Call_Lc_Share_Slot_1_State()
+    {
+        var (dmr, hits) = Make(slot: 1, cc: 9, tg: 763901);
+        dmr.ParseLine("14:56:34 Sync: +DMR MS/DM MODE/MONO | Color Code=09 | VC* ");
+        dmr.ParseLine("\u001b[32m SLOT 1 TGT=763901 SRC=12345678 Group Call  ");
+        dmr.ParseLine("14:56:34 Sync: +DMR MS/DM MODE/MONO | Color Code=09 | VC* ");
+        Assert.Equal(3, hits.Count);
+        Assert.Equal((12345678, 763901, (string?)null), hits[1]);
+
+        // Another simplex user on a different talkgroup: its call LC blocks its voice bursts.
+        var (other, otherHits) = Make(slot: 1, cc: 9, tg: 763901);
+        other.ParseLine("\u001b[32m SLOT 1 TGT=999 SRC=1 Group Call  ");
+        other.ParseLine("14:56:34 Sync: +DMR MS/DM MODE/MONO | Color Code=09 | VC* ");
+        Assert.Empty(otherHits);
+
+        // Wrong color code on the MS line blocks the following call LC.
+        var (cc, ccHits) = Make(slot: 1, cc: 9);
+        cc.ParseLine("14:56:34 Sync: +DMR MS/DM MODE/MONO | Color Code=03 | VC* ");
+        cc.ParseLine("\u001b[32m SLOT 1 TGT=763901 SRC=12345678 Group Call  ");
+        Assert.Empty(ccHits);
+    }
 }
