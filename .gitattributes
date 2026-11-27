@@ -1,0 +1,2 @@
+# Raw IQ test captures: never diff or convert line endings.
+*.u8 binary
