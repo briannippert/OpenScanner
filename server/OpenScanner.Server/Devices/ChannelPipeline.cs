@@ -285,23 +285,33 @@ public class ChannelPipeline : IDisposable
     }
 
     /// <summary>
-    /// Channel filter cutoff (one-sided, Hz) and peak transmitter deviation for a mode.
+    /// Channel filter cutoff (one-sided, Hz) and the deviation that maps to ~80% of full scale
+    /// in the discriminator output, for a mode.
     ///
-    /// The digital modes are pinned by standard: P25 and DMR are 12.5 kHz channels, so 6.25 kHz
-    /// of cutoff, with C4FM peaking at 1800 Hz and DMR 4FSK at 1944 Hz. Analog FM is deliberately
-    /// left at 12.5 kHz / 5 kHz rather than assuming a narrowbanded system — over-narrowing a
-    /// 25 kHz channel would clip the audio, which is a worse failure than passing extra noise.
-    /// Anything unrecognised gets no channel filter, preserving the pre-2026 behaviour.
+    /// P25 and DMR are 12.5 kHz channels, so 6.25 kHz of cutoff. Their output scale is NOT their
+    /// nominal deviation (C4FM 1800 Hz, DMR 4FSK 1944 Hz): scaled that tightly, carrier
+    /// frequency error plus filter overshoot drive the outer symbols into clipping and dsd-fme
+    /// cannot slice them. Measured on an off-air DMR simplex capture (Nov 2026), decoding was
+    /// clean with a scale reference anywhere from 3.5 kHz to 38 kHz, degraded at 2.5 kHz and
+    /// failed outright at 1944 Hz — no call LC, no color code, garbled voice. 5 kHz sits in the
+    /// clean range and is what FastScan used before the narrow scaling was introduced.
+    ///
+    /// Analog FM is deliberately left at 12.5 kHz / 5 kHz rather than assuming a narrowbanded
+    /// system — over-narrowing a 25 kHz channel would clip the audio, which is a worse failure
+    /// than passing extra noise. Anything unrecognised gets no channel filter, preserving the
+    /// pre-2026 behaviour.
     /// </summary>
-    private static (double CutoffHz, double DeviationHz) FilterProfile(string? mode) =>
+    internal static (double CutoffHz, double DeviationHz) FilterProfile(string? mode) =>
         mode?.ToUpperInvariant() switch
         {
-            "P25" => (6250, 1800),
-            "DMR" => (6250, 1944),
+            "P25" or "DMR" => (6250, DigitalScaleReferenceHz),
             "NFM" or "FM" => (12500, 5000),
             "AM" => (5000, 5000),
             _ => (0, 5000),
         };
+
+    /// <summary>Discriminator scale reference for digital modes; see <see cref="FilterProfile"/>.</summary>
+    internal const double DigitalScaleReferenceHz = 5000;
 
     /// <summary>
     /// Whether this mode requires a decoder process (dsd-fme).
